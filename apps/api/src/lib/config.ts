@@ -1,8 +1,14 @@
+function parseCorsOrigins(): string[] | true {
+  const raw = process.env.CORS_ORIGIN ?? 'http://localhost,http://localhost:5173';
+  if (raw === '*') return true;
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 3001),
   host: process.env.HOST ?? '0.0.0.0',
   jwtSecret: process.env.JWT_SECRET ?? 'dev-only-change-in-production',
-  corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost',
+  corsOrigins: parseCorsOrigins(),
   discord: {
     clientId: process.env.DISCORD_CLIENT_ID ?? '',
     clientSecret: process.env.DISCORD_CLIENT_SECRET ?? '',

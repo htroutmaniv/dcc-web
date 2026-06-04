@@ -8,7 +8,10 @@ const app = await buildApp();
 await app.listen({ port: config.port, host: config.host });
 
 const io = new Server(app.server, {
-  cors: { origin: config.corsOrigin, credentials: true },
+  cors: {
+    origin: config.corsOrigins === true ? true : config.corsOrigins,
+    credentials: true,
+  },
 });
 app.io = io;
 

@@ -37,14 +37,16 @@ dcc_web/
 
 ## Quick start
 
-### Docker (nginx on port 80)
+### Docker (live test on port 80)
 
 ```bash
 cp .env.example .env
 docker compose up --build
 ```
 
-Open http://localhost — use **Dev login** until Discord app credentials are set.
+Open **http://localhost:8080** (default; port 80 is often taken on Windows).
+
+To use port 80: `HTTP_PORT=80 docker compose up --build -d` then http://localhost.
 
 ### Local development
 

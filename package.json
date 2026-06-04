@@ -12,8 +12,10 @@
     "dev:api": "npm run dev -w @dcc-web/api",
     "dev:web": "npm run dev -w @dcc-web/web",
     "dev": "npm run build -w @dcc-web/shared && concurrently \"npm run dev:api\" \"npm run dev:web\"",
-    "docker:up": "docker compose up --build",
+    "docker:up": "docker compose up --build -d",
     "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:postgres": "docker compose up postgres -d",
     "db:generate": "npm run db:generate -w @dcc-web/api",
     "db:migrate": "npm run db:migrate -w @dcc-web/api"
   },

@@ -1,9 +1,21 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomBytes } from 'node:crypto';
 import { config } from '../lib/config.js';
 import { prisma } from '../lib/prisma.js';
 
 const DISCORD_API = 'https://discord.com/api/v10';
+
+/** Origin for redirects (preserves port, e.g. localhost:8080). */
+function requestOrigin(request: FastifyRequest): string {
+  const proto =
+    (request.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0] ??
+    'http';
+  const host =
+    (request.headers['x-forwarded-host'] as string | undefined) ??
+    request.headers.host ??
+    'localhost';
+  return `${proto}://${host}`;
+}
 
 export async function authRoutes(app: FastifyInstance) {
   /** Dev login — replace with Discord in production */
@@ -122,6 +134,6 @@ export async function authRoutes(app: FastifyInstance) {
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60,
     });
-    return reply.redirect('/');
+    return reply.redirect(`${requestOrigin(request)}/`);
   });
 }

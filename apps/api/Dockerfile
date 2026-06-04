@@ -11,6 +11,7 @@ RUN npm run db:generate -w @dcc-web/api
 RUN npm run build -w @dcc-web/api
 
 FROM node:20-alpine
+RUN apk add --no-cache wget
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/node_modules ./node_modules

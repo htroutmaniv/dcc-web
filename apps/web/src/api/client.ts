@@ -1,20 +1,37 @@
 const API_BASE = '/api';
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 export async function api<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
+  const headers = new Headers(init?.headers);
+  const hasBody = init?.body != null && init.body !== '';
+  if (hasBody && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
+    headers,
   });
+  const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error((err as { error?: string }).error ?? res.statusText);
+    const msg =
+      (body as { message?: string; error?: string }).message ??
+      (body as { error?: string }).error ??
+      res.statusText;
+    throw new ApiError(msg, res.status);
   }
-  return res.json() as Promise<T>;
+  return body as T;
 }

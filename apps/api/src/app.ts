@@ -24,7 +24,7 @@ export async function buildApp() {
 
   await app.register(sensible);
   await app.register(cors, {
-    origin: config.corsOrigin,
+    origin: config.corsOrigins,
     credentials: true,
   });
   await app.register(cookie);
