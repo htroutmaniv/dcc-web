@@ -1,0 +1,26 @@
+{
+  "name": "dcc-web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "DCC session character sheets and tactical maps",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @dcc-web/shared && npm run build -w @dcc-web/api && npm run build -w @dcc-web/web",
+    "dev:api": "npm run dev -w @dcc-web/api",
+    "dev:web": "npm run dev -w @dcc-web/web",
+    "dev": "npm run build -w @dcc-web/shared && concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
+    "db:generate": "npm run db:generate -w @dcc-web/api",
+    "db:migrate": "npm run db:migrate -w @dcc-web/api"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

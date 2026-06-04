@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dcc
+      POSTGRES_PASSWORD: dcc
+      POSTGRES_DB: dcc
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U dcc']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://dcc:dcc@postgres:5432/dcc
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      CORS_ORIGIN: http://localhost
+      PORT: 3001
+      HOST: 0.0.0.0
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI:-http://localhost/api/auth/discord/callback}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    ports:
+      - '80:80'
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

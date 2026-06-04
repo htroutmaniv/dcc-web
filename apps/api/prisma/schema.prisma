@@ -1,0 +1,232 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum GameStatus {
+  active
+  archived
+}
+
+enum GamePlayerRole {
+  player
+  co_dm
+}
+
+enum CharacterStatus {
+  alive
+  dead
+}
+
+enum CharacterSource {
+  manual
+  random
+  purple_sorcerer
+  import
+}
+
+enum ItemCategory {
+  weapon
+  armor
+  treasure
+  misc
+  disposable
+}
+
+enum TokenKind {
+  pc
+  npc
+  object
+}
+
+enum TokenZone {
+  map
+  holding
+}
+
+enum MovementRequestStatus {
+  pending
+  accepted
+  rejected
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String?  @unique
+  discordId    String?  @unique @map("discord_id")
+  displayName  String   @map("display_name")
+  avatarUrl    String?  @map("avatar_url")
+  passwordHash String?  @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  dmGames       Game[]         @relation("DmGames")
+  gamePlayers   GamePlayer[]
+  characters    Character[]
+  diceRolls     DiceRoll[]
+  movementReqs  MovementRequest[] @relation("MovementRequester")
+
+  @@map("users")
+}
+
+model Game {
+  id         String     @id @default(uuid()) @db.Uuid
+  dmUserId   String     @map("dm_user_id") @db.Uuid
+  title      String
+  inviteCode String     @unique @map("invite_code")
+  status     GameStatus @default(active)
+  settings   Json       @default("{\"gridFtPerCell\":5,\"playerTokenMovement\":\"free\"}")
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  dm              User              @relation("DmGames", fields: [dmUserId], references: [id])
+  players         GamePlayer[]
+  characters      Character[]
+  map             GameMap?
+  diceRolls       DiceRoll[]
+  movementRequests MovementRequest[]
+
+  @@index([dmUserId, status])
+  @@map("games")
+}
+
+model GamePlayer {
+  gameId   String         @map("game_id") @db.Uuid
+  userId   String         @map("user_id") @db.Uuid
+  role     GamePlayerRole @default(player)
+  joinedAt DateTime       @default(now()) @map("joined_at")
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([gameId, userId])
+  @@index([userId])
+  @@map("game_players")
+}
+
+model Character {
+  id            String          @id @default(uuid()) @db.Uuid
+  gameId        String          @map("game_id") @db.Uuid
+  ownerUserId   String          @map("owner_user_id") @db.Uuid
+  name          String
+  level         Int             @default(0)
+  className     String          @default("") @map("class_name")
+  alignment     String          @default("")
+  status        CharacterStatus @default(alive)
+  diedAt        DateTime?       @map("died_at")
+  portraitUrl   String?         @map("portrait_url")
+  stats         Json
+  combat        Json
+  notes         String          @default("")
+  source        CharacterSource @default(manual)
+  sourcePayload Json?           @map("source_payload")
+  version       Int             @default(1)
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  game     Game            @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  owner    User            @relation(fields: [ownerUserId], references: [id])
+  items    CharacterItem[]
+  tokens   MapToken[]
+  diceRolls DiceRoll[]
+
+  @@index([gameId, ownerUserId])
+  @@index([gameId, status])
+  @@map("characters")
+}
+
+model CharacterItem {
+  id          String       @id @default(uuid()) @db.Uuid
+  characterId String       @map("character_id") @db.Uuid
+  category    ItemCategory
+  name        String
+  quantity    Int          @default(1)
+  weight      Decimal?     @db.Decimal(10, 2)
+  properties  Json         @default("{}")
+  sortOrder   Int          @default(0) @map("sort_order")
+  notes       String       @default("")
+
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([characterId, category])
+  @@map("character_items")
+}
+
+model GameMap {
+  id             String   @id @default(uuid()) @db.Uuid
+  gameId         String   @unique @map("game_id") @db.Uuid
+  imageUrl       String?  @map("image_url")
+  widthPx        Int      @default(0) @map("width_px")
+  heightPx       Int      @default(0) @map("height_px")
+  gridCellPx     Int      @default(50) @map("grid_cell_px")
+  gridFtPerCell  Decimal  @default(5) @map("grid_ft_per_cell") @db.Decimal(6, 2)
+  dmDrawings     Json     @default("[]") @map("dm_drawings")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  game   Game       @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  tokens MapToken[]
+
+  @@map("game_maps")
+}
+
+model MapToken {
+  id           String    @id @default(uuid()) @db.Uuid
+  mapId        String    @map("map_id") @db.Uuid
+  kind         TokenKind
+  characterId  String?   @map("character_id") @db.Uuid
+  label        String
+  x            Decimal   @db.Decimal(12, 4)
+  y            Decimal   @db.Decimal(12, 4)
+  zone         TokenZone @default(holding)
+  color        String    @default("#c9a227")
+  iconUrl      String?   @map("icon_url")
+  sortOrder    Int       @default(0) @map("sort_order")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  map       GameMap    @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  character Character? @relation(fields: [characterId], references: [id], onDelete: SetNull)
+
+  @@index([mapId, zone])
+  @@map("map_tokens")
+}
+
+model DiceRoll {
+  id          String   @id @default(uuid()) @db.Uuid
+  gameId      String   @map("game_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  characterId String?  @map("character_id") @db.Uuid
+  notation    String
+  rolls       Json
+  modifier    Int
+  total       Int
+  reason      String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  game      Game       @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id])
+  character Character? @relation(fields: [characterId], references: [id], onDelete: SetNull)
+
+  @@index([gameId, createdAt])
+  @@map("dice_rolls")
+}
+
+model MovementRequest {
+  id             String                @id @default(uuid()) @db.Uuid
+  gameId         String                @map("game_id") @db.Uuid
+  tokenId        String                @map("token_id") @db.Uuid
+  requesterId    String                @map("requester_id") @db.Uuid
+  targetX        Decimal               @map("target_x") @db.Decimal(12, 4)
+  targetY        Decimal               @map("target_y") @db.Decimal(12, 4)
+  targetZone     TokenZone             @map("target_zone")
+  status         MovementRequestStatus @default(pending)
+  createdAt      DateTime              @default(now()) @map("created_at")
+  resolvedAt     DateTime?             @map("resolved_at")
+
+  game      Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  requester User @relation("MovementRequester", fields: [requesterId], references: [id])
+
+  @@index([gameId, status])
+  @@map("movement_requests")
+}
