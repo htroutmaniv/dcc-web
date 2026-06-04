@@ -20,6 +20,7 @@ enum GamePlayerRole {
 enum CharacterStatus {
   alive
   dead
+  archived
 }
 
 enum CharacterSource {
@@ -116,6 +117,7 @@ model Character {
   alignment     String          @default("")
   status        CharacterStatus @default(alive)
   diedAt        DateTime?       @map("died_at")
+  archivedAt    DateTime?       @map("archived_at")
   portraitUrl   String?         @map("portrait_url")
   stats         Json
   combat        Json

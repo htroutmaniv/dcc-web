@@ -16,15 +16,24 @@ export const createGameSchema = z.object({
   title: z.string().min(1).max(120),
 });
 
+const patchItemSchema = z.object({
+  category: z.enum(['weapon', 'armor', 'treasure', 'misc', 'disposable']),
+  name: z.string().min(1).max(200),
+  quantity: z.number().int().min(0).max(9999).optional(),
+  notes: z.string().max(500).optional(),
+  properties: z.record(z.unknown()).optional(),
+});
+
 export const patchCharacterSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   level: z.number().int().min(0).max(30).optional(),
   className: z.string().max(64).optional(),
   alignment: z.string().max(32).optional(),
-  status: z.enum(['alive', 'dead']).optional(),
+  status: z.enum(['alive', 'dead', 'archived']).optional(),
   stats: z.record(z.unknown()).optional(),
   combat: z.record(z.unknown()).optional(),
   notes: z.string().max(10000).optional(),
+  items: z.array(patchItemSchema).optional(),
 });
 
 export const tokenMoveSchema = z.object({

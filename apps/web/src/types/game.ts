@@ -12,13 +12,47 @@ export interface Game {
   status?: string;
 }
 
+export interface CharacterAbility {
+  score: number;
+  modifier: number;
+}
+
+export interface CharacterStats {
+  abilities?: Record<string, CharacterAbility>;
+  saves?: Record<string, number>;
+  speed?: number;
+  initiative?: number;
+  custom?: Record<string, unknown>;
+}
+
+export interface CharacterCombat {
+  ac?: number;
+  hpMax?: number;
+  hpCurrent?: number;
+  hpTemp?: number;
+}
+
+export interface CharacterItem {
+  id: string;
+  category: string;
+  name: string;
+  quantity: number;
+  notes?: string;
+  properties?: Record<string, unknown>;
+}
+
 export interface Character {
   id: string;
+  ownerUserId?: string;
   name: string;
   className: string;
   level: number;
   status: string;
-  combat: { hpCurrent?: number; hpMax?: number; ac?: number };
+  alignment?: string;
+  notes?: string;
+  stats?: CharacterStats;
+  combat?: CharacterCombat;
+  items?: CharacterItem[];
 }
 
 export interface DiceResult {

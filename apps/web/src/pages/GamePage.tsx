@@ -5,8 +5,10 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { api, ApiError } from '../api/client';
 import { AppShell } from '../components/AppShell';
 import { GameSideMenu, type GameMenuTab } from '../components/GameSideMenu';
+import { CharacterSheetView } from '../components/character-sheet/CharacterSheetView';
 import { TacticalMap } from '../components/TacticalMap';
 import type { Character, DiceResult, GameDetail } from '../types/game';
+import { getCombatRollSpec, type CombatRollKind } from '../utils/combat-rolls';
 import { formatError } from '../utils/errors';
 
 export default function GamePage() {
@@ -19,6 +21,12 @@ export default function GamePage() {
   const [lastRoll, setLastRoll] = useState<DiceResult | null>(null);
   const [menuTab, setMenuTab] = useState<GameMenuTab>('characters');
   const [diceNotation, setDiceNotation] = useState('1d20');
+  const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
+  const [rollingCharacterId, setRollingCharacterId] = useState<string | null>(null);
+  const [rollingKind, setRollingKind] = useState<CombatRollKind | null>(null);
+  const [combatRollByCharacter, setCombatRollByCharacter] = useState<
+    Record<string, DiceResult>
+  >({});
 
   const isDm = detail?.isDm ?? false;
 
@@ -35,6 +43,10 @@ export default function GamePage() {
       `/games/${gameId}/characters${q}`,
     );
     setCharacters(data.characters);
+    setSelectedCharacter((prev) => {
+      if (!prev) return null;
+      return data.characters.find((c) => c.id === prev.id) ?? null;
+    });
   }, [gameId, detail]);
 
   useEffect(() => {
@@ -70,6 +82,32 @@ export default function GamePage() {
     }
   };
 
+  const rollCharacterCombat = async (character: Character, kind: CombatRollKind) => {
+    if (!gameId) return;
+    const { notation, reason } = getCombatRollSpec(character, kind);
+    setRollingCharacterId(character.id);
+    setRollingKind(kind);
+    try {
+      const { result } = await api<{ result: DiceResult }>('/dice/roll', {
+        method: 'POST',
+        body: JSON.stringify({
+          gameId,
+          characterId: character.id,
+          notation,
+          reason,
+        }),
+      });
+      setCombatRollByCharacter((prev) => ({ ...prev, [character.id]: result }));
+      setLastRoll(result);
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setRollingCharacterId(null);
+      setRollingKind(null);
+    }
+  };
+
   const rollDice = async () => {
     if (!gameId) return;
     try {
@@ -89,17 +127,37 @@ export default function GamePage() {
     }
   };
 
-  const markDead = async (characterId: string) => {
+  const handleCharacterUpdated = useCallback((updated: Character) => {
+    setSelectedCharacter(updated);
+    setCharacters((prev) =>
+      prev.map((c) => (c.id === updated.id ? updated : c)),
+    );
+  }, []);
+
+  const patchCharacterStatus = async (
+    characterId: string,
+    status: 'alive' | 'dead' | 'archived',
+  ) => {
     try {
       await api(`/characters/${characterId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ status: 'dead' }),
+        body: JSON.stringify({ status }),
       });
+      if (status === 'archived' && selectedCharacter?.id === characterId) {
+        setSelectedCharacter(null);
+      }
       await loadCharacters();
+      setError(null);
     } catch (e) {
       setError(formatError(e));
     }
   };
+
+  const markDead = (characterId: string) => patchCharacterStatus(characterId, 'dead');
+  const reviveCharacter = (characterId: string) =>
+    patchCharacterStatus(characterId, 'alive');
+  const archiveCharacter = (characterId: string) =>
+    patchCharacterStatus(characterId, 'archived');
 
   const gridFt =
     detail?.game.map?.gridFtPerCell != null
@@ -175,8 +233,22 @@ export default function GamePage() {
           height: 'calc(100vh - 64px)',
         }}
       >
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', p: 2, minWidth: 0 }}>
-          <TacticalMap gridFtPerCell={gridFt} isDm={isDm} />
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          {selectedCharacter ? (
+            <CharacterSheetView
+              character={selectedCharacter}
+              isDm={isDm}
+              onClose={() => setSelectedCharacter(null)}
+              onCharacterUpdated={handleCharacterUpdated}
+              onMarkDead={markDead}
+              onRevive={reviveCharacter}
+              onArchive={archiveCharacter}
+            />
+          ) : (
+            <Box sx={{ flex: 1, p: 2, display: 'flex', flexDirection: 'column' }}>
+              <TacticalMap gridFtPerCell={gridFt} isDm={isDm} />
+            </Box>
+          )}
         </Box>
         <GameSideMenu
           game={detail.game}
@@ -189,7 +261,15 @@ export default function GamePage() {
           lastRoll={lastRoll}
           onGenerateCharacter={generateCharacter}
           onRollD20={rollDice}
-          onMarkDead={markDead}
+          onSelectCharacter={(c) => {
+            setSelectedCharacter(c);
+            setMenuTab('characters');
+          }}
+          onCombatRoll={rollCharacterCombat}
+          rollingCharacterId={rollingCharacterId}
+          rollingKind={rollingKind}
+          combatRollByCharacter={combatRollByCharacter}
+          selectedCharacterId={selectedCharacter?.id}
           diceNotation={diceNotation}
           onDiceNotationChange={setDiceNotation}
         />

@@ -1,4 +1,4 @@
-export type CharacterStatus = 'alive' | 'dead';
+export type CharacterStatus = 'alive' | 'dead' | 'archived';
 export type CharacterSource = 'manual' | 'random' | 'purple_sorcerer' | 'import';
 export type ItemCategory = 'weapon' | 'armor' | 'treasure' | 'misc' | 'disposable';
 export type TokenKind = 'pc' | 'npc' | 'object';

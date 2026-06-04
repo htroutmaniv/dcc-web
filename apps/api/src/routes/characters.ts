@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { assertGameMember } from '../lib/game-access.js';
 import { prisma } from '../lib/prisma.js';
 import { generateRandomCharacterData } from '../services/character-generator.js';
+import { applyCharacterStatus } from '../services/character-status.js';
 import { characterMovementRange } from '../services/movement.js';
 
 export async function characterRoutes(app: FastifyInstance) {
@@ -23,15 +24,22 @@ export async function characterRoutes(app: FastifyInstance) {
       const where: {
         gameId: string;
         ownerUserId?: string;
-        status?: 'alive' | 'dead';
+        status?: 'alive' | 'dead' | 'archived' | { in: ('alive' | 'dead')[] };
       } = { gameId };
       if (!access.isDm) where.ownerUserId = request.userId!;
-      if (status === 'alive' || status === 'dead') where.status = status;
-      else if (includeDead !== 'true') where.status = 'alive';
+      if (status === 'alive' || status === 'dead' || status === 'archived') {
+        where.status = status;
+      } else if (includeDead === 'true' && access.isDm) {
+        where.status = { in: ['alive', 'dead'] };
+      } else {
+        where.status = 'alive';
+      }
 
       const characters = await prisma.character.findMany({
         where,
-        include: { items: { orderBy: { sortOrder: 'asc' } } },
+        include: {
+          items: { orderBy: { sortOrder: 'asc' } },
+        },
         orderBy: { updatedAt: 'desc' },
       });
       return { characters };
@@ -61,10 +69,23 @@ export async function characterRoutes(app: FastifyInstance) {
           name: generated.name,
           className: generated.className,
           level: generated.level,
+          alignment: generated.alignment,
+          notes: generated.notes,
           stats: generated.stats as unknown as Prisma.InputJsonValue,
           combat: generated.combat as unknown as Prisma.InputJsonValue,
           source: 'random',
+          items: {
+            create: generated.items.map((item, i) => ({
+              category: item.category,
+              name: item.name,
+              quantity: item.quantity,
+              notes: item.notes ?? '',
+              properties: (item.properties ?? {}) as Prisma.InputJsonValue,
+              sortOrder: i,
+            })),
+          },
         },
+        include: { items: { orderBy: { sortOrder: 'asc' } } },
       });
       return { character };
     },
@@ -86,32 +107,87 @@ export async function characterRoutes(app: FastifyInstance) {
       if (!access.isDm && existing.ownerUserId !== request.userId!) {
         throw app.httpErrors.forbidden('Cannot edit another player\'s character');
       }
-      if (!access.isDm && (parsed.data.stats || parsed.data.combat || parsed.data.status)) {
-        throw app.httpErrors.forbidden('Only the DM can modify stats, combat, or status');
+      if (!access.isDm && parsed.data.status !== undefined) {
+        throw app.httpErrors.forbidden('Only the DM can change character status');
       }
 
-      const character = await prisma.character.update({
-        where: { id: characterId },
-        data: {
-          ...(parsed.data.name !== undefined && { name: parsed.data.name }),
-          ...(parsed.data.level !== undefined && { level: parsed.data.level }),
-          ...(parsed.data.className !== undefined && { className: parsed.data.className }),
-          ...(parsed.data.alignment !== undefined && { alignment: parsed.data.alignment }),
-          ...(parsed.data.notes !== undefined && { notes: parsed.data.notes }),
-          ...(access.isDm &&
-            parsed.data.stats !== undefined && {
+      const statusChange =
+        access.isDm && parsed.data.status !== undefined ? parsed.data.status : undefined;
+
+      const hasOtherFields =
+        parsed.data.name !== undefined ||
+        parsed.data.level !== undefined ||
+        parsed.data.className !== undefined ||
+        parsed.data.alignment !== undefined ||
+        parsed.data.notes !== undefined ||
+        parsed.data.stats !== undefined ||
+        parsed.data.combat !== undefined ||
+        parsed.data.items !== undefined;
+
+      const character = await prisma.$transaction(async (tx) => {
+        if (parsed.data.items) {
+          await tx.characterItem.deleteMany({ where: { characterId } });
+        }
+
+        if (statusChange) {
+          try {
+            await applyCharacterStatus(tx, characterId, statusChange, {
+              bumpVersion: !hasOtherFields,
+            });
+          } catch (e) {
+            if (
+              e instanceof Error &&
+              e.message === 'CHARACTER_ARCHIVE_MIGRATION_REQUIRED'
+            ) {
+              throw app.httpErrors.badRequest(
+                'Archive requires a database migration. Run: bun run db:migrate',
+              );
+            }
+            throw e;
+          }
+        }
+
+        if (!hasOtherFields && !statusChange) {
+          throw app.httpErrors.badRequest('No changes provided');
+        }
+
+        if (!hasOtherFields) {
+          return tx.character.findUniqueOrThrow({
+            where: { id: characterId },
+            include: { items: { orderBy: { sortOrder: 'asc' } } },
+          });
+        }
+
+        return tx.character.update({
+          where: { id: characterId },
+          data: {
+            ...(parsed.data.name !== undefined && { name: parsed.data.name }),
+            ...(parsed.data.level !== undefined && { level: parsed.data.level }),
+            ...(parsed.data.className !== undefined && { className: parsed.data.className }),
+            ...(parsed.data.alignment !== undefined && { alignment: parsed.data.alignment }),
+            ...(parsed.data.notes !== undefined && { notes: parsed.data.notes }),
+            ...(parsed.data.stats !== undefined && {
               stats: parsed.data.stats as Prisma.InputJsonValue,
             }),
-          ...(access.isDm &&
-            parsed.data.combat !== undefined && {
+            ...(parsed.data.combat !== undefined && {
               combat: parsed.data.combat as Prisma.InputJsonValue,
             }),
-          ...(access.isDm && parsed.data.status !== undefined && {
-            status: parsed.data.status,
-            diedAt: parsed.data.status === 'dead' ? new Date() : null,
-          }),
-          version: { increment: 1 },
-        },
+            ...(parsed.data.items && {
+              items: {
+                create: parsed.data.items.map((item, i) => ({
+                  category: item.category,
+                  name: item.name,
+                  quantity: item.quantity ?? 1,
+                  notes: item.notes ?? '',
+                  properties: (item.properties ?? {}) as Prisma.InputJsonValue,
+                  sortOrder: i,
+                })),
+              },
+            }),
+            version: { increment: 1 },
+          },
+          include: { items: { orderBy: { sortOrder: 'asc' } } },
+        });
       });
       return { character };
     },

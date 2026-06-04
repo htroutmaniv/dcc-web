@@ -5,7 +5,6 @@ import {
   Divider,
   List,
   ListItem,
-  ListItemButton,
   ListItemText,
   Tab,
   Tabs,
@@ -16,7 +15,9 @@ import CasinoIcon from '@mui/icons-material/Casino';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import GroupsIcon from '@mui/icons-material/Groups';
 import MapIcon from '@mui/icons-material/Map';
+import { CharacterListItem } from './CharacterListItem';
 import type { Character, DiceResult, Game, User } from '../types/game';
+import type { CombatRollKind } from '../utils/combat-rolls';
 
 export type GameMenuTab = 'characters' | 'dice' | 'session';
 
@@ -31,7 +32,12 @@ interface GameSideMenuProps {
   lastRoll: DiceResult | null;
   onGenerateCharacter: () => void;
   onRollD20: () => void;
-  onMarkDead: (characterId: string) => void;
+  onSelectCharacter: (character: Character) => void;
+  onCombatRoll: (character: Character, kind: CombatRollKind) => void;
+  rollingCharacterId?: string | null;
+  rollingKind?: CombatRollKind | null;
+  combatRollByCharacter?: Record<string, DiceResult>;
+  selectedCharacterId?: string | null;
   diceNotation: string;
   onDiceNotationChange: (value: string) => void;
 }
@@ -47,7 +53,12 @@ export function GameSideMenu({
   lastRoll,
   onGenerateCharacter,
   onRollD20,
-  onMarkDead,
+  onSelectCharacter,
+  onCombatRoll,
+  rollingCharacterId,
+  rollingKind,
+  combatRollByCharacter,
+  selectedCharacterId,
   diceNotation,
   onDiceNotationChange,
 }: GameSideMenuProps) {
@@ -98,32 +109,29 @@ export function GameSideMenu({
             >
               Generate character
             </Button>
+            {isDm && (
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                Kill, revive, and archive from the character sheet.
+              </Typography>
+            )}
             {characters.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
                 No characters in this game yet.
               </Typography>
             ) : (
-              <List dense disablePadding>
+              <List disablePadding>
                 {characters.map((c) => (
-                  <ListItem
+                  <CharacterListItem
                     key={c.id}
-                    disablePadding
-                    secondaryAction={
-                      isDm && c.status === 'alive' ? (
-                        <Button size="small" onClick={() => onMarkDead(c.id)}>
-                          Dead
-                        </Button>
-                      ) : undefined
+                    character={c}
+                    selected={selectedCharacterId === c.id}
+                    onSelect={() => onSelectCharacter(c)}
+                    onCombatRoll={(kind) => onCombatRoll(c, kind)}
+                    rollingKind={
+                      rollingCharacterId === c.id ? (rollingKind ?? null) : null
                     }
-                    sx={{ mb: 0.5 }}
-                  >
-                    <ListItemButton sx={{ borderRadius: 1, pr: isDm ? 7 : 2 }}>
-                      <ListItemText
-                        primary={`${c.name}`}
-                        secondary={`${c.className || '—'} · lvl ${c.level} · ${c.status} · HP ${c.combat?.hpCurrent ?? '?'}/${c.combat?.hpMax ?? '?'}`}
-                      />
-                    </ListItemButton>
-                  </ListItem>
+                    lastRoll={combatRollByCharacter?.[c.id]}
+                  />
                 ))}
               </List>
             )}
