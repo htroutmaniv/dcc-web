@@ -6,7 +6,7 @@ Discord is a good fit for tabletop groups that already coordinate in a server. D
 
 1. [Discord Developer Portal](https://discord.com/developers/applications) → **New Application**
 2. **OAuth2** → add redirect URI (must match exactly):
-   - Dev: `http://localhost/api/auth/discord/callback`
+   - Local (via nginx): `http://localhost:8080/api/auth/discord/callback`
    - Prod: `https://your-domain.com/api/auth/discord/callback`
 3. Copy **Client ID** and **Client Secret** into API env (`DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`)
 4. Scopes for login: `identify` (username, avatar, id). Optional later: `email` if you need email on file.

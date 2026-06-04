@@ -8,16 +8,22 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @dcc-web/shared && npm run build -w @dcc-web/api && npm run build -w @dcc-web/web",
-    "dev:api": "npm run dev -w @dcc-web/api",
-    "dev:web": "npm run dev -w @dcc-web/web",
-    "dev": "npm run build -w @dcc-web/shared && concurrently \"npm run dev:api\" \"npm run dev:web\"",
-    "docker:up": "docker compose up --build -d",
-    "docker:down": "docker compose down",
+    "build": "bun run --filter @dcc-web/shared build && bun run --filter @dcc-web/api build && bun run --filter @dcc-web/web build",
+    "build:shared": "bun run --filter @dcc-web/shared build",
+    "setup": "bun scripts/ensure-env.ts && bun install && bun run db:generate && bun run stack && bun run db:migrate",
+    "stack": "docker compose up -d",
+    "stack:down": "docker compose down",
+    "server": "bun scripts/ensure-env.ts && bun run build:shared && bun run --filter @dcc-web/api server",
+    "bundler": "bun run --filter @dcc-web/web bundler",
+    "shared": "bun run --filter @dcc-web/shared dev",
+    "start:server": "bun run build && bun run --filter @dcc-web/api start",
+    "start:bundler": "bun run --filter @dcc-web/web preview",
+    "start": "bun run build && bun run stack && concurrently -k -n api,web \"bun run start:server\" \"bun run start:bundler\"",
+    "db:generate": "bun run --filter @dcc-web/api db:generate",
+    "db:migrate": "bun run --filter @dcc-web/api db:migrate",
+    "db:migrate:dev": "bun run --filter @dcc-web/api db:migrate:dev",
     "docker:logs": "docker compose logs -f",
-    "docker:postgres": "docker compose up postgres -d",
-    "db:generate": "npm run db:generate -w @dcc-web/api",
-    "db:migrate": "npm run db:migrate -w @dcc-web/api"
+    "postinstall": "bun run db:generate"
   },
   "engines": {
     "node": ">=20"

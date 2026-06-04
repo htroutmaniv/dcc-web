@@ -1,70 +1,33 @@
-# DCC Web — Session Character & Battle Map Manager
+# DCC Web
 
-Web application for **Dungeon Crawl Classics** (and compatible) tabletop play: shared sessions where the DM sees all player character sheets, players see only their own, with tactical maps, token placement, and movement visualization.
+Dungeon Crawl Classics session manager: character sheets, server dice, tactical maps.
 
-## Stack
+## How it runs
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | React, TypeScript, MUI (theming) |
-| API | Node.js, TypeScript (Fastify recommended) |
-| Real-time | WebSockets (Socket.IO or native `ws`) |
-| Reverse proxy | nginx |
-| Shared types | `packages/shared` workspace package |
+**nginx (Docker)** → proxies to **Node API** and **Vite** on your machine. **Postgres (Docker)** for data.
 
-## Repository layout
-
-```
-dcc_web/
-├── apps/
-│   ├── api/          # REST + WebSocket server
-│   └── web/          # React SPA
-├── packages/
-│   └── shared/       # DTOs, Zod schemas, constants
-├── nginx/            # Production reverse-proxy config
-└── docs/             # Architecture & domain design
-```
-
-## Documentation
-
-- [Architecture](docs/ARCHITECTURE.md) — system design, flows, deployment
-- [Data model](docs/DATA-MODEL.md) — entities and permissions
-- [Purple Sorcerer](docs/PURPLE-SORCERER.md) — import strategy (no public API)
-
-## Status
-
-**Skeleton** — API, web shell, PostgreSQL schema, Docker (nginx + api + postgres). UI flows are minimal; expand per [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) phases.
-
-## Quick start
-
-### Docker (live test on port 80)
+Same layout for daily dev and production-like runs — see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ```bash
 cp .env.example .env
-docker compose up --build
+bun install
+bun run stack
+bun run db:migrate
 ```
 
-Open **http://localhost:8080** (default; port 80 is often taken on Windows).
+In **two terminals**: `bun server` and `bun bundler`. Open **http://localhost:8080**
 
-To use port 80: `HTTP_PORT=80 docker compose up --build -d` then http://localhost.
+## Scripts
 
-### Local development
+| Script | What |
+|--------|------|
+| `bun run dev` | Docker stack + API watch + Vite HMR |
+| `bun run start` | Build + Docker stack + API + Vite preview |
+| `bun run stack` | Postgres + nginx only |
+| `bun run build` | Compile shared, API, web |
 
-```bash
-npm install
-npm run build -w @dcc-web/shared
-# Start Postgres (or use docker compose up postgres -d)
-export DATABASE_URL=postgresql://dcc:dcc@localhost:5432/dcc
-npm run db:migrate -w @dcc-web/api
-npm run dev
-```
+## Docs
 
-Web: http://localhost:5173 (proxies `/api` to API). API: http://localhost:3001.
-
-### Discord login
-
-See [docs/DISCORD-AUTH.md](docs/DISCORD-AUTH.md). Set `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, and register redirect `http://localhost/api/auth/discord/callback`.
-
-## License
-
-TBD — ensure compliance with Goodman Games / Purple Sorcerer terms if distributing generated content or importers.
+- [Development / structure](docs/DEVELOPMENT.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Discord auth](docs/DISCORD-AUTH.md)

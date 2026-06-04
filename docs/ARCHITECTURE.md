@@ -17,14 +17,14 @@ flowchart TB
     PL[Player clients]
   end
 
-  subgraph edge [Edge]
-    NGX[nginx]
+  subgraph edge [Edge Docker]
+    NGX[nginx reverse proxy]
   end
 
-  subgraph app [Application tier]
-    WEB[React SPA static]
+  subgraph host [Host processes]
+    WEB[Vite React]
     API[Node API REST]
-    WS[WebSocket hub]
+    WS[WebSocket on API]
   end
 
   subgraph data [Data tier]
@@ -38,6 +38,8 @@ flowchart TB
   NGX -->|/| WEB
   NGX -->|/api| API
   NGX -->|/socket.io| WS
+  WEB -.->|dev/preview :5173| NGX
+  API -.->|:3001| NGX
   DM --> WS
   PL --> WS
   API --> PG

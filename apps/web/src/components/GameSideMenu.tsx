@@ -1,0 +1,196 @@
+import {
+  Alert,
+  Box,
+  Button,
+  Divider,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemText,
+  Tab,
+  Tabs,
+  TextField,
+  Typography,
+} from '@mui/material';
+import CasinoIcon from '@mui/icons-material/Casino';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import GroupsIcon from '@mui/icons-material/Groups';
+import MapIcon from '@mui/icons-material/Map';
+import type { Character, DiceResult, Game, User } from '../types/game';
+
+export type GameMenuTab = 'characters' | 'dice' | 'session';
+
+interface GameSideMenuProps {
+  game: Game;
+  isDm: boolean;
+  inviteCode: string;
+  characters: Character[];
+  players?: { user: User }[];
+  tab: GameMenuTab;
+  onTabChange: (tab: GameMenuTab) => void;
+  lastRoll: DiceResult | null;
+  onGenerateCharacter: () => void;
+  onRollD20: () => void;
+  onMarkDead: (characterId: string) => void;
+  diceNotation: string;
+  onDiceNotationChange: (value: string) => void;
+}
+
+export function GameSideMenu({
+  game,
+  isDm,
+  inviteCode,
+  characters,
+  players,
+  tab,
+  onTabChange,
+  lastRoll,
+  onGenerateCharacter,
+  onRollD20,
+  onMarkDead,
+  diceNotation,
+  onDiceNotationChange,
+}: GameSideMenuProps) {
+  return (
+    <Box
+      sx={{
+        width: 320,
+        flexShrink: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        borderLeft: 1,
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
+      }}
+    >
+      <Box sx={{ px: 2, pt: 2, pb: 1 }}>
+        <Typography variant="subtitle2" color="text.secondary">
+          Session menu
+        </Typography>
+        <Typography variant="body2" noWrap title={game.title}>
+          {game.title}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Code: {inviteCode}
+        </Typography>
+      </Box>
+
+      <Tabs
+        value={tab}
+        onChange={(_, v) => onTabChange(v as GameMenuTab)}
+        variant="fullWidth"
+        sx={{ borderBottom: 1, borderColor: 'divider' }}
+      >
+        <Tab icon={<GroupsIcon />} iconPosition="start" label="PCs" value="characters" />
+        <Tab icon={<CasinoIcon />} iconPosition="start" label="Dice" value="dice" />
+        <Tab icon={<MapIcon />} iconPosition="start" label="Info" value="session" />
+      </Tabs>
+
+      <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+        {tab === 'characters' && (
+          <>
+            <Button
+              fullWidth
+              variant="outlined"
+              startIcon={<PersonAddIcon />}
+              onClick={onGenerateCharacter}
+              sx={{ mb: 2 }}
+            >
+              Generate character
+            </Button>
+            {characters.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No characters in this game yet.
+              </Typography>
+            ) : (
+              <List dense disablePadding>
+                {characters.map((c) => (
+                  <ListItem
+                    key={c.id}
+                    disablePadding
+                    secondaryAction={
+                      isDm && c.status === 'alive' ? (
+                        <Button size="small" onClick={() => onMarkDead(c.id)}>
+                          Dead
+                        </Button>
+                      ) : undefined
+                    }
+                    sx={{ mb: 0.5 }}
+                  >
+                    <ListItemButton sx={{ borderRadius: 1, pr: isDm ? 7 : 2 }}>
+                      <ListItemText
+                        primary={`${c.name}`}
+                        secondary={`${c.className || '—'} · lvl ${c.level} · ${c.status} · HP ${c.combat?.hpCurrent ?? '?'}/${c.combat?.hpMax ?? '?'}`}
+                      />
+                    </ListItemButton>
+                  </ListItem>
+                ))}
+              </List>
+            )}
+          </>
+        )}
+
+        {tab === 'dice' && (
+          <>
+            <TextField
+              size="small"
+              label="Notation"
+              value={diceNotation}
+              onChange={(e) => onDiceNotationChange(e.target.value)}
+              fullWidth
+              sx={{ mb: 1 }}
+              placeholder="1d20+2"
+            />
+            <Button
+              fullWidth
+              variant="contained"
+              startIcon={<CasinoIcon />}
+              onClick={onRollD20}
+            >
+              Roll (server)
+            </Button>
+            {lastRoll && (
+              <Alert severity="success" sx={{ mt: 2 }}>
+                <strong>{lastRoll.total}</strong> — [{lastRoll.rolls.join(', ')}]
+                {lastRoll.modifier !== 0 && ` ${lastRoll.modifier >= 0 ? '+' : ''}${lastRoll.modifier}`}
+              </Alert>
+            )}
+          </>
+        )}
+
+        {tab === 'session' && (
+          <>
+            <Typography variant="body2" color="text.secondary" paragraph>
+              Role: <strong>{isDm ? 'Dungeon Master' : 'Player'}</strong>
+            </Typography>
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+              Players in game
+            </Typography>
+            {players?.length ? (
+              <List dense>
+                {players.map((p) => (
+                  <ListItem key={p.user.id} disablePadding>
+                    <ListItemText primary={p.user.displayName} />
+                  </ListItem>
+                ))}
+              </List>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No players listed yet.
+              </Typography>
+            )}
+            {isDm && (
+              <>
+                <Divider sx={{ my: 2 }} />
+                <Typography variant="caption" color="text.secondary">
+                  DM map tools (reset tokens, clear map) will appear here.
+                </Typography>
+              </>
+            )}
+          </>
+        )}
+      </Box>
+    </Box>
+  );
+}

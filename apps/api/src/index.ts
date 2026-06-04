@@ -1,3 +1,4 @@
+import './load-env.js';
 import { Server } from 'socket.io';
 import { config } from './lib/config.js';
 import { buildApp } from './app.js';

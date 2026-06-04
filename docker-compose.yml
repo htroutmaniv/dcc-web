@@ -1,3 +1,5 @@
+# Infrastructure only: Postgres + nginx reverse proxy to host Node/Vite.
+# Run the app with: bun run dev  (or bun run start after build)
 services:
   postgres:
     image: postgres:16-alpine
@@ -15,38 +17,14 @@ services:
       timeout: 5s
       retries: 5
 
-  api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    environment:
-      DATABASE_URL: postgresql://dcc:dcc@postgres:5432/dcc
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      CORS_ORIGIN: http://localhost,http://localhost:8080,http://127.0.0.1,http://127.0.0.1:8080,http://localhost:5173
-      PORT: 3001
-      HOST: 0.0.0.0
-      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
-      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
-      DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI:-http://localhost/api/auth/discord/callback}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3001/health']
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 30s
-
   nginx:
     build:
       context: .
       dockerfile: nginx/Dockerfile
     ports:
       - '${HTTP_PORT:-8080}:80'
-    depends_on:
-      api:
-        condition: service_healthy
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
 
 volumes:
   pgdata:
