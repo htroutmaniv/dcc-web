@@ -33,6 +33,7 @@ import {
   getTargetAc,
   type DiceRollKind,
   type GameInitiativeState,
+  fitImageToGrid,
   type MapDrawTool,
   type MapGridPreset,
   type MapLayoutAnchor,
@@ -115,6 +116,7 @@ export default function GamePage() {
   const [mapBusy, setMapBusy] = useState(false);
   const [drawTool, setDrawTool] = useState<MapDrawTool>('select');
   const [drawColor, setDrawColor] = useState('#c9a227');
+  const [drawStrokeWidth, setDrawStrokeWidth] = useState(2);
 
   /** DM = game creator only (server sets isDm from dm_user_id). */
   const isDm = detail?.isDm === true;
@@ -459,19 +461,30 @@ export default function GamePage() {
     }
   };
 
-  const applyCharacterFromServer = useCallback((updated: Character) => {
-    setSelectedCharacter((prev) => (prev?.id === updated.id ? updated : prev));
-    setCharacters((prev) => {
-      if (updated.status === 'archived') {
-        return prev.filter((c) => c.id !== updated.id);
+  const applyCharacterFromServer = useCallback(
+    (updated: Character) => {
+      if (
+        !isDm &&
+        updated.ownerUserId &&
+        user?.id &&
+        updated.ownerUserId !== user.id
+      ) {
+        return;
       }
-      const idx = prev.findIndex((c) => c.id === updated.id);
-      if (idx >= 0) {
-        return prev.map((c) => (c.id === updated.id ? updated : c));
-      }
-      return [...prev, updated];
-    });
-  }, []);
+      setSelectedCharacter((prev) => (prev?.id === updated.id ? updated : prev));
+      setCharacters((prev) => {
+        if (updated.status === 'archived') {
+          return prev.filter((c) => c.id !== updated.id);
+        }
+        const idx = prev.findIndex((c) => c.id === updated.id);
+        if (idx >= 0) {
+          return prev.map((c) => (c.id === updated.id ? updated : c));
+        }
+        return [...prev, updated];
+      });
+    },
+    [isDm, user?.id],
+  );
 
   const handleCharacterUpdated = applyCharacterFromServer;
 
@@ -521,9 +534,9 @@ export default function GamePage() {
         if (actorUserId && actorUserId === user?.id) return;
         void loadMonsters().catch(() => {});
       },
-      onCharacterUpsert: (character, actorUserId) => {
+      onCharacterUpsert: (_character, actorUserId) => {
         if (actorUserId && actorUserId === user?.id) return;
-        applyCharacterFromServer(character);
+        void loadCharacters().catch(() => {});
       },
       onInitiativeUpdated: (next) => {
         applyInitiative(next);
@@ -1115,10 +1128,24 @@ export default function GamePage() {
     }
   };
 
-  const uploadMapImage = (file: File) => {
+  const uploadMapImage = (file: File, gridW?: number, gridH?: number) => {
     const reader = new FileReader();
     reader.onload = () => {
-      void patchActiveMap({ imageDataUrl: reader.result as string });
+      const dataUrl = reader.result as string;
+      const img = new window.Image();
+      img.onload = () => {
+        const fit =
+          gridW && gridH
+            ? fitImageToGrid(img.naturalWidth, img.naturalHeight, gridW, gridH)
+            : { widthPx: img.naturalWidth, heightPx: img.naturalHeight };
+        void patchActiveMap({
+          imageDataUrl: dataUrl,
+          widthPx: fit.widthPx,
+          heightPx: fit.heightPx,
+          imageScale: 1,
+        });
+      };
+      img.src = dataUrl;
     };
     reader.readAsDataURL(file);
   };
@@ -1148,22 +1175,6 @@ export default function GamePage() {
     if (!gameId || !detail || !isDm || !activeMapId) return;
     void autoSyncMapTokens();
   }, [gameId, detail, isDm, activeMapId, autoSyncMapTokens]);
-
-  const syncMapTokens = async () => {
-    if (!gameId || !activeMapId) return;
-    setMapBusy(true);
-    try {
-      const { map } = await api<{ map: TacticalGameMap }>(
-        `/games/${gameId}/maps/${activeMapId}/sync-tokens`,
-        { method: 'POST' },
-      );
-      applyMapFromServer(map);
-    } catch (e) {
-      setError(formatError(e));
-    } finally {
-      setMapBusy(false);
-    }
-  };
 
   const layoutMapTokens = async (anchor?: MapLayoutAnchor) => {
     if (!gameId || !activeMapId) return;
@@ -1287,6 +1298,8 @@ export default function GamePage() {
               partyCharacters={characters}
               partyMonsters={monsters}
               isDm={isDm}
+              players={detail.game.players?.map((p) => p.user) ?? []}
+              dmUserId={detail.game.dmUserId}
               onClose={() => setSelectedCharacter(null)}
               onCharacterUpdated={handleCharacterUpdated}
               onMonsterUpdated={handleMonsterUpdated}
@@ -1356,8 +1369,11 @@ export default function GamePage() {
                   mapBusy={mapBusy}
                   drawTool={drawTool}
                   drawColor={drawColor}
+                  drawStrokeWidth={drawStrokeWidth}
                   onDrawToolChange={setDrawTool}
                   onDrawColorChange={setDrawColor}
+                  onDrawStrokeWidthChange={setDrawStrokeWidth}
+                  onImageScaleChange={(imageScale) => void patchActiveMap({ imageScale })}
                   onSelectMap={(id) => void setActiveMap(id)}
                   onPrevMap={() => cycleMap(-1)}
                   onNextMap={() => cycleMap(1)}
@@ -1369,7 +1385,7 @@ export default function GamePage() {
                   onGridPresetChange={(preset) => void patchActiveMap({ gridPreset: preset })}
                   onUploadImage={uploadMapImage}
                   onRemoveImage={() => void patchActiveMap({ clearImage: true })}
-                  onSyncTokens={() => void syncMapTokens()}
+                  onRenameMap={(name) => void patchActiveMap({ name })}
                   onLayoutTokens={(anchor) => void layoutMapTokens(anchor)}
                   onClearDrawings={() => void patchActiveMap({ dmDrawings: [] })}
                   onDrawingsChange={(drawings) => void patchActiveMap({ dmDrawings: drawings })}
@@ -1449,6 +1465,9 @@ export default function GamePage() {
         onClose={() => setCreateDialogOpen(false)}
         onSubmit={createCharacter}
         submitting={creatingCharacter}
+        isDm={isDm}
+        players={detail?.game.players?.map((p) => p.user) ?? []}
+        dmUserId={detail?.game.dmUserId}
       />
       <ApplyDamageDialog
         open={applyDamageRoll != null}

@@ -29,6 +29,20 @@ function broadcastCharacter(
   });
 }
 
+async function assertValidCharacterOwner(
+  gameId: string,
+  dmUserId: string,
+  ownerUserId: string,
+) {
+  if (ownerUserId === dmUserId) return;
+  const member = await prisma.gamePlayer.findUnique({
+    where: { gameId_userId: { gameId, userId: ownerUserId } },
+  });
+  if (!member) {
+    throw new Error('Owner must be the DM or a player in this game');
+  }
+}
+
 export async function characterRoutes(app: FastifyInstance) {
   app.get(
     '/games/:gameId/characters',
@@ -116,6 +130,19 @@ export async function characterRoutes(app: FastifyInstance) {
           ? parsed.data.ownerUserId
           : request.userId!;
 
+      if (access.isDm && parsed.data.ownerUserId) {
+        try {
+          await assertValidCharacterOwner(
+            gameId,
+            access.game.dmUserId,
+            parsed.data.ownerUserId,
+          );
+        } catch (e) {
+          const message = e instanceof Error ? e.message : 'Invalid character owner';
+          throw app.httpErrors.badRequest(message);
+        }
+      }
+
       try {
         if (parsed.data.mode === 'random') {
           const generated = generateRandomCharacterData({
@@ -202,9 +229,30 @@ export async function characterRoutes(app: FastifyInstance) {
       if (!access.isDm && parsed.data.status !== undefined) {
         throw app.httpErrors.forbidden('Only the DM can change character status');
       }
+      if (!access.isDm && parsed.data.ownerUserId !== undefined) {
+        throw app.httpErrors.forbidden('Only the DM can assign character ownership');
+      }
 
       const statusChange =
         access.isDm && parsed.data.status !== undefined ? parsed.data.status : undefined;
+
+      const ownerChange =
+        access.isDm && parsed.data.ownerUserId !== undefined
+          ? parsed.data.ownerUserId
+          : undefined;
+
+      if (ownerChange !== undefined) {
+        try {
+          await assertValidCharacterOwner(
+            existing.gameId,
+            access.game.dmUserId,
+            ownerChange,
+          );
+        } catch (e) {
+          const message = e instanceof Error ? e.message : 'Invalid character owner';
+          throw app.httpErrors.badRequest(message);
+        }
+      }
 
       const hasOtherFields =
         parsed.data.name !== undefined ||
@@ -212,6 +260,7 @@ export async function characterRoutes(app: FastifyInstance) {
         parsed.data.className !== undefined ||
         parsed.data.alignment !== undefined ||
         parsed.data.notes !== undefined ||
+        parsed.data.ownerUserId !== undefined ||
         parsed.data.stats !== undefined ||
         parsed.data.combat !== undefined ||
         parsed.data.items !== undefined;
@@ -258,6 +307,7 @@ export async function characterRoutes(app: FastifyInstance) {
             ...(parsed.data.className !== undefined && { className: parsed.data.className }),
             ...(parsed.data.alignment !== undefined && { alignment: parsed.data.alignment }),
             ...(parsed.data.notes !== undefined && { notes: parsed.data.notes }),
+            ...(ownerChange !== undefined && { ownerUserId: ownerChange }),
             ...(parsed.data.stats !== undefined && {
               stats: parsed.data.stats as Prisma.InputJsonValue,
             }),

@@ -15,6 +15,8 @@ import GroupsIcon from '@mui/icons-material/Groups';
 import MapIcon from '@mui/icons-material/Map';
 import PestControlIcon from '@mui/icons-material/PestControl';
 import { CharacterListItem, type CombatTargetOption } from './CharacterListItem';
+import { DmCharacterSections } from './DmCharacterSections';
+import type { DiceResult } from '../types/game';
 import { DiceTabPanel } from './DiceTabPanel';
 import { MonsterPanel } from './MonsterPanel';
 import type { Character, Game, User } from '../types/game';
@@ -191,6 +193,60 @@ export function GameSideMenu({
               <Typography variant="body2" color="text.secondary">
                 No characters in this game yet.
               </Typography>
+            ) : isDm && game.dmUserId ? (
+              <DmCharacterSections
+                characters={characters}
+                players={players ?? []}
+                dmUserId={game.dmUserId}
+                renderItem={(c) => {
+                  const isTurn = isCharacterTurn(initiative ?? null, c.id);
+                  const canEndTurn =
+                    initiativeActive &&
+                    isTurn &&
+                    (isDm || (currentUserId != null && c.ownerUserId === currentUserId));
+                  return (
+                    <CharacterListItem
+                      key={c.id}
+                      character={c}
+                      selected={selectedCharacterId === c.id}
+                      onSelect={() => onSelectCharacter(c)}
+                      onCombatRoll={(kind) => onCombatRoll(c, kind)}
+                      onPatchHp={
+                        onPatchCharacterHp
+                          ? (hp) => onPatchCharacterHp(c, hp)
+                          : undefined
+                      }
+                      canEditHp={canEditCharacter(c)}
+                      hpAdjusting={hpAdjustingId === c.id}
+                      onSelectWeapon={(weaponId) => onSelectWeapon?.(c, weaponId)}
+                      combatTargets={combatTargetOptions}
+                      attackTargetId={characterAttackTargetById[c.id] ?? ''}
+                      onAttackTargetChange={(ref) =>
+                        onCharacterAttackTargetChange?.(c.id, ref)
+                      }
+                      onOpenConsume={(kind) => onOpenConsume(c, kind)}
+                      onSelectActiveLight={(lightItemId) =>
+                        onSelectActiveLight(c, lightItemId)
+                      }
+                      onToggleLightLit={(lit) => onToggleLightLit(c, lit)}
+                      onExpendActiveLight={() => onExpendActiveLight(c)}
+                      consumableAdjusting={consumableAdjustingId === c.id}
+                      canEditConsumables={canEditCharacter(c)}
+                      canToggleInPlay={canEditCharacter(c)}
+                      onToggleInPlay={(active) => onToggleInPlay(c, active)}
+                      initiativeActive={initiativeActive}
+                      isInitiativeTurn={isTurn}
+                      canEndTurn={canEndTurn}
+                      onEndTurn={() => onEndTurn(c)}
+                      endingTurn={endTurnCharacterId === c.id}
+                      rollingKind={
+                        rollingCharacterId === c.id ? (rollingKind ?? null) : null
+                      }
+                      lastRoll={combatRollByCharacter?.[c.id]}
+                    />
+                  );
+                }}
+              />
             ) : (
               <List disablePadding>
                 {characters.map((c) => {

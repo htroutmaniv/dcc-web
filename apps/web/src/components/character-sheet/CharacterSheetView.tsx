@@ -4,6 +4,10 @@ import {
   Box,
   Button,
   CircularProgress,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
   Stack,
   Typography,
 } from '@mui/material';
@@ -13,7 +17,7 @@ import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Cancel';
 import { api, ApiError } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
-import type { Character } from '../../types/game';
+import type { Character, User } from '../../types/game';
 import {
   isLevel0Sheet,
   mapCharacterToLevel0Sheet,
@@ -52,6 +56,8 @@ interface CharacterSheetViewProps {
   onArchive?: (characterId: string) => void;
   onMarkDead?: (characterId: string) => void;
   isDm?: boolean;
+  players?: User[];
+  dmUserId?: string;
 }
 
 export function CharacterSheetView({
@@ -67,6 +73,8 @@ export function CharacterSheetView({
   onArchive,
   onMarkDead,
   isDm,
+  players = [],
+  dmUserId,
 }: CharacterSheetViewProps) {
   const { user } = useAuth();
   const [character, setCharacter] = useState(characterProp);
@@ -238,6 +246,40 @@ export function CharacterSheetView({
     [character, onCharacterUpdated],
   );
 
+  const assignOwner = useCallback(
+    async (ownerUserId: string) => {
+      if (!dmUserId) return;
+      const currentOwner = character.ownerUserId ?? dmUserId;
+      if (ownerUserId === currentOwner) return;
+      setSaving(true);
+      setError(null);
+      try {
+        const res = await api<{ character: Character } | Character>(
+          `/characters/${character.id}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({ ownerUserId }),
+          },
+        );
+        const updated =
+          res && typeof res === 'object' && 'character' in res
+            ? res.character
+            : (res as Character);
+        if (!updated?.id) {
+          throw new Error('Assign succeeded but no character was returned');
+        }
+        setCharacter(updated);
+        setDraft(mapCharacterToLevel0Sheet(updated));
+        onCharacterUpdated?.(updated);
+      } catch (e) {
+        setError(formatError(e));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [character.id, character.ownerUserId, dmUserId, onCharacterUpdated],
+  );
+
   const handleEquipmentSaved = (updated: Character) => {
     setCharacter(updated);
     setDraft(mapCharacterToLevel0Sheet(updated));
@@ -388,8 +430,8 @@ export function CharacterSheetView({
           </Stack>
         </Box>
 
-        {isDm && (onRevive || onMarkDead || onArchive) && (
-          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} flexWrap="wrap">
+        {isDm && dmUserId && (
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} flexWrap="wrap" alignItems="center">
             <Typography
               variant="caption"
               color="text.secondary"
@@ -397,6 +439,25 @@ export function CharacterSheetView({
             >
               DM:
             </Typography>
+            <FormControl size="small" sx={{ minWidth: 180 }}>
+              <InputLabel id="char-assign-label">Assigned to</InputLabel>
+              <Select
+                labelId="char-assign-label"
+                label="Assigned to"
+                value={character.ownerUserId ?? dmUserId}
+                onChange={(e) => void assignOwner(e.target.value)}
+                disabled={saving || editing}
+              >
+                <MenuItem value={dmUserId}>NPC (DM)</MenuItem>
+                {players
+                  .filter((p) => p.id !== dmUserId)
+                  .map((p) => (
+                    <MenuItem key={p.id} value={p.id}>
+                      {p.displayName}
+                    </MenuItem>
+                  ))}
+              </Select>
+            </FormControl>
             {character.status === 'dead' && onRevive && (
               <Button
                 size="small"

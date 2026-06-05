@@ -41,6 +41,7 @@ export type GameMapDto = {
   imageUrl: string | null;
   widthPx: number;
   heightPx: number;
+  imageScale: number;
   gridCellPx: number;
   gridFtPerCell: number;
   dmDrawings: MapDrawing[];
@@ -119,6 +120,7 @@ function toMapDto(
     imageUrl: string | null;
     widthPx: number;
     heightPx: number;
+    imageScale?: number;
     gridCellPx: number;
     gridFtPerCell: Prisma.Decimal;
     dmDrawings: unknown;
@@ -136,6 +138,7 @@ function toMapDto(
     imageUrl: row.imageUrl,
     widthPx: row.widthPx,
     heightPx: row.heightPx,
+    imageScale: (row as { imageScale?: number }).imageScale ?? 1,
     gridCellPx: row.gridCellPx || preset.gridCellPx,
     gridFtPerCell: Number(row.gridFtPerCell) || preset.gridFtPerCell,
     dmDrawings: parseMapDrawings(row.dmDrawings),
@@ -243,6 +246,9 @@ export async function patchGameMap(
     dmDrawings?: MapDrawing[];
     imageDataUrl?: string | null;
     clearImage?: boolean;
+    widthPx?: number;
+    heightPx?: number;
+    imageScale?: number;
   },
 ): Promise<GameMapDto> {
   const existing = await prisma.gameMap.findFirstOrThrow({ where: { id: mapId, gameId } });
@@ -259,6 +265,11 @@ export async function patchGameMap(
   if (patch.dmDrawings !== undefined) {
     data.dmDrawings = patch.dmDrawings as unknown as Prisma.InputJsonValue;
   }
+  if (patch.widthPx !== undefined) data.widthPx = patch.widthPx;
+  if (patch.heightPx !== undefined) data.heightPx = patch.heightPx;
+  if (patch.imageScale !== undefined) {
+    (data as Prisma.GameMapUpdateInput & { imageScale?: number }).imageScale = patch.imageScale;
+  }
   if (patch.clearImage) {
     if (existing.imageUrl?.startsWith('/uploads/maps/')) {
       const file = path.join(UPLOAD_DIR, path.basename(existing.imageUrl));
@@ -267,9 +278,13 @@ export async function patchGameMap(
     data.imageUrl = null;
     data.widthPx = 0;
     data.heightPx = 0;
+    (data as Prisma.GameMapUpdateInput & { imageScale?: number }).imageScale = 1;
   } else if (patch.imageDataUrl) {
     const saved = await saveMapImage(mapId, patch.imageDataUrl);
     data.imageUrl = saved.imageUrl;
+    if (patch.widthPx !== undefined) data.widthPx = patch.widthPx;
+    if (patch.heightPx !== undefined) data.heightPx = patch.heightPx;
+    (data as Prisma.GameMapUpdateInput & { imageScale?: number }).imageScale = patch.imageScale ?? 1;
   }
 
   await prisma.gameMap.update({ where: { id: mapId }, data });

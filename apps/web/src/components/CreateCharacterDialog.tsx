@@ -23,6 +23,7 @@ import CasinoIcon from '@mui/icons-material/Casino';
 import EditIcon from '@mui/icons-material/Edit';
 import { createCharacterSchema, DCC_CHARACTER_CLASSES } from '@dcc-web/shared';
 import type { z } from 'zod';
+import type { User } from '../types/game';
 
 export type CreateCharacterPayload = z.infer<typeof createCharacterSchema>;
 
@@ -31,6 +32,9 @@ interface CreateCharacterDialogProps {
   onClose: () => void;
   onSubmit: (payload: CreateCharacterPayload) => Promise<void>;
   submitting?: boolean;
+  isDm?: boolean;
+  players?: User[];
+  dmUserId?: string;
 }
 
 const LEVELS = Array.from({ length: 11 }, (_, i) => i);
@@ -40,11 +44,15 @@ export function CreateCharacterDialog({
   onClose,
   onSubmit,
   submitting = false,
+  isDm = false,
+  players = [],
+  dmUserId,
 }: CreateCharacterDialogProps) {
   const [mode, setMode] = useState<'random' | 'manual'>('random');
   const [level, setLevel] = useState(0);
   const [className, setClassName] = useState('');
   const [name, setName] = useState('');
+  const [ownerUserId, setOwnerUserId] = useState('');
   const [noElves, setNoElves] = useState(false);
   const [noDwarves, setNoDwarves] = useState(false);
   const [noHalflings, setNoHalflings] = useState(false);
@@ -55,19 +63,23 @@ export function CreateCharacterDialog({
     setLevel(0);
     setClassName('');
     setName('');
+    setOwnerUserId(dmUserId ?? players[0]?.id ?? '');
     setNoElves(false);
     setNoDwarves(false);
     setNoHalflings(false);
-  }, [open]);
+  }, [open, players, dmUserId]);
 
   const showClass = level > 0;
   const showRaceFilters = mode === 'random';
+
+  const ownerField = isDm && dmUserId ? { ownerUserId: ownerUserId || dmUserId } : {};
 
   const buildPayload = (): CreateCharacterPayload => {
     if (mode === 'manual') {
       return {
         mode: 'manual',
         level,
+        ...ownerField,
         ...(showClass && className ? { className } : {}),
         ...(name.trim() ? { name: name.trim() } : {}),
       };
@@ -75,6 +87,7 @@ export function CreateCharacterDialog({
     return {
       mode: 'random',
       level,
+      ...ownerField,
       ...(showClass && className ? { className } : {}),
       noElves,
       noDwarves,
@@ -109,6 +122,30 @@ export function CreateCharacterDialog({
             Manual
           </ToggleButton>
         </ToggleButtonGroup>
+
+        {isDm && dmUserId && (
+          <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+            <InputLabel id="char-owner-label">Assigned to</InputLabel>
+            <Select
+              labelId="char-owner-label"
+              label="Assigned to"
+              value={ownerUserId || dmUserId}
+              onChange={(e) => setOwnerUserId(e.target.value)}
+            >
+              <MenuItem value={dmUserId}>NPC (DM)</MenuItem>
+              {players
+                .filter((p) => p.id !== dmUserId)
+                .map((p) => (
+                  <MenuItem key={p.id} value={p.id}>
+                    {p.displayName}
+                  </MenuItem>
+                ))}
+            </Select>
+            <FormHelperText>
+              Unassigned characters stay with the DM as NPCs. Assign to a player for their sheet.
+            </FormHelperText>
+          </FormControl>
+        )}
 
         <FormControl fullWidth size="small" sx={{ mb: 2 }}>
           <InputLabel id="char-level-label">Level</InputLabel>

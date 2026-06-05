@@ -264,6 +264,7 @@ model GameMap {
   imageUrl       String?  @map("image_url")
   widthPx        Int      @default(0) @map("width_px")
   heightPx       Int      @default(0) @map("height_px")
+  imageScale     Float    @default(1) @map("image_scale")
   gridCellPx     Int      @default(50) @map("grid_cell_px")
   gridFtPerCell  Decimal  @default(5) @map("grid_ft_per_cell") @db.Decimal(6, 2)
   dmDrawings     Json     @default("[]") @map("dm_drawings")

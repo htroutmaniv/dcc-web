@@ -20,8 +20,11 @@ interface TacticalMapProps {
   mapBusy?: boolean;
   drawTool: MapDrawTool;
   drawColor: string;
+  drawStrokeWidth: number;
   onDrawToolChange: (tool: MapDrawTool) => void;
   onDrawColorChange: (color: string) => void;
+  onDrawStrokeWidthChange: (width: number) => void;
+  onImageScaleChange: (scale: number) => void;
   onSelectMap: (mapId: string) => void;
   onPrevMap: () => void;
   onNextMap: () => void;
@@ -29,9 +32,9 @@ interface TacticalMapProps {
   onDeleteMap: () => void;
   onToggleMapVisible: () => void;
   onGridPresetChange: (preset: MapGridPreset) => void;
-  onUploadImage: (file: File) => void;
+  onUploadImage: (file: File, gridW?: number, gridH?: number) => void;
   onRemoveImage: () => void;
-  onSyncTokens: () => void;
+  onRenameMap: (name: string) => void;
   onLayoutTokens: (anchor?: MapLayoutAnchor) => void;
   onClearDrawings: () => void;
   onDrawingsChange: (drawings: TacticalGameMap['dmDrawings']) => void;
@@ -52,8 +55,11 @@ export function TacticalMap({
   mapBusy,
   drawTool,
   drawColor,
+  drawStrokeWidth,
   onDrawToolChange,
   onDrawColorChange,
+  onDrawStrokeWidthChange,
+  onImageScaleChange,
   onSelectMap,
   onPrevMap,
   onNextMap,
@@ -63,7 +69,7 @@ export function TacticalMap({
   onGridPresetChange,
   onUploadImage,
   onRemoveImage,
-  onSyncTokens,
+  onRenameMap,
   onLayoutTokens,
   onClearDrawings,
   onDrawingsChange,
@@ -100,9 +106,12 @@ export function TacticalMap({
           activeMapId={activeMapId}
           drawTool={drawTool}
           drawColor={drawColor}
+          drawStrokeWidth={drawStrokeWidth}
           busy={mapBusy}
           onDrawToolChange={onDrawToolChange}
           onDrawColorChange={onDrawColorChange}
+          onDrawStrokeWidthChange={onDrawStrokeWidthChange}
+          onImageScaleChange={onImageScaleChange}
           onSelectMap={onSelectMap}
           onPrevMap={onPrevMap}
           onNextMap={onNextMap}
@@ -110,9 +119,12 @@ export function TacticalMap({
           onDeleteMap={onDeleteMap}
           onToggleVisible={onToggleMapVisible}
           onGridPresetChange={onGridPresetChange}
-          onUploadImage={onUploadImage}
+          onUploadImage={(file) => {
+            const size = canvasRef.current?.getGridSize();
+            onUploadImage(file, size?.gridW, size?.gridH);
+          }}
           onRemoveImage={onRemoveImage}
-          onSyncTokens={onSyncTokens}
+          onRenameMap={onRenameMap}
           onLayoutTokens={() => {
             const anchor = canvasRef.current?.getLayoutAnchor();
             if (anchor) onLayoutTokens(anchor);
@@ -152,6 +164,7 @@ export function TacticalMap({
           showMonsterTokens={showMonsterTokens}
           drawTool={drawTool}
           drawColor={drawColor}
+          drawStrokeWidth={drawStrokeWidth}
           onDrawingsChange={onDrawingsChange}
           onTokenMove={onTokenMove}
           canDragToken={canDragToken}

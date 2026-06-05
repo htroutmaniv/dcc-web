@@ -55,6 +55,7 @@ export const patchCharacterSchema = z.object({
   className: z.string().max(64).optional(),
   alignment: z.string().max(32).optional(),
   status: z.enum(['alive', 'dead', 'archived']).optional(),
+  ownerUserId: z.string().uuid().optional(),
   stats: z.record(z.unknown()).optional(),
   combat: z.record(z.unknown()).optional(),
   notes: z.string().max(10000).optional(),
@@ -231,6 +232,9 @@ export const patchGameMapSchema = z.object({
   dmDrawings: z.array(z.record(z.unknown())).max(500).optional(),
   imageDataUrl: z.string().max(6_000_000).optional().nullable(),
   clearImage: z.boolean().optional(),
+  widthPx: z.coerce.number().int().min(0).max(20000).optional(),
+  heightPx: z.coerce.number().int().min(0).max(20000).optional(),
+  imageScale: z.coerce.number().min(0.1).max(5).optional(),
 });
 
 export const setActiveMapSchema = z.object({

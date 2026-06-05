@@ -26,6 +26,7 @@ export interface TacticalGameMap {
   imageUrl: string | null;
   widthPx: number;
   heightPx: number;
+  imageScale: number;
   gridCellPx: number;
   gridFtPerCell: number;
   dmDrawings: MapDrawing[];

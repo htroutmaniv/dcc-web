@@ -24,6 +24,7 @@ import {
   MAP_MAX_ZOOM,
   computeLayoutAnchorFromView,
   computeMapGridDimensions,
+  eraseDrawingsAtPath,
   resolveMapGridPreset,
   type MapDrawing,
   type MapDrawTool,
@@ -39,6 +40,7 @@ const LAYOUT_INSET_TOP_PX = 52;
 
 export type TacticalMapCanvasHandle = {
   getLayoutAnchor: () => MapLayoutAnchor | undefined;
+  getGridSize: () => { gridW: number; gridH: number };
 };
 
 interface TacticalMapCanvasProps {
@@ -47,6 +49,7 @@ interface TacticalMapCanvasProps {
   showMonsterTokens: boolean;
   drawTool: MapDrawTool;
   drawColor: string;
+  drawStrokeWidth: number;
   onDrawingsChange: (drawings: MapDrawing[]) => void;
   onTokenMove: (tokenId: string, x: number, y: number) => void;
   canDragToken?: (token: TacticalMapToken) => boolean;
@@ -140,6 +143,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
       showMonsterTokens,
       drawTool,
       drawColor,
+      drawStrokeWidth,
       onDrawingsChange,
       onTokenMove,
       canDragToken,
@@ -264,9 +268,18 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
       }
     }, [viewport.width, viewport.height, gridW, gridH]);
 
+    const imageScale = map.imageScale ?? 1;
+    const imageBaseW = map.widthPx > 0 ? map.widthPx : gridW;
+    const imageBaseH = map.heightPx > 0 ? map.heightPx : gridH;
+    const imageW = imageBaseW * imageScale;
+    const imageH = imageBaseH * imageScale;
+    const imageX = (gridW - imageW) / 2;
+    const imageY = (gridH - imageH) / 2;
+
     useImperativeHandle(
       ref,
       () => ({
+        getGridSize: () => ({ gridW, gridH }),
         getLayoutAnchor: () => {
           if (!viewport.width || !viewport.height) return undefined;
           const g = mapGroupRef.current;
@@ -286,7 +299,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
           });
         },
       }),
-      [viewport.width, viewport.height, position.x, position.y, scale, cell],
+      [viewport.width, viewport.height, position.x, position.y, scale, cell, gridW, gridH],
     );
 
     const screenToGrid = useCallback(
@@ -310,7 +323,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
       const id = `draw-${Date.now()}`;
       onDrawingsChange([
         ...map.dmDrawings,
-        { id, tool: 'freehand', points, color: drawColor, strokeWidth: 2 },
+        { id, tool: 'freehand', points, color: drawColor, strokeWidth: drawStrokeWidth },
       ]);
     };
 
@@ -327,7 +340,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
       const id = `draw-${Date.now()}`;
       onDrawingsChange([
         ...map.dmDrawings,
-        { id, tool, x, y, width, height, color: drawColor, strokeWidth: 2 },
+        { id, tool, x, y, width, height, color: drawColor, strokeWidth: drawStrokeWidth },
       ]);
     };
 
@@ -338,7 +351,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
       const pos = stage.getPointerPosition();
       if (!pos) return;
       const g = screenToGrid(pos.x, pos.y);
-      if (drawTool === 'freehand') {
+      if (drawTool === 'freehand' || drawTool === 'erase') {
         setDraftPoints([g.x, g.y]);
       } else if (drawTool === 'circle' || drawTool === 'rect') {
         setShapeStart(g);
@@ -353,7 +366,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
       const pos = stage.getPointerPosition();
       if (!pos) return;
       const g = screenToGrid(pos.x, pos.y);
-      if (drawTool === 'freehand' && draftPoints.length > 0) {
+      if ((drawTool === 'freehand' || drawTool === 'erase') && draftPoints.length > 0) {
         setDraftPoints((prev) => [...prev, g.x, g.y]);
       } else if ((drawTool === 'circle' || drawTool === 'rect') && shapeStart) {
         setShapeEnd(g);
@@ -362,7 +375,11 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
 
     const handlePointerUp = () => {
       if (!drawing) return;
-      if (drawTool === 'freehand' && draftPoints.length > 0) {
+      if (drawTool === 'erase' && draftPoints.length > 0) {
+        const radius = Math.max(0.5, drawStrokeWidth * 0.75);
+        onDrawingsChange(eraseDrawingsAtPath(map.dmDrawings, draftPoints, radius));
+        setDraftPoints([]);
+      } else if (drawTool === 'freehand' && draftPoints.length > 0) {
         finishStroke(draftPoints);
         setDraftPoints([]);
       } else if ((drawTool === 'circle' || drawTool === 'rect') && shapeStart && shapeEnd) {
@@ -447,7 +464,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
             handlePointerMove(e);
           }}
           onTouchEnd={handlePointerUp}
-          style={{ cursor: drawing ? 'crosshair' : 'grab' }}
+          style={{ cursor: drawing ? (drawTool === 'erase' ? 'cell' : 'crosshair') : 'grab' }}
         >
           <Layer>
             <Group
@@ -458,16 +475,19 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
               }}
               onDragEnd={handleMapPanEnd}
             >
-              {mapImage && (
-                <KonvaImage
-                  image={mapImage}
-                  x={0}
-                  y={0}
-                  width={gridW}
-                  height={gridH}
-                  listening={false}
-                />
-              )}
+              <Group listening={false}>
+                {mapImage && (
+                  <KonvaImage
+                    image={mapImage}
+                    x={imageX}
+                    y={imageY}
+                    width={imageW}
+                    height={imageH}
+                    listening={false}
+                  />
+                )}
+              </Group>
+              <Group listening={false}>
               {Array.from({ length: gridCols + 1 }, (_, i) => (
                 <Line
                   key={`v${i}`}
@@ -486,6 +506,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
                   listening={false}
                 />
               ))}
+              </Group>
 
               {map.dmDrawings.map((d) => {
                 if (d.tool === 'freehand') {
@@ -527,11 +548,21 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
                   />
                 );
               })}
-              {draftPoints.length > 0 && (
+              {draftPoints.length > 0 && drawTool === 'freehand' && (
                 <Line
                   points={draftPoints.map((v, i) => (i % 2 === 0 ? v * cell : v * cell))}
                   stroke={drawColor}
-                  strokeWidth={2}
+                  strokeWidth={drawStrokeWidth}
+                  lineCap="round"
+                  lineJoin="round"
+                  listening={false}
+                />
+              )}
+              {draftPoints.length > 0 && drawTool === 'erase' && (
+                <Line
+                  points={draftPoints.map((v, i) => (i % 2 === 0 ? v * cell : v * cell))}
+                  stroke="rgba(255, 120, 120, 0.85)"
+                  strokeWidth={drawStrokeWidth * cell * 1.5}
                   lineCap="round"
                   lineJoin="round"
                   listening={false}
@@ -541,7 +572,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
                 <Rect
                   {...previewShape}
                   stroke={drawColor}
-                  strokeWidth={2}
+                  strokeWidth={drawStrokeWidth}
                   dash={[6, 4]}
                   listening={false}
                 />
@@ -552,7 +583,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
                   y={previewShape.y + previewShape.height / 2}
                   radius={Math.max(previewShape.width, previewShape.height) / 2}
                   stroke={drawColor}
-                  strokeWidth={2}
+                  strokeWidth={drawStrokeWidth}
                   dash={[6, 4]}
                   listening={false}
                 />
