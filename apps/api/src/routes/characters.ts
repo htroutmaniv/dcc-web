@@ -1,10 +1,18 @@
-import { generateCharacterSchema, patchCharacterSchema } from '@dcc-web/shared';
+import {
+  createCharacterSchema,
+  generateCharacterSchema,
+  patchCharacterSchema,
+  replaceCharacterItemsSchema,
+} from '@dcc-web/shared';
 import type { CharacterStats } from '@dcc-web/shared';
 import type { Prisma } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { assertGameMember } from '../lib/game-access.js';
 import { prisma } from '../lib/prisma.js';
-import { generateRandomCharacterData } from '../services/character-generator.js';
+import {
+  createManualCharacterData,
+  generateRandomCharacterData,
+} from '../services/character-generator.js';
 import { applyCharacterStatus } from '../services/character-status.js';
 import { characterMovementRange } from '../services/movement.js';
 
@@ -46,6 +54,83 @@ export async function characterRoutes(app: FastifyInstance) {
     },
   );
 
+  async function persistCharacter(
+    gameId: string,
+    ownerUserId: string,
+    generated: ReturnType<typeof generateRandomCharacterData>,
+    source: 'random' | 'manual',
+  ) {
+    return prisma.character.create({
+      data: {
+        gameId,
+        ownerUserId,
+        name: generated.name,
+        className: generated.className,
+        level: generated.level,
+        alignment: generated.alignment,
+        notes: generated.notes,
+        stats: generated.stats as unknown as Prisma.InputJsonValue,
+        combat: generated.combat as unknown as Prisma.InputJsonValue,
+        source,
+        items: {
+          create: generated.items.map((item, i) => ({
+            category: item.category,
+            name: item.name,
+            quantity: item.quantity,
+            notes: item.notes ?? '',
+            properties: (item.properties ?? {}) as Prisma.InputJsonValue,
+            sortOrder: i,
+          })),
+        },
+      },
+      include: { items: { orderBy: { sortOrder: 'asc' } } },
+    });
+  }
+
+  app.post(
+    '/games/:gameId/characters',
+    { onRequest: [app.authenticate] },
+    async (request) => {
+      const { gameId } = request.params as { gameId: string };
+      const access = await assertGameMember(request.userId!, gameId);
+      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
+
+      const parsed = createCharacterSchema.safeParse(request.body ?? {});
+      if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
+
+      const ownerUserId =
+        access.isDm && parsed.data.ownerUserId
+          ? parsed.data.ownerUserId
+          : request.userId!;
+
+      try {
+        if (parsed.data.mode === 'random') {
+          const generated = generateRandomCharacterData({
+            level: parsed.data.level,
+            className: parsed.data.className,
+            noElves: parsed.data.noElves,
+            noDwarves: parsed.data.noDwarves,
+            noHalflings: parsed.data.noHalflings,
+          });
+          const character = await persistCharacter(gameId, ownerUserId, generated, 'random');
+          return { character };
+        }
+
+        const generated = createManualCharacterData({
+          level: parsed.data.level,
+          className: parsed.data.className,
+          name: parsed.data.name,
+        });
+        const character = await persistCharacter(gameId, ownerUserId, generated, 'manual');
+        return { character };
+      } catch (e) {
+        const message = e instanceof Error ? e.message : 'Character creation failed';
+        throw app.httpErrors.badRequest(message);
+      }
+    },
+  );
+
+  /** @deprecated Prefer POST /games/:gameId/characters with mode "random" */
   app.post(
     '/games/:gameId/characters/generate',
     { onRequest: [app.authenticate] },
@@ -61,33 +146,20 @@ export async function characterRoutes(app: FastifyInstance) {
         access.isDm && parsed.data.ownerUserId
           ? parsed.data.ownerUserId
           : request.userId!;
-      const generated = generateRandomCharacterData(parsed.data.level);
-      const character = await prisma.character.create({
-        data: {
-          gameId,
-          ownerUserId,
-          name: generated.name,
-          className: generated.className,
-          level: generated.level,
-          alignment: generated.alignment,
-          notes: generated.notes,
-          stats: generated.stats as unknown as Prisma.InputJsonValue,
-          combat: generated.combat as unknown as Prisma.InputJsonValue,
-          source: 'random',
-          items: {
-            create: generated.items.map((item, i) => ({
-              category: item.category,
-              name: item.name,
-              quantity: item.quantity,
-              notes: item.notes ?? '',
-              properties: (item.properties ?? {}) as Prisma.InputJsonValue,
-              sortOrder: i,
-            })),
-          },
-        },
-        include: { items: { orderBy: { sortOrder: 'asc' } } },
-      });
-      return { character };
+      try {
+        const generated = generateRandomCharacterData({
+          level: parsed.data.level,
+          className: parsed.data.className,
+          noElves: parsed.data.noElves,
+          noDwarves: parsed.data.noDwarves,
+          noHalflings: parsed.data.noHalflings,
+        });
+        const character = await persistCharacter(gameId, ownerUserId, generated, 'random');
+        return { character };
+      } catch (e) {
+        const message = e instanceof Error ? e.message : 'Character generation failed';
+        throw app.httpErrors.badRequest(message);
+      }
     },
   );
 
@@ -184,6 +256,47 @@ export async function characterRoutes(app: FastifyInstance) {
                 })),
               },
             }),
+            version: { increment: 1 },
+          },
+          include: { items: { orderBy: { sortOrder: 'asc' } } },
+        });
+      });
+      return { character };
+    },
+  );
+
+  app.put(
+    '/characters/:characterId/items',
+    { onRequest: [app.authenticate] },
+    async (request) => {
+      const { characterId } = request.params as { characterId: string };
+      const parsed = replaceCharacterItemsSchema.safeParse(request.body);
+      if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
+
+      const existing = await prisma.character.findUniqueOrThrow({
+        where: { id: characterId },
+      });
+      const access = await assertGameMember(request.userId!, existing.gameId);
+      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
+      if (!access.isDm && existing.ownerUserId !== request.userId!) {
+        throw app.httpErrors.forbidden('Cannot edit another player\'s character');
+      }
+
+      const character = await prisma.$transaction(async (tx) => {
+        await tx.characterItem.deleteMany({ where: { characterId } });
+        return tx.character.update({
+          where: { id: characterId },
+          data: {
+            items: {
+              create: parsed.data.items.map((item, i) => ({
+                category: item.category,
+                name: item.name,
+                quantity: item.quantity ?? 1,
+                notes: item.notes ?? '',
+                properties: (item.properties ?? {}) as Prisma.InputJsonValue,
+                sortOrder: i,
+              })),
+            },
             version: { increment: 1 },
           },
           include: { items: { orderBy: { sortOrder: 'asc' } } },

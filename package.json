@@ -10,7 +10,7 @@
   "scripts": {
     "build": "bun run --filter @dcc-web/shared build && bun run --filter @dcc-web/api build && bun run --filter @dcc-web/web build",
     "build:shared": "bun run --filter @dcc-web/shared build",
-    "setup": "bun scripts/ensure-env.ts && bun install && bun run db:generate && bun run stack && bun run db:migrate",
+    "setup": "bun scripts/ensure-env.ts && bun install && bun run db:generate && bun run stack && bun run db:migrate && bun run db:seed",
     "stack": "docker compose up -d",
     "stack:down": "docker compose down",
     "server": "bun scripts/ensure-env.ts && bun run build:shared && bun run --filter @dcc-web/api server",
@@ -22,6 +22,7 @@
     "db:generate": "bun run --filter @dcc-web/api db:generate",
     "db:migrate": "bun run --filter @dcc-web/api db:migrate",
     "db:migrate:dev": "bun run --filter @dcc-web/api db:migrate:dev",
+    "db:seed": "bun run --filter @dcc-web/api db:seed",
     "docker:logs": "docker compose logs -f",
     "postinstall": "bun run db:generate"
   },

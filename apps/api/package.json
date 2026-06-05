@@ -12,7 +12,8 @@
     "db:migrate": "bun ../../scripts/prisma-env.ts migrate deploy",
     "db:migrate:dev": "bun ../../scripts/prisma-env.ts migrate dev",
     "db:push": "bun ../../scripts/prisma-env.ts db push",
-    "db:studio": "bun ../../scripts/prisma-env.ts studio"
+    "db:studio": "bun ../../scripts/prisma-env.ts studio",
+    "db:seed": "bun ../../scripts/prisma-env.ts db seed"
   },
   "dependencies": {
     "@dcc-web/shared": "*",
@@ -25,6 +26,9 @@
     "fastify": "^5.2.1",
     "socket.io": "^4.8.1",
     "zod": "^3.24.2"
+  },
+  "prisma": {
+    "seed": "bun prisma/seed.ts"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",

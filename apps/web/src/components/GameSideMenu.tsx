@@ -17,6 +17,7 @@ import GroupsIcon from '@mui/icons-material/Groups';
 import MapIcon from '@mui/icons-material/Map';
 import { CharacterListItem } from './CharacterListItem';
 import type { Character, DiceResult, Game, User } from '../types/game';
+import type { ConsumableTrackKind } from '@dcc-web/shared';
 import type { CombatRollKind } from '../utils/combat-rolls';
 
 export type GameMenuTab = 'characters' | 'dice' | 'session';
@@ -30,10 +31,14 @@ interface GameSideMenuProps {
   tab: GameMenuTab;
   onTabChange: (tab: GameMenuTab) => void;
   lastRoll: DiceResult | null;
-  onGenerateCharacter: () => void;
+  onAddCharacter: () => void;
   onRollD20: () => void;
   onSelectCharacter: (character: Character) => void;
   onCombatRoll: (character: Character, kind: CombatRollKind) => void;
+  onAdjustConsumable: (character: Character, kind: ConsumableTrackKind, delta: number) => void;
+  onToggleLightSource: (character: Character, using: boolean) => void;
+  consumableAdjustingId?: string | null;
+  canEditCharacter: (character: Character) => boolean;
   rollingCharacterId?: string | null;
   rollingKind?: CombatRollKind | null;
   combatRollByCharacter?: Record<string, DiceResult>;
@@ -51,10 +56,14 @@ export function GameSideMenu({
   tab,
   onTabChange,
   lastRoll,
-  onGenerateCharacter,
+  onAddCharacter,
   onRollD20,
   onSelectCharacter,
   onCombatRoll,
+  onAdjustConsumable,
+  onToggleLightSource,
+  consumableAdjustingId,
+  canEditCharacter,
   rollingCharacterId,
   rollingKind,
   combatRollByCharacter,
@@ -65,7 +74,7 @@ export function GameSideMenu({
   return (
     <Box
       sx={{
-        width: 320,
+        width: 340,
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
@@ -104,10 +113,10 @@ export function GameSideMenu({
               fullWidth
               variant="outlined"
               startIcon={<PersonAddIcon />}
-              onClick={onGenerateCharacter}
+              onClick={onAddCharacter}
               sx={{ mb: 2 }}
             >
-              Generate character
+              Add character
             </Button>
             {isDm && (
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
@@ -127,6 +136,10 @@ export function GameSideMenu({
                     selected={selectedCharacterId === c.id}
                     onSelect={() => onSelectCharacter(c)}
                     onCombatRoll={(kind) => onCombatRoll(c, kind)}
+                    onAdjustConsumable={(kind, delta) => onAdjustConsumable(c, kind, delta)}
+                    onToggleLightSource={(using) => onToggleLightSource(c, using)}
+                    consumableAdjusting={consumableAdjustingId === c.id}
+                    canEditConsumables={canEditCharacter(c)}
                     rollingKind={
                       rollingCharacterId === c.id ? (rollingKind ?? null) : null
                     }

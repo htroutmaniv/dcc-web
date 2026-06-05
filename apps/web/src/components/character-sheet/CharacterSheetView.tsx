@@ -21,6 +21,19 @@ import {
   type Level0SheetData,
 } from '../../utils/character-sheet';
 import { formatError } from '../../utils/errors';
+import {
+  armorStatsFromItem,
+  combineArmorStats,
+  computeAc,
+  computeEffectiveSpeed,
+  deriveArmorOnSheet,
+  getBaseSpeed,
+  isBodyArmorItem,
+  isShieldItem,
+  NO_EQUIP_ID,
+} from '../../utils/armor';
+import { getActiveWeapon, weaponStatsFromItem } from '../../utils/weapons';
+import { EquipmentManagerDialog } from './EquipmentManagerDialog';
 import { Level0CharacterSheet } from './Level0CharacterSheet';
 
 interface CharacterSheetViewProps {
@@ -50,6 +63,7 @@ export function CharacterSheetView({
     mapCharacterToLevel0Sheet(characterProp),
   );
   const [saving, setSaving] = useState(false);
+  const [equipmentOpen, setEquipmentOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isDead = character.status === 'dead';
 
@@ -108,11 +122,146 @@ export function CharacterSheetView({
     }
   }, [draft, character, onCharacterUpdated]);
 
+  const persistSelectedWeapon = useCallback(
+    async (weaponId: string) => {
+      const active = (character.items ?? []).find(
+        (i) => i.category === 'weapon' && i.id === weaponId,
+      );
+      if (!active) return;
+
+      const prevStats = character.stats ?? {};
+      const prevCustom = (prevStats.custom ?? {}) as Record<string, unknown>;
+      try {
+        const res = await api<{ character: Character } | Character>(
+          `/characters/${character.id}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({
+              stats: {
+                ...prevStats,
+                custom: {
+                  ...prevCustom,
+                  selectedWeaponId: weaponId,
+                  selectedWeaponName: active.name,
+                },
+              },
+            }),
+          },
+        );
+        const updated =
+          res && typeof res === 'object' && 'character' in res
+            ? res.character
+            : (res as Character);
+        if (!updated?.id) return;
+        setCharacter(updated);
+        setDraft(mapCharacterToLevel0Sheet(updated));
+        onCharacterUpdated?.(updated);
+        setError(null);
+      } catch (e) {
+        setError(formatError(e));
+      }
+    },
+    [character, onCharacterUpdated],
+  );
+
+  const persistArmorLoadout = useCallback(
+    async (bodyArmorId: string, shieldId: string) => {
+      const prevStats = character.stats ?? {};
+      const prevCustom = (prevStats.custom ?? {}) as Record<string, unknown>;
+      const prevCombat = character.combat ?? {};
+      const abilities = prevStats.abilities ?? {};
+      const agiMod = abilities.agi?.modifier ?? 0;
+      const baseSpeed = getBaseSpeed(character);
+
+      const items = character.items ?? [];
+      const body =
+        bodyArmorId && bodyArmorId !== NO_EQUIP_ID
+          ? items.find((i) => i.id === bodyArmorId && isBodyArmorItem(i))
+          : undefined;
+      const shield =
+        shieldId && shieldId !== NO_EQUIP_ID
+          ? items.find((i) => i.id === shieldId && isShieldItem(i))
+          : undefined;
+
+      const equipped = combineArmorStats(
+        body ? armorStatsFromItem(body) : null,
+        shield ? armorStatsFromItem(shield) : null,
+      );
+      const ac = computeAc(agiMod, equipped);
+      const speed = computeEffectiveSpeed(baseSpeed, equipped);
+
+      const custom: Record<string, unknown> = {
+        ...prevCustom,
+        baseSpeed,
+        selectedArmorId: bodyArmorId || NO_EQUIP_ID,
+        selectedShieldId: shieldId || NO_EQUIP_ID,
+      };
+      if (body?.name) custom.selectedArmorName = body.name;
+      if (shield?.name) custom.selectedShieldName = shield.name;
+
+      try {
+        const res = await api<{ character: Character } | Character>(
+          `/characters/${character.id}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({
+              stats: { ...prevStats, speed, custom },
+              combat: { ...prevCombat, ac },
+            }),
+          },
+        );
+        const updated =
+          res && typeof res === 'object' && 'character' in res
+            ? res.character
+            : (res as Character);
+        if (!updated?.id) return;
+        setCharacter(updated);
+        setDraft(mapCharacterToLevel0Sheet(updated));
+        onCharacterUpdated?.(updated);
+        setError(null);
+      } catch (e) {
+        setError(formatError(e));
+      }
+    },
+    [character, onCharacterUpdated],
+  );
+
+  const handleEquipmentSaved = (updated: Character) => {
+    setCharacter(updated);
+    setDraft(mapCharacterToLevel0Sheet(updated));
+    onCharacterUpdated?.(updated);
+  };
+
+  const applyArmorSelection = (patch: {
+    selectedArmorId?: string;
+    selectedShieldId?: string;
+  }) => {
+    const next = {
+      ...draft,
+      selectedArmorId: patch.selectedArmorId ?? draft.selectedArmorId ?? NO_EQUIP_ID,
+      selectedShieldId: patch.selectedShieldId ?? draft.selectedShieldId ?? NO_EQUIP_ID,
+    };
+    const derived = deriveArmorOnSheet(next);
+    setDraft({ ...next, ...derived });
+    void persistArmorLoadout(next.selectedArmorId ?? NO_EQUIP_ID, next.selectedShieldId ?? NO_EQUIP_ID);
+  };
+
   const sheet = (
     <Level0CharacterSheet
       data={draft}
       editing={editing}
       onChange={setDraft}
+      onOpenEquipment={() => setEquipmentOpen(true)}
+      onSelectWeapon={(weaponId) => {
+        setDraft((d) => ({ ...d, selectedWeaponId: weaponId }));
+        void persistSelectedWeapon(weaponId);
+      }}
+      onSelectArmor={(armorId) => {
+        applyArmorSelection({ selectedArmorId: armorId || NO_EQUIP_ID });
+      }}
+      onSelectShield={(shieldId) => {
+        applyArmorSelection({ selectedShieldId: shieldId || NO_EQUIP_ID });
+      }}
     />
   );
 
@@ -160,6 +309,21 @@ export function CharacterSheetView({
               HP {character.combat?.hpCurrent ?? '—'}/{character.combat?.hpMax ?? '—'}
               {' · '}
               AC {character.combat?.ac ?? '—'}
+              {(() => {
+                const w = getActiveWeapon(character);
+                if (!w) return null;
+                const { attackBonus, damage } = weaponStatsFromItem(w);
+                const ab =
+                  attackBonus !== 0
+                    ? ` ${attackBonus >= 0 ? '+' : ''}${attackBonus}`
+                    : '';
+                return (
+                  <>
+                    {' · '}
+                    {w.name} ({damage}{ab} atk)
+                  </>
+                );
+              })()}
             </Typography>
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap">
@@ -288,6 +452,14 @@ export function CharacterSheetView({
           </Box>
         )}
       </Box>
+
+      <EquipmentManagerDialog
+        open={equipmentOpen}
+        character={character}
+        canEdit={canEdit}
+        onClose={() => setEquipmentOpen(false)}
+        onSaved={handleEquipmentSaved}
+      />
     </Box>
   );
 }

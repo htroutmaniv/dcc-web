@@ -74,4 +74,5 @@ npm run bundler
 |-------|-----|
 | 502 at :8080 | Both `bun server` and `bun bundler` must be running |
 | API import errors from shared | `bun run build:shared` or `bun run shared` |
+| Equipment autocomplete empty | `bun run db:migrate` then `bun run db:seed` |
 | HMR broken | `VITE_HMR_CLIENT_PORT=8080` in `.env` |

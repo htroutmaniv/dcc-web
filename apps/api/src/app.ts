@@ -11,6 +11,7 @@ import { gameRoutes } from './routes/games.js';
 import { characterRoutes } from './routes/characters.js';
 import { diceRoutes } from './routes/dice.js';
 import { mapRoutes } from './routes/maps.js';
+import { itemRoutes } from './routes/items.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -43,6 +44,7 @@ export async function buildApp() {
   await app.register(characterRoutes);
   await app.register(diceRoutes);
   await app.register(mapRoutes);
+  await app.register(itemRoutes);
 
   return app;
 }

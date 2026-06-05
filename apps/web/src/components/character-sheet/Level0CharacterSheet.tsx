@@ -1,6 +1,15 @@
-import { Box, MenuItem } from '@mui/material';
+import { Box, Button, MenuItem, Select, Stack } from '@mui/material';
+import InventoryIcon from '@mui/icons-material/Inventory';
 import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
+import { computeDccSaves, formatSaveModifier } from '@dcc-web/shared';
+import {
+  armorStatsFromEntry,
+  deriveArmorOnSheet,
+  formatDefenseLines,
+  formatPieceStatLines,
+  NO_EQUIP_ID,
+} from '../../utils/armor';
 import {
   abilityModifier,
   type Level0SheetData,
@@ -12,6 +21,10 @@ interface Level0CharacterSheetProps {
   data: Level0SheetData;
   editing?: boolean;
   onChange?: (data: Level0SheetData) => void;
+  onSelectWeapon?: (weaponId: string) => void;
+  onSelectArmor?: (armorId: string) => void;
+  onSelectShield?: (shieldId: string) => void;
+  onOpenEquipment?: () => void;
 }
 
 function FieldBox({
@@ -66,9 +79,23 @@ function SheetText({
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function SectionLabel({
+  children,
+  sx,
+}: {
+  children: React.ReactNode;
+  sx?: object;
+}) {
   return (
-    <SheetText sx={{ fontWeight: 800, fontSize: '0.95rem', lineHeight: 1.1, display: 'block' }}>
+    <SheetText
+      sx={{
+        fontWeight: 800,
+        fontSize: '0.95rem',
+        lineHeight: 1.1,
+        display: 'block',
+        ...sx,
+      }}
+    >
       {children}
     </SheetText>
   );
@@ -86,9 +113,44 @@ export function Level0CharacterSheet({
   data,
   editing = false,
   onChange,
+  onSelectWeapon,
+  onSelectArmor,
+  onSelectShield,
+  onOpenEquipment,
 }: Level0CharacterSheetProps) {
+  const agiMod = data.abilities.find((a) => a.key === 'agi')?.mod ?? 0;
+  const activeArmor = data.armorEntries.find((a) => a.id === data.selectedArmorId);
+  const activeShield = data.shieldEntries.find((s) => s.id === data.selectedShieldId);
+  const bodyStats = armorStatsFromEntry(activeArmor);
+  const shieldStats = armorStatsFromEntry(activeShield);
+  const defenseLines = formatDefenseLines({
+    agiMod,
+    ac: data.ac,
+    baseSpeed: data.baseSpeed,
+    speed: data.speed,
+    body: bodyStats,
+    shield: shieldStats,
+  });
+  const activeWeapon =
+    data.weaponEntries.find((w) => w.id === data.selectedWeaponId) ??
+    data.weaponEntries[0];
   const weaponSlots = [...data.weapons];
   while (weaponSlots.length < 3) weaponSlots.push('');
+
+  const recalcDerived = (abilities: Level0SheetData['abilities']) => {
+    const mod = (k: string) => abilities.find((a) => a.key === k)?.mod ?? 0;
+    const classForSaves =
+      data.level > 0 ? data.occupation.trim() || 'Warrior' : undefined;
+    const saves = computeDccSaves({
+      level: data.level,
+      className: classForSaves,
+      agilityMod: mod('agi'),
+      staminaMod: mod('sta'),
+      personalityMod: mod('per'),
+    });
+    const armorDerived = deriveArmorOnSheet({ ...data, abilities, saves, init: mod('agi') });
+    return { saves, init: mod('agi'), ...armorDerived };
+  };
 
   const updateAbility = (key: string, score: number) => {
     const abilities = data.abilities.map((ab) =>
@@ -96,7 +158,23 @@ export function Level0CharacterSheet({
         ? { ...ab, score, mod: abilityModifier(score) }
         : ab,
     );
-    onChange?.({ ...data, abilities });
+    const derived = recalcDerived(abilities);
+    onChange?.({ ...data, abilities, ...derived });
+  };
+
+  const selectArmorValue = data.selectedArmorId ?? NO_EQUIP_ID;
+  const selectShieldValue = data.selectedShieldId ?? NO_EQUIP_ID;
+
+  const armorSelectSx = {
+    bgcolor: sheetColors.field,
+    color: sheetColors.ink,
+    fontFamily: sheetFont.label,
+    fontWeight: 700,
+    '& .MuiOutlinedInput-notchedOutline': {
+      borderColor: sheetColors.border,
+      borderWidth: 2,
+    },
+    '& .MuiSelect-icon': { color: sheetColors.ink },
   };
 
   return (
@@ -191,20 +269,9 @@ export function Level0CharacterSheet({
             <Box sx={{ textAlign: 'center', flex: 1 }}>
               <ShieldOutlinedIcon sx={{ fontSize: 48, color: sheetColors.ink }} />
               <SectionLabel>AC</SectionLabel>
-              {editing ? (
-                <SheetField
-                  type="number"
-                  value={data.ac}
-                  onChange={(e) =>
-                    patch(data, onChange, { ac: Number.parseInt(e.target.value, 10) || 0 })
-                  }
-                  sx={{ maxWidth: 72, mx: 'auto' }}
-                />
-              ) : (
-                <SheetText sx={{ fontWeight: 800, fontSize: '1.25rem', display: 'block' }}>
-                  ({data.ac})
-                </SheetText>
-              )}
+              <SheetText sx={{ fontWeight: 800, fontSize: '1.25rem', display: 'block' }}>
+                ({data.ac})
+              </SheetText>
             </Box>
             <Box sx={{ textAlign: 'center', flex: 1 }}>
               <FavoriteBorderIcon sx={{ fontSize: 48, color: sheetColors.ink }} />
@@ -224,6 +291,53 @@ export function Level0CharacterSheet({
                 </SheetText>
               )}
             </Box>
+          </Box>
+
+          <SectionLabel>Saving throws</SectionLabel>
+          <Box sx={{ display: 'flex', gap: 1, mb: 2, mt: 0.5 }}>
+            {(
+              [
+                ['Ref', 'reflex'] as const,
+                ['Fort', 'fortitude'] as const,
+                ['Will', 'will'] as const,
+              ] as const
+            ).map(([short, key]) => (
+              <Box
+                key={key}
+                sx={{
+                  flex: 1,
+                  textAlign: 'center',
+                  border: `2px solid ${sheetColors.border}`,
+                  bgcolor: sheetColors.field,
+                  py: 0.75,
+                  px: 0.5,
+                }}
+              >
+                <SheetText sx={{ fontWeight: 800, fontSize: '0.7rem', display: 'block' }}>
+                  {short}
+                </SheetText>
+                {editing ? (
+                  <SheetField
+                    type="number"
+                    value={data.saves[key]}
+                    onChange={(e) =>
+                      onChange?.({
+                        ...data,
+                        saves: {
+                          ...data.saves,
+                          [key]: Number.parseInt(e.target.value, 10) || 0,
+                        },
+                      })
+                    }
+                    sx={{ maxWidth: 56, mx: 'auto', mt: 0.25 }}
+                  />
+                ) : (
+                  <SheetText sx={{ fontWeight: 800, fontSize: '1.1rem', display: 'block' }}>
+                    {formatSaveModifier(data.saves[key])}
+                  </SheetText>
+                )}
+              </Box>
+            ))}
           </Box>
 
           <Box
@@ -276,56 +390,53 @@ export function Level0CharacterSheet({
         </Box>
 
         <Box>
-          <SectionLabel>Saves</SectionLabel>
-          <FieldBox sx={{ mt: 0.5, mb: 2, flexDirection: 'column', alignItems: 'stretch', gap: 0.75 }}>
-            {(
-              [
-                ['Reflex', 'reflex'] as const,
-                ['Fortitude', 'fortitude'] as const,
-                ['Will', 'will'] as const,
-              ]
-            ).map(([label, key]) => (
-              <Box
-                key={key}
-                sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}
+          <SectionLabel>Weapon</SectionLabel>
+          {!editing && data.weaponEntries.length > 0 && (
+            <Box sx={{ mt: 0.5, mb: 1 }}>
+              <Select
+                size="small"
+                fullWidth
+                value={data.selectedWeaponId ?? data.weaponEntries[0]!.id}
+                onChange={(e) => onSelectWeapon?.(e.target.value)}
+                sx={{
+                  bgcolor: sheetColors.field,
+                  color: sheetColors.ink,
+                  fontFamily: sheetFont.label,
+                  fontWeight: 700,
+                  '& .MuiOutlinedInput-notchedOutline': {
+                    borderColor: sheetColors.border,
+                    borderWidth: 2,
+                  },
+                  '& .MuiSelect-icon': { color: sheetColors.ink },
+                }}
               >
-                <SheetText sx={{ fontWeight: 700 }}>{label}:</SheetText>
-                {editing ? (
-                  <SheetField
-                    type="number"
-                    value={data.saves[key]}
-                    onChange={(e) =>
-                      onChange?.({
-                        ...data,
-                        saves: {
-                          ...data.saves,
-                          [key]: Number.parseInt(e.target.value, 10) || 0,
-                        },
-                      })
-                    }
-                    sx={{ maxWidth: 56 }}
-                  />
-                ) : (
-                  <Box
-                    component="span"
-                    sx={{
-                      border: `2px solid ${sheetColors.border}`,
-                      minWidth: 36,
-                      textAlign: 'center',
-                      fontWeight: 800,
-                      bgcolor: sheetColors.paper,
-                      color: sheetColors.ink,
-                      py: 0.25,
-                    }}
-                  >
-                    {data.saves[key]}
-                  </Box>
-                )}
-              </Box>
-            ))}
-          </FieldBox>
-
-          <SectionLabel>Weapons</SectionLabel>
+                {data.weaponEntries.map((w) => (
+                  <MenuItem key={w.id} value={w.id}>
+                    {w.label}
+                  </MenuItem>
+                ))}
+              </Select>
+              {activeWeapon && (
+                <SheetText
+                  sx={{ mt: 0.75, fontSize: '0.8rem', display: 'block', opacity: 0.9 }}
+                >
+                  To hit: 1d20
+                  {activeWeapon.attackBonus >= 0 ? '+' : ''}
+                  {activeWeapon.attackBonus} · Damage: {activeWeapon.damage}
+                </SheetText>
+              )}
+            </Box>
+          )}
+          {!editing && data.weaponEntries.length === 0 && (
+            <SheetText sx={{ mt: 0.5, mb: 1, fontStyle: 'italic', display: 'block' }}>
+              No weapons
+            </SheetText>
+          )}
+          {editing && (
+            <SheetText sx={{ fontSize: '0.75rem', mb: 0.5, display: 'block', opacity: 0.85 }}>
+              Other weapons (edit lines)
+            </SheetText>
+          )}
           <Box sx={{ mt: 0.5, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
             {weaponSlots.map((w, i) =>
               editing ? (
@@ -340,26 +451,112 @@ export function Level0CharacterSheet({
                   }}
                 />
               ) : (
-                <Box
-                  key={i}
-                  sx={{
-                    border: `2px solid ${sheetColors.border}`,
-                    borderRadius: 1,
-                    minHeight: 32,
-                    px: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    bgcolor: w?.trim() ? sheetColors.weaponFill : sheetColors.field,
-                    color: w?.trim() ? sheetColors.weaponText : sheetColors.fieldText,
-                  }}
-                >
-                  <SheetText sx={{ fontWeight: 700, fontSize: '0.9rem', color: 'inherit' }}>
-                    {w?.trim() || ' '}
-                  </SheetText>
-                </Box>
+                i > 0 && (
+                  <Box
+                    key={i}
+                    sx={{
+                      border: `2px solid ${sheetColors.border}`,
+                      borderRadius: 1,
+                      minHeight: 28,
+                      px: 1,
+                      display: w?.trim() ? 'flex' : 'none',
+                      alignItems: 'center',
+                      bgcolor: sheetColors.field,
+                      color: sheetColors.fieldText,
+                    }}
+                  >
+                    <SheetText sx={{ fontWeight: 600, fontSize: '0.85rem', color: 'inherit' }}>
+                      {w?.trim()}
+                    </SheetText>
+                  </Box>
+                )
               ),
             )}
           </Box>
+
+          <SectionLabel sx={{ mt: 1.5 }}>Armor</SectionLabel>
+          <Box sx={{ mt: 0.5, mb: 1 }}>
+            <Select
+              size="small"
+              fullWidth
+              disabled={editing}
+              displayEmpty
+              value={selectArmorValue}
+              onChange={(e) => onSelectArmor?.(e.target.value)}
+              sx={armorSelectSx}
+            >
+              <MenuItem value={NO_EQUIP_ID}>No armor</MenuItem>
+              {data.armorEntries.map((a) => (
+                <MenuItem key={a.id} value={a.id}>
+                  {a.name}
+                </MenuItem>
+              ))}
+            </Select>
+            {activeArmor && (
+              <Box sx={{ mt: 0.5, pl: 0.5 }}>
+                {formatPieceStatLines(activeArmor).map((line) => (
+                  <SheetText
+                    key={line}
+                    sx={{ fontSize: '0.72rem', display: 'block', opacity: 0.88, lineHeight: 1.35 }}
+                  >
+                    {line}
+                  </SheetText>
+                ))}
+              </Box>
+            )}
+          </Box>
+
+          <SectionLabel>Shield</SectionLabel>
+          <Box sx={{ mt: 0.5, mb: 1 }}>
+            <Select
+              size="small"
+              fullWidth
+              disabled={editing}
+              displayEmpty
+              value={selectShieldValue}
+              onChange={(e) => onSelectShield?.(e.target.value)}
+              sx={armorSelectSx}
+            >
+              <MenuItem value={NO_EQUIP_ID}>No shield</MenuItem>
+              {data.shieldEntries.map((s) => (
+                <MenuItem key={s.id} value={s.id}>
+                  {s.name}
+                </MenuItem>
+              ))}
+            </Select>
+            {activeShield && (
+              <Box sx={{ mt: 0.5, pl: 0.5 }}>
+                {formatPieceStatLines(activeShield).map((line) => (
+                  <SheetText
+                    key={line}
+                    sx={{ fontSize: '0.72rem', display: 'block', opacity: 0.88, lineHeight: 1.35 }}
+                  >
+                    {line}
+                  </SheetText>
+                ))}
+              </Box>
+            )}
+          </Box>
+
+          <SectionLabel sx={{ mt: 0.5 }}>Defense total</SectionLabel>
+          <FieldBox
+            sx={{
+              mt: 0.5,
+              flexDirection: 'column',
+              alignItems: 'flex-start',
+              py: 0.75,
+              gap: 0.25,
+            }}
+          >
+            {defenseLines.map((line) => (
+              <SheetText
+                key={line}
+                sx={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', lineHeight: 1.4 }}
+              >
+                {line}
+              </SheetText>
+            ))}
+          </FieldBox>
         </Box>
 
         <Box>
@@ -370,16 +567,25 @@ export function Level0CharacterSheet({
                 <SheetField
                   type="number"
                   sx={{ mt: 0.5 }}
-                  value={data.speed}
-                  onChange={(e) =>
-                    patch(data, onChange, { speed: Number.parseInt(e.target.value, 10) || 0 })
-                  }
+                  value={data.baseSpeed}
+                  onChange={(e) => {
+                    const baseSpeed = Number.parseInt(e.target.value, 10) || 0;
+                    const { speed } = deriveArmorOnSheet({ ...data, baseSpeed });
+                    patch(data, onChange, { baseSpeed, speed });
+                  }}
                 />
               ) : (
                 <FieldBox sx={{ mt: 0.5, justifyContent: 'center' }}>
                   <SheetText sx={{ fontWeight: 800 }}>{data.speed}</SheetText>
                 </FieldBox>
               )}
+              {activeArmor?.speedPenalty ? (
+                <SheetText sx={{ fontSize: '0.7rem', mt: 0.25, display: 'block', opacity: 0.85 }}>
+                  Base {data.baseSpeed}
+                  {activeArmor.speedPenalty >= 0 ? '+' : ''}
+                  {activeArmor.speedPenalty} armor
+                </SheetText>
+              ) : null}
             </Box>
             <Box sx={{ flex: 1 }}>
               <SectionLabel>Init</SectionLabel>
@@ -400,36 +606,45 @@ export function Level0CharacterSheet({
             </Box>
           </Box>
 
-          <SectionLabel>Equipment</SectionLabel>
-          {editing ? (
-            <SheetField
-              multiline
-              minRows={8}
-              sx={{ mt: 0.5 }}
-              value={data.equipment.join('\n')}
-              onChange={(e) =>
-                patch(data, onChange, {
-                  equipment: e.target.value.split('\n').filter((l) => l.length > 0),
-                })
-              }
-              placeholder="One item per line"
-            />
-          ) : (
-            <FieldBox
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ gap: 1 }}>
+            <SectionLabel>Equipment</SectionLabel>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<InventoryIcon />}
+              onClick={onOpenEquipment}
               sx={{
-                mt: 0.5,
-                minHeight: 180,
-                flexDirection: 'column',
-                alignItems: 'flex-start',
+                color: sheetColors.ink,
+                borderColor: sheetColors.border,
+                fontFamily: sheetFont.label,
+                fontWeight: 700,
               }}
             >
-              {data.equipment.map((line, i) => (
-                <SheetText key={i} sx={{ fontSize: '0.9rem', fontWeight: 600, lineHeight: 1.5 }}>
-                  {line.trim() ? (line.startsWith('•') ? line : `• ${line}`) : '—'}
-                </SheetText>
-              ))}
-            </FieldBox>
-          )}
+              Manage
+            </Button>
+          </Stack>
+          <FieldBox
+            sx={{
+              mt: 0.5,
+              minHeight: 120,
+              flexDirection: 'column',
+              alignItems: 'flex-start',
+            }}
+          >
+            {data.equipment.filter((l) => l.trim()).length === 0 ? (
+              <SheetText sx={{ fontSize: '0.9rem', fontStyle: 'italic' }}>
+                Open Manage to add armor, consumables, and gear.
+              </SheetText>
+            ) : (
+              data.equipment
+                .filter((l) => l.trim())
+                .map((line, i) => (
+                  <SheetText key={i} sx={{ fontSize: '0.9rem', fontWeight: 600, lineHeight: 1.5 }}>
+                    • {line.replace(/^•\s*/, '')}
+                  </SheetText>
+                ))
+            )}
+          </FieldBox>
         </Box>
       </Box>
 

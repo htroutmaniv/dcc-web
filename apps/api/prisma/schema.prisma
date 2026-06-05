@@ -139,6 +139,19 @@ model Character {
   @@map("characters")
 }
 
+model ItemCatalog {
+  id          String       @id @default(uuid()) @db.Uuid
+  category    ItemCategory
+  name        String
+  description String       @default("")
+  properties  Json         @default("{}")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  @@unique([category, name])
+  @@index([category])
+  @@map("item_catalog")
+}
+
 model CharacterItem {
   id          String       @id @default(uuid()) @db.Uuid
   characterId String       @map("character_id") @db.Uuid

@@ -4,16 +4,29 @@ import { Alert, Box, Button, Chip, CircularProgress, Link } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { api, ApiError } from '../api/client';
 import { AppShell } from '../components/AppShell';
+import {
+  CreateCharacterDialog,
+  type CreateCharacterPayload,
+} from '../components/CreateCharacterDialog';
 import { GameSideMenu, type GameMenuTab } from '../components/GameSideMenu';
 import { CharacterSheetView } from '../components/character-sheet/CharacterSheetView';
 import { TacticalMap } from '../components/TacticalMap';
+import { useAuth } from '../context/AuthContext';
+import {
+  countConsumables,
+  isUsingLightSource,
+  USING_LIGHT_SOURCE_KEY,
+  type ConsumableTrackKind,
+} from '@dcc-web/shared';
 import type { Character, DiceResult, GameDetail } from '../types/game';
+import { buildItemsAfterConsumableDelta } from '../utils/consumables';
 import { getCombatRollSpec, type CombatRollKind } from '../utils/combat-rolls';
 import { formatError } from '../utils/errors';
 
 export default function GamePage() {
   const { gameId } = useParams<{ gameId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<GameDetail | null>(null);
@@ -27,6 +40,9 @@ export default function GamePage() {
   const [combatRollByCharacter, setCombatRollByCharacter] = useState<
     Record<string, DiceResult>
   >({});
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [creatingCharacter, setCreatingCharacter] = useState(false);
+  const [consumableAdjustingId, setConsumableAdjustingId] = useState<string | null>(null);
 
   const isDm = detail?.isDm ?? false;
 
@@ -67,18 +83,26 @@ export default function GamePage() {
     void loadCharacters().catch((e) => setError(formatError(e)));
   }, [detail, loadCharacters]);
 
-  const generateCharacter = async () => {
+  const createCharacter = async (payload: CreateCharacterPayload) => {
     if (!gameId) return;
+    setCreatingCharacter(true);
     try {
-      await api(`/games/${gameId}/characters/generate`, {
-        method: 'POST',
-        body: JSON.stringify({ level: 0 }),
-      });
+      const { character } = await api<{ character: Character }>(
+        `/games/${gameId}/characters`,
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        },
+      );
       await loadCharacters();
+      setSelectedCharacter(character);
       setMenuTab('characters');
+      setCreateDialogOpen(false);
       setError(null);
     } catch (e) {
       setError(formatError(e));
+    } finally {
+      setCreatingCharacter(false);
     }
   };
 
@@ -128,11 +152,88 @@ export default function GamePage() {
   };
 
   const handleCharacterUpdated = useCallback((updated: Character) => {
-    setSelectedCharacter(updated);
+    setSelectedCharacter((prev) => (prev?.id === updated.id ? updated : prev));
     setCharacters((prev) =>
       prev.map((c) => (c.id === updated.id ? updated : c)),
     );
   }, []);
+
+  const canEditCharacter = useCallback(
+    (c: Character) => isDm || (user != null && c.ownerUserId === user.id),
+    [isDm, user],
+  );
+
+  const adjustConsumable = async (
+    character: Character,
+    kind: ConsumableTrackKind,
+    delta: number,
+  ) => {
+    if (!canEditCharacter(character)) return;
+    setConsumableAdjustingId(character.id);
+    try {
+      const items = buildItemsAfterConsumableDelta(character, kind, delta);
+      const { character: updated } = await api<{ character: Character }>(
+        `/characters/${character.id}/items`,
+        { method: 'PUT', body: JSON.stringify({ items }) },
+      );
+      let next = updated;
+      if (
+        kind === 'light' &&
+        countConsumables(updated.items ?? [], 'light') === 0 &&
+        isUsingLightSource(updated)
+      ) {
+        const prevStats = updated.stats ?? {};
+        const prevCustom = (prevStats.custom ?? {}) as Record<string, unknown>;
+        const res = await api<{ character: Character }>(
+          `/characters/${updated.id}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({
+              stats: {
+                ...prevStats,
+                custom: { ...prevCustom, [USING_LIGHT_SOURCE_KEY]: false },
+              },
+            }),
+          },
+        );
+        next = res.character;
+      }
+      handleCharacterUpdated(next);
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setConsumableAdjustingId(null);
+    }
+  };
+
+  const toggleLightSource = async (character: Character, using: boolean) => {
+    if (!canEditCharacter(character)) return;
+    if (using && countConsumables(character.items ?? [], 'light') <= 0) return;
+    setConsumableAdjustingId(character.id);
+    try {
+      const prevStats = character.stats ?? {};
+      const prevCustom = (prevStats.custom ?? {}) as Record<string, unknown>;
+      const { character: updated } = await api<{ character: Character }>(
+        `/characters/${character.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            stats: {
+              ...prevStats,
+              custom: { ...prevCustom, [USING_LIGHT_SOURCE_KEY]: using },
+            },
+          }),
+        },
+      );
+      handleCharacterUpdated(updated);
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setConsumableAdjustingId(null);
+    }
+  };
 
   const patchCharacterStatus = async (
     characterId: string,
@@ -259,13 +360,17 @@ export default function GamePage() {
           tab={menuTab}
           onTabChange={setMenuTab}
           lastRoll={lastRoll}
-          onGenerateCharacter={generateCharacter}
+          onAddCharacter={() => setCreateDialogOpen(true)}
           onRollD20={rollDice}
           onSelectCharacter={(c) => {
             setSelectedCharacter(c);
             setMenuTab('characters');
           }}
           onCombatRoll={rollCharacterCombat}
+          onAdjustConsumable={adjustConsumable}
+          onToggleLightSource={toggleLightSource}
+          consumableAdjustingId={consumableAdjustingId}
+          canEditCharacter={canEditCharacter}
           rollingCharacterId={rollingCharacterId}
           rollingKind={rollingKind}
           combatRollByCharacter={combatRollByCharacter}
@@ -274,6 +379,12 @@ export default function GamePage() {
           onDiceNotationChange={setDiceNotation}
         />
       </Box>
+      <CreateCharacterDialog
+        open={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+        onSubmit={createCharacter}
+        submitting={creatingCharacter}
+      />
     </AppShell>
   );
 }

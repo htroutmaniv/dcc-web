@@ -1,4 +1,5 @@
-import type { Character, CharacterItem } from '../types/game';
+import type { Character } from '../types/game';
+import { getActiveWeapon, weaponStatsFromItem } from './weapons';
 
 export type CombatRollKind = 'initiative' | 'toHit' | 'damage';
 
@@ -10,10 +11,6 @@ export interface CombatRollSpec {
 function formatModifier(mod: number): string {
   if (mod === 0) return '';
   return mod > 0 ? `+${mod}` : `${mod}`;
-}
-
-function primaryWeapon(character: Character): CharacterItem | undefined {
-  return (character.items ?? []).find((i) => i.category === 'weapon');
 }
 
 export function getCombatRollSpec(
@@ -30,9 +27,10 @@ export function getCombatRollSpec(
     };
   }
 
-  const weapon = primaryWeapon(character);
-  const attackBonus = Number(weapon?.properties?.attackBonus ?? 0);
-  const damageNotation = String(weapon?.properties?.damage ?? '1d4').replace(/\s/g, '');
+  const weapon = getActiveWeapon(character);
+  const { attackBonus, damage } = weapon
+    ? weaponStatsFromItem(weapon)
+    : { attackBonus: 0, damage: '1d4' };
 
   if (kind === 'toHit') {
     return {
@@ -42,7 +40,7 @@ export function getCombatRollSpec(
   }
 
   return {
-    notation: damageNotation,
+    notation: damage,
     reason: `${name} — damage${weapon ? ` (${weapon.name})` : ''}`,
   };
 }
