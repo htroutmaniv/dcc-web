@@ -1,8 +1,8 @@
-# Reverse proxy only — API and Vite run on the host (same in dev and prod).
-# Upstreams: host.docker.internal → your machine (Docker Desktop / Linux host-gateway).
+# Production — TLS on 443, HTTP redirects to HTTPS.
+# Mount Let's Encrypt certs at /etc/letsencrypt (see LETSENCRYPT_DIR in docker-compose).
 
 upstream dcc_api {
-    server host.docker.internal:3001;
+    server host.docker.internal:${DCC_API_PORT};
     keepalive 16;
 }
 
@@ -13,11 +13,19 @@ upstream dcc_web {
 
 server {
     listen 80;
-    server_name localhost;
+    server_name ${NGINX_SERVER_NAME};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${NGINX_SERVER_NAME};
+
+    ssl_certificate     ${NGINX_SSL_CERT};
+    ssl_certificate_key ${NGINX_SSL_KEY};
 
     client_max_body_size 20M;
 
-    # API + WebSockets
     location /api/ {
         proxy_pass http://dcc_api/;
         proxy_http_version 1.1;
@@ -28,15 +36,21 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    location /socket.io/ {
+    location /socket.io {
         proxy_pass http://dcc_api;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
     }
 
-    # Vite dev server or `vite preview` (HMR / @vite WebSocket)
     location / {
         proxy_pass http://dcc_web;
         proxy_http_version 1.1;

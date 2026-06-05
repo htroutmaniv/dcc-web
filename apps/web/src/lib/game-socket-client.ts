@@ -1,29 +1,77 @@
-import type { Socket } from 'socket.io-client';
+import { io, type Socket } from 'socket.io-client';
 
-let activeSocket: Socket | null = null;
+let socket: Socket | null = null;
 let activeGameId: string | null = null;
 
-export function registerGameSocket(socket: Socket, gameId: string): void {
-  activeSocket = socket;
-  activeGameId = gameId;
+function createSocket(): Socket {
+  const s = io(window.location.origin, {
+    path: '/socket.io',
+    withCredentials: true,
+    // Polling first — more reliable through reverse proxies; upgrades to WebSocket.
+    transports: ['polling', 'websocket'],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 10000,
+  });
+
+  s.on('connect', () => {
+    if (activeGameId) {
+      s.emit('game:join', { gameId: activeGameId });
+    }
+  });
+
+  s.io.on('reconnect', () => {
+    if (activeGameId) {
+      s.emit('game:join', { gameId: activeGameId });
+    }
+  });
+
+  return s;
 }
 
-export function unregisterGameSocket(socket: Socket): void {
-  if (activeSocket === socket) {
-    activeSocket = null;
+/** Shared Socket.IO connection — one per browser tab, reused across game pages. */
+export function getGameSocket(): Socket {
+  if (!socket) {
+    socket = createSocket();
+  }
+  if (!socket.connected) {
+    socket.connect();
+  }
+  return socket;
+}
+
+/** Track active game and return the shared socket (does not emit join — call joinGameRoom after handlers are attached). */
+export function registerGameSocket(gameId: string): Socket {
+  activeGameId = gameId;
+  return getGameSocket();
+}
+
+export function joinGameRoom(gameId: string): void {
+  activeGameId = gameId;
+  getGameSocket().emit('game:join', { gameId });
+}
+
+export function unregisterGameSocket(gameId: string): void {
+  if (activeGameId === gameId) {
     activeGameId = null;
+  }
+  const s = socket;
+  if (s?.connected) {
+    s.emit('game:leave', { gameId });
   }
 }
 
 /** Leave the active game room and disconnect (navigation, logout, etc.). */
 export function leaveActiveGameSocket(): void {
-  const socket = activeSocket;
+  const s = socket;
   const gameId = activeGameId;
-  activeSocket = null;
   activeGameId = null;
-  if (!socket) return;
-  if (socket.connected && gameId) {
-    socket.emit('game:leave', { gameId });
+  socket = null;
+  if (!s) return;
+  if (s.connected && gameId) {
+    s.emit('game:leave', { gameId });
   }
-  socket.disconnect();
+  s.removeAllListeners();
+  s.disconnect();
 }

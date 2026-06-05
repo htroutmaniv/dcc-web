@@ -1,9 +1,11 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { randomBytes } from 'node:crypto';
+import { loginSchema, registerSchema, resendVerificationSchema } from '@dcc-web/shared';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { config } from '../lib/config.js';
+import { consumeAuthToken, issueAuthToken } from '../lib/auth-tokens.js';
+import { sendMail, verificationEmailHtml } from '../lib/mail.js';
+import { hashPassword, verifyPassword } from '../lib/password.js';
 import { prisma } from '../lib/prisma.js';
-
-const DISCORD_API = 'https://discord.com/api/v10';
+import { clearSessionCookie, setSessionCookie } from '../lib/session-cookie.js';
 
 export const DEV_AUTH_ACCOUNTS = {
   dm: { email: 'dev-dm@localhost', displayName: 'Dev DM' },
@@ -12,23 +14,178 @@ export const DEV_AUTH_ACCOUNTS = {
 
 export type DevAuthAccount = keyof typeof DEV_AUTH_ACCOUNTS;
 
-/** Origin for redirects (preserves port, e.g. localhost:8080). */
-function requestOrigin(request: FastifyRequest): string {
-  const proto =
-    (request.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0] ??
-    'http';
-  const host =
-    (request.headers['x-forwarded-host'] as string | undefined) ??
-    request.headers.host ??
-    'localhost';
-  return `${proto}://${host}`;
+function emailAuthEnabled(): boolean {
+  return Boolean(config.resend.apiKey && config.resend.from);
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function defaultDisplayName(email: string, displayName?: string): string {
+  const trimmed = displayName?.trim();
+  if (trimmed) return trimmed;
+  return email.split('@')[0] ?? 'Player';
+}
+
+function appOrigin(): string {
+  return config.publicUrl.replace(/\/$/, '');
+}
+
+function authRedirect(reply: FastifyReply, path: string): FastifyReply {
+  return reply.redirect(`${appOrigin()}${path}`);
+}
+
+function sessionForUser(app: FastifyInstance, reply: FastifyReply, userId: string): void {
+  const token = app.jwt.sign({ sub: userId }, { expiresIn: '7d' });
+  setSessionCookie(reply, token);
+}
+
+async function sendVerificationEmail(userId: string, email: string): Promise<void> {
+  const token = await issueAuthToken(userId, 'verify_email');
+  const verifyUrl = `${appOrigin()}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
+  await sendMail({
+    to: email,
+    subject: 'Verify your DCC Web account',
+    html: verificationEmailHtml(verifyUrl),
+  });
 }
 
 export async function authRoutes(app: FastifyInstance) {
-  /**
-   * Dev login — two fixed accounts (DM vs player) for local testing.
-   * Body: { account: "dm" | "player", displayName?: string }
-   */
+  app.get('/auth/config', async () => ({
+    devLogin: config.enableDevLogin,
+    emailAuth: emailAuthEnabled(),
+    publicUrl: config.publicUrl,
+  }));
+
+  app.post('/auth/register', async (request, reply) => {
+    if (!emailAuthEnabled()) {
+      return reply.status(503).send({ error: 'Email sign-up is not configured' });
+    }
+
+    const parsed = registerSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.flatten().fieldErrors });
+    }
+
+    const email = normalizeEmail(parsed.data.email);
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing?.emailVerifiedAt) {
+      return reply.status(409).send({ error: 'An account with this email already exists' });
+    }
+
+    const passwordHash = await hashPassword(parsed.data.password);
+    const displayName = defaultDisplayName(email, parsed.data.displayName);
+
+    const user = existing
+      ? await prisma.user.update({
+          where: { id: existing.id },
+          data: { passwordHash, displayName },
+        })
+      : await prisma.user.create({
+          data: { email, passwordHash, displayName },
+        });
+
+    try {
+      await sendVerificationEmail(user.id, email);
+    } catch (err) {
+      request.log.error({ err }, 'Failed to send verification email');
+      return reply.status(502).send({ error: 'Could not send verification email. Try again later.' });
+    }
+
+    return {
+      ok: true,
+      message: 'Check your email for a verification link.',
+    };
+  });
+
+  app.post('/auth/login', async (request, reply) => {
+    if (!emailAuthEnabled()) {
+      return reply.status(503).send({ error: 'Email sign-in is not configured' });
+    }
+
+    const parsed = loginSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.flatten().fieldErrors });
+    }
+
+    const email = normalizeEmail(parsed.data.email);
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user?.passwordHash) {
+      return reply.status(401).send({ error: 'Invalid email or password' });
+    }
+
+    const valid = await verifyPassword(parsed.data.password, user.passwordHash);
+    if (!valid) {
+      return reply.status(401).send({ error: 'Invalid email or password' });
+    }
+
+    if (!user.emailVerifiedAt) {
+      return reply.status(403).send({
+        error: 'Email not verified',
+        code: 'email_not_verified',
+      });
+    }
+
+    sessionForUser(app, reply, user.id);
+    return {
+      user: {
+        id: user.id,
+        displayName: user.displayName,
+        email: user.email,
+        emailVerified: true,
+      },
+    };
+  });
+
+  app.post('/auth/resend-verification', async (request, reply) => {
+    if (!emailAuthEnabled()) {
+      return reply.status(503).send({ error: 'Email sign-up is not configured' });
+    }
+
+    const parsed = resendVerificationSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.flatten().fieldErrors });
+    }
+
+    const email = normalizeEmail(parsed.data.email);
+    const user = await prisma.user.findUnique({ where: { email } });
+
+    // Avoid leaking whether an account exists
+    if (!user || user.emailVerifiedAt || !user.passwordHash) {
+      return { ok: true, message: 'If that account is pending verification, we sent a new link.' };
+    }
+
+    try {
+      await sendVerificationEmail(user.id, email);
+    } catch (err) {
+      request.log.error({ err }, 'Failed to resend verification email');
+      return reply.status(502).send({ error: 'Could not send verification email. Try again later.' });
+    }
+
+    return { ok: true, message: 'If that account is pending verification, we sent a new link.' };
+  });
+
+  app.get('/auth/verify-email', async (request, reply) => {
+    const token = (request.query as { token?: string }).token;
+    if (!token) {
+      return authRedirect(reply, '/?auth_error=invalid_token');
+    }
+
+    const result = await consumeAuthToken(token, 'verify_email');
+    if (!result) {
+      return authRedirect(reply, '/?auth_error=invalid_token');
+    }
+
+    await prisma.user.update({
+      where: { id: result.userId },
+      data: { emailVerifiedAt: new Date() },
+    });
+
+    sessionForUser(app, reply, result.userId);
+    return authRedirect(reply, '/?auth_success=1');
+  });
+
   app.post('/auth/dev-login', async (request, reply) => {
     if (!config.enableDevLogin) {
       return reply.status(403).send({ error: 'Dev login is disabled' });
@@ -39,16 +196,14 @@ export async function authRoutes(app: FastifyInstance) {
     const displayName = body?.displayName?.trim() || preset.displayName;
     const user = await prisma.user.upsert({
       where: { email: preset.email },
-      create: { email: preset.email, displayName },
+      create: {
+        email: preset.email,
+        displayName,
+        emailVerifiedAt: new Date(),
+      },
       update: { displayName },
     });
-    const token = app.jwt.sign({ sub: user.id }, { expiresIn: '7d' });
-    reply.setCookie(config.sessionCookieName, token, {
-      path: '/',
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60,
-    });
+    sessionForUser(app, reply, user.id);
     return {
       user: { id: user.id, displayName: user.displayName, email: preset.email },
       account,
@@ -58,100 +213,27 @@ export async function authRoutes(app: FastifyInstance) {
   app.get('/auth/me', { onRequest: [app.authenticate] }, async (request) => {
     const user = await prisma.user.findUniqueOrThrow({
       where: { id: request.userId! },
-      select: { id: true, displayName: true, avatarUrl: true, discordId: true },
+      select: {
+        id: true,
+        displayName: true,
+        avatarUrl: true,
+        email: true,
+        emailVerifiedAt: true,
+      },
     });
-    return { user };
+    return {
+      user: {
+        id: user.id,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+        email: user.email,
+        emailVerified: Boolean(user.emailVerifiedAt),
+      },
+    };
   });
 
   app.post('/auth/logout', async (_request, reply) => {
-    reply.clearCookie(config.sessionCookieName, { path: '/' });
+    clearSessionCookie(reply);
     return { ok: true };
-  });
-
-  app.get('/auth/discord', async (_request, reply) => {
-    if (!config.discord.clientId) {
-      return reply.status(503).send({
-        error: 'Discord OAuth not configured',
-        hint: 'Set DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET',
-      });
-    }
-    const state = randomBytes(16).toString('hex');
-    reply.setCookie('oauth_state', state, {
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: 600,
-      path: '/',
-    });
-    const params = new URLSearchParams({
-      client_id: config.discord.clientId,
-      redirect_uri: config.discord.redirectUri,
-      response_type: 'code',
-      scope: 'identify',
-      state,
-    });
-    return reply.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
-  });
-
-  app.get('/auth/discord/callback', async (request, reply) => {
-    const query = request.query as { code?: string; state?: string };
-    const cookieState = request.cookies.oauth_state;
-    if (!query.code || !query.state || query.state !== cookieState) {
-      return reply.status(400).send({ error: 'Invalid OAuth state' });
-    }
-    if (!config.discord.clientSecret) {
-      return reply.status(503).send({ error: 'Discord OAuth not configured' });
-    }
-
-    const tokenRes = await fetch(`${DISCORD_API}/oauth2/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: config.discord.clientId,
-        client_secret: config.discord.clientSecret,
-        grant_type: 'authorization_code',
-        code: query.code,
-        redirect_uri: config.discord.redirectUri,
-      }),
-    });
-    if (!tokenRes.ok) {
-      return reply.status(502).send({ error: 'Discord token exchange failed' });
-    }
-    const tokens = (await tokenRes.json()) as { access_token: string };
-    const userRes = await fetch(`${DISCORD_API}/users/@me`, {
-      headers: { Authorization: `Bearer ${tokens.access_token}` },
-    });
-    if (!userRes.ok) {
-      return reply.status(502).send({ error: 'Discord user fetch failed' });
-    }
-    const discordUser = (await userRes.json()) as {
-      id: string;
-      username: string;
-      global_name?: string | null;
-      avatar?: string | null;
-    };
-    const displayName = discordUser.global_name ?? discordUser.username;
-    const avatarUrl = discordUser.avatar
-      ? `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`
-      : null;
-
-    const user = await prisma.user.upsert({
-      where: { discordId: discordUser.id },
-      create: {
-        discordId: discordUser.id,
-        displayName,
-        avatarUrl,
-      },
-      update: { displayName, avatarUrl },
-    });
-
-    const jwt = app.jwt.sign({ sub: user.id }, { expiresIn: '7d' });
-    reply.clearCookie('oauth_state', { path: '/' });
-    reply.setCookie(config.sessionCookieName, jwt, {
-      path: '/',
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60,
-    });
-    return reply.redirect(`${requestOrigin(request)}/`);
   });
 }

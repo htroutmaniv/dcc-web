@@ -19,5 +19,5 @@ COPY --from=build /app/packages/shared ./packages/shared
 COPY --from=build /app/apps/api ./apps/api
 COPY package.json ./
 WORKDIR /app/apps/api
-EXPOSE 3001
+EXPOSE 3003
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]

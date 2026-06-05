@@ -1,30 +1,41 @@
-# Infrastructure only: Postgres + nginx reverse proxy to host Node/Vite.
-# Run the app with: bun run dev  (or bun run start after build)
-services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: dcc
-      POSTGRES_PASSWORD: dcc
-      POSTGRES_DB: dcc
-    ports:
-      - '5432:5432'
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U dcc']
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  nginx:
-    build:
-      context: .
-      dockerfile: nginx/Dockerfile
-    ports:
-      - '${HTTP_PORT:-8080}:80'
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
-
-volumes:
-  pgdata:
+# Infrastructure only: Postgres + nginx reverse proxy to host Node/Vite.
+# Run the app with: bun run dev  (or bun run start after build)
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dcc
+      # Required in root .env — compose fails if missing (no default password)
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: dcc
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U dcc']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    environment:
+      DCC_API_PORT: ${PORT:-3003}
+      NGINX_TLS: ${NGINX_TLS:-false}
+      NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-hat3d.com}
+      NGINX_SSL_CERT: ${NGINX_SSL_CERT:-/etc/letsencrypt/live/hat3d.com/fullchain.pem}
+      NGINX_SSL_KEY: ${NGINX_SSL_KEY:-/etc/letsencrypt/live/hat3d.com/privkey.pem}
+    ports:
+      - '${NGINX_HTTP_PORT:-8080}:80'
+      - '${NGINX_HTTPS_PORT:-443}:443'
+    volumes:
+      # Production: set LETSENCRYPT_DIR to your host cert folder (e.g. D:/Work/docker/letsencrypt)
+      - '${LETSENCRYPT_DIR:-./nginx/certs-empty}:/etc/letsencrypt:ro'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+
+volumes:
+  pgdata:

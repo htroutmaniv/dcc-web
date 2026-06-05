@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -17,23 +17,28 @@ import {
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
-import MenuBookIcon from '@mui/icons-material/MenuBook';
 import LoginIcon from '@mui/icons-material/Login';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import { api } from '../api/client';
 import { AppShell } from '../components/AppShell';
+import { AuthForm } from '../components/AuthForm';
 import { useAuth } from '../context/AuthContext';
 import type { GameListEntry } from '../types/game';
+import { authErrorMessage } from '../utils/auth-errors';
 import { formatError } from '../utils/errors';
 
 export default function HomePage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, authConfig, refresh } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [gameEntries, setGameEntries] = useState<GameListEntry[]>([]);
   const [newGameTitle, setNewGameTitle] = useState('Thursday DCC');
   const [inviteCode, setInviteCode] = useState('');
   const [loadingGames, setLoadingGames] = useState(false);
+  const [authBanner, setAuthBanner] = useState<string | null>(null);
+  const [infoBanner, setInfoBanner] = useState<string | null>(null);
 
   const loadGames = useCallback(async () => {
     if (!user) {
@@ -57,6 +62,34 @@ export default function HomePage() {
     if (user) void loadGames();
     else setGameEntries([]);
   }, [user, loadGames]);
+
+  useEffect(() => {
+    const errorCode = searchParams.get('auth_error');
+    if (errorCode) {
+      setAuthBanner(authErrorMessage(errorCode));
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('auth_error');
+          return next;
+        },
+        { replace: true },
+      );
+    }
+    if (searchParams.get('auth_success') === '1') {
+      setAuthBanner(null);
+      setInfoBanner('Email verified — you are signed in.');
+      void refresh();
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('auth_success');
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  }, [searchParams, refresh, setSearchParams]);
 
   const createGame = async () => {
     try {
@@ -95,6 +128,18 @@ export default function HomePage() {
           Sign in to see sessions you run or have joined. Only the game creator has DM tools.
         </Typography>
 
+        {infoBanner && (
+          <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfoBanner(null)}>
+            {infoBanner}
+          </Alert>
+        )}
+
+        {authBanner && (
+          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setAuthBanner(null)}>
+            {authBanner}
+          </Alert>
+        )}
+
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
             {error}
@@ -110,10 +155,21 @@ export default function HomePage() {
             <Typography variant="h6" gutterBottom>
               Sign in to continue
             </Typography>
-            <Typography color="text.secondary">
-              Use <strong>Dev DM</strong> or <strong>Dev Player</strong> in the header (separate
-              test accounts), or Discord. You will only see games you created or joined.
+            <Typography color="text.secondary" paragraph>
+              Sign in to create or join games. You will only see sessions you run or have joined.
             </Typography>
+            {authConfig.emailAuth ? (
+              <AuthForm />
+            ) : authConfig.devLogin ? (
+              <Typography variant="body2" color="text.secondary">
+                Use <strong>Dev DM</strong> or <strong>Dev Player</strong> in the header for local
+                testing.
+              </Typography>
+            ) : (
+              <Typography variant="body2" color="warning.main">
+                Sign-in is not configured on this server.
+              </Typography>
+            )}
           </Paper>
         )}
 

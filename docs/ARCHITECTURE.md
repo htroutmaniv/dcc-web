@@ -39,7 +39,7 @@ flowchart TB
   NGX -->|/api| API
   NGX -->|/socket.io| WS
   WEB -.->|dev/preview :5173| NGX
-  API -.->|:3001| NGX
+  API -.->|:3003| NGX
   DM --> WS
   PL --> WS
   API --> PG
@@ -143,7 +143,7 @@ Conflict policy: **last-write-wins per field** with `updatedAt` + `version` for 
 ## nginx configuration (production)
 
 ```nginx
-upstream api_upstream { server api:3001; }
+upstream api_upstream { server api:3003; }
 
 server {
   listen 80;
@@ -197,7 +197,7 @@ Environment variables:
 
 Record choices in ADRs as you implement:
 
-1. **Auth provider** — Email/password first vs OAuth (Discord/Google for gaming groups).
+1. **Auth provider** — Email/password with Resend for verification and password reset.
 2. **Movement rules** — DCC exact table vs simple “speed in ft” circle.
 3. **Fog of war** — Per-player socket events vs shared state with clip regions.
 4. **Offline / PWA** — Nice-to-have for players at table with flaky Wi‑Fi.

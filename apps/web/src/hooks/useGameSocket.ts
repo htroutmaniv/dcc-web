@@ -1,6 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { io, type Socket } from 'socket.io-client';
-import { registerGameSocket, unregisterGameSocket } from '../lib/game-socket-client';
+import type { Socket } from 'socket.io-client';
+import {
+  joinGameRoom,
+  registerGameSocket,
+  unregisterGameSocket,
+} from '../lib/game-socket-client';
 import type { GameInitiativeState } from '@dcc-web/shared';
 import type { Character, DiceResult, GamePresenceUser } from '../types/game';
 import type { DiceRollLogEntry } from '../types/dice-roll-log';
@@ -45,23 +49,14 @@ export function useGameSocket(
   useEffect(() => {
     if (!gameId || !enabled) return;
 
-    const socket: Socket = io(window.location.origin, {
-      path: '/socket.io',
-      withCredentials: true,
-      transports: ['websocket', 'polling'],
-      autoConnect: true,
-    });
+    const socket: Socket = registerGameSocket(gameId);
 
-    const onConnect = () => {
-      socket.emit('game:join', { gameId });
+    const onGameJoined = (payload: { gameId?: string }) => {
+      if (payload?.gameId !== gameId) return;
+      handlersRef.current.onConnected?.();
     };
 
-    socket.on('connect', onConnect);
-
-    socket.on('game:joined', () => {
-      registerGameSocket(socket, gameId);
-      handlersRef.current.onConnected?.();
-    });
+    socket.on('game:joined', onGameJoined);
 
     socket.on(
       'character:upsert',
@@ -128,13 +123,33 @@ export function useGameSocket(
       console.warn('[game socket]', payload?.message ?? 'error');
     });
 
-    return () => {
-      socket.off('connect', onConnect);
-      unregisterGameSocket(socket);
-      if (socket.connected) {
-        socket.emit('game:leave', { gameId });
+    socket.on('connect_error', (err: Error) => {
+      console.warn('[game socket] connect_error', err.message);
+    });
+
+    socket.on('disconnect', (reason: string) => {
+      if (reason !== 'io client disconnect') {
+        console.warn('[game socket] disconnected:', reason);
       }
-      socket.disconnect();
+    });
+
+    joinGameRoom(gameId);
+
+    return () => {
+      socket.off('game:joined', onGameJoined);
+      socket.off('character:upsert');
+      socket.off('initiative:updated');
+      socket.off('monsters:changed');
+      socket.off('damage:applied');
+      socket.off('token:updated');
+      socket.off('map:updated');
+      socket.off('map:token_moved');
+      socket.off('dice:rolled');
+      socket.off('game:presence');
+      socket.off('game:error');
+      socket.off('connect_error');
+      socket.off('disconnect');
+      unregisterGameSocket(gameId);
     };
   }, [gameId, enabled]);
 }

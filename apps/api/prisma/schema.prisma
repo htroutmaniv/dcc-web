@@ -67,22 +67,42 @@ enum CharacterNameKind {
   last
 }
 
+enum AuthTokenType {
+  verify_email
+  password_reset
+}
+
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  email        String?  @unique
-  discordId    String?  @unique @map("discord_id")
-  displayName  String   @map("display_name")
-  avatarUrl    String?  @map("avatar_url")
-  passwordHash String?  @map("password_hash")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String?   @unique
+  displayName     String    @map("display_name")
+  avatarUrl       String?   @map("avatar_url")
+  passwordHash    String?   @map("password_hash")
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
 
   dmGames       Game[]         @relation("DmGames")
   gamePlayers   GamePlayer[]
   characters    Character[]
   diceRolls     DiceRoll[]
   movementReqs  MovementRequest[] @relation("MovementRequester")
+  authTokens    AuthToken[]
 
   @@map("users")
+}
+
+model AuthToken {
+  id        String        @id @default(uuid()) @db.Uuid
+  userId    String        @map("user_id") @db.Uuid
+  type      AuthTokenType
+  tokenHash String        @map("token_hash")
+  expiresAt DateTime      @map("expires_at")
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@map("auth_tokens")
 }
 
 model Game {

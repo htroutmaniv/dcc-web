@@ -22,12 +22,14 @@ In **two terminals**: `bun server` and `bun bundler`. Open **http://localhost:80
 | Script | What |
 |--------|------|
 | `bun run dev` | Docker stack + API watch + Vite HMR |
-| `bun run start` | Build + Docker stack + API + Vite preview |
+| `bun run prod` / `bun run start` | Build once + Docker stack + API + Vite preview |
+| `bun run start:server` | API only (after `bun run build`) |
+| `bun run start:bundler` | Vite preview only (after `bun run build`) |
 | `bun run stack` | Postgres + nginx only |
 | `bun run build` | Compile shared, API, web |
 
 ## Docs
 
 - [Development / structure](docs/DEVELOPMENT.md)
+- [Production deployment (hat3d.com)](docs/DEPLOYMENT.md)
 - [Architecture](docs/ARCHITECTURE.md)
-- [Discord auth](docs/DISCORD-AUTH.md)

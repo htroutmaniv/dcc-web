@@ -533,9 +533,9 @@ export default function GamePage() {
     gameId,
     {
       onConnected: () => {
-        void loadCharacters().catch(() => {});
+        // Full resync after (re)connect — catches anything missed while disconnected.
+        void loadDetail().catch(() => {});
         void loadDiceRolls().catch(() => {});
-        void loadMonsters().catch(() => {});
       },
       onMonstersChanged: (actorUserId) => {
         if (actorUserId && actorUserId === user?.id) return;

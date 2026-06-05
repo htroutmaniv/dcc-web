@@ -2,6 +2,8 @@ export interface User {
   id: string;
   displayName: string;
   avatarUrl?: string | null;
+  email?: string | null;
+  emailVerified?: boolean;
 }
 
 import type { GameInitiativeState, GameSettings } from '@dcc-web/shared';

@@ -21,6 +21,10 @@ const io = new Server(app.server, {
     origin: config.corsOrigins === true ? true : config.corsOrigins,
     credentials: true,
   },
+  // Generous timeouts for clients behind TLS-terminating reverse proxies (nginx).
+  pingInterval: 25_000,
+  pingTimeout: 60_000,
+  connectTimeout: 45_000,
 });
 app.io = io;
 
@@ -35,6 +39,8 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
+  app.log.info({ socketId: socket.id, userId: socket.data.userId }, 'socket connected');
+
   socket.on('game:join', async (payload: { gameId?: string }) => {
     try {
       const gameId = payload?.gameId;
@@ -69,7 +75,13 @@ io.on('connection', (socket) => {
 
   // Rooms are still populated on disconnecting; disconnect fires after cleanup.
   socket.on('disconnecting', clearPresence);
-  socket.on('disconnect', clearPresence);
+  socket.on('disconnect', (reason) => {
+    clearPresence();
+    app.log.info(
+      { socketId: socket.id, userId: socket.data.userId, reason },
+      'socket disconnected',
+    );
+  });
 });
 
 app.log.info(`API listening on ${config.host}:${config.port}`);

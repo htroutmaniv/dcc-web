@@ -27,9 +27,10 @@ export async function api<T>(
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
+    const err = (body as { message?: string; error?: unknown }).error;
     const msg =
-      (body as { message?: string; error?: string }).message ??
-      (body as { error?: string }).error ??
+      (body as { message?: string }).message ??
+      (typeof err === 'string' ? err : err ? JSON.stringify(err) : undefined) ??
       res.statusText;
     throw new ApiError(msg, res.status);
   }

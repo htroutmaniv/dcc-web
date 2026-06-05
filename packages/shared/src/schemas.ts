@@ -261,3 +261,18 @@ export const transferInventoryItemSchema = z.object({
   targetId: z.string().uuid(),
   quantity: z.coerce.number().int().min(1).max(9999).optional(),
 });
+
+export const registerSchema = z.object({
+  email: z.string().email().max(255),
+  password: z.string().min(8).max(128),
+  displayName: z.string().trim().min(1).max(64).optional(),
+});
+
+export const loginSchema = z.object({
+  email: z.string().email().max(255),
+  password: z.string().min(1).max(128),
+});
+
+export const resendVerificationSchema = z.object({
+  email: z.string().email().max(255),
+});

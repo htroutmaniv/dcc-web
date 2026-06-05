@@ -4,7 +4,7 @@
 
 nginx + Postgres run in Docker. **API** and **Vite** run on the host in **separate terminals** so backend reloads do not restart the bundler (and vice versa).
 
-Open the app at **http://localhost:8080** (nginx → host ports 3001 + 5173).
+Open the app at **http://localhost:8080** (`NGINX_TLS=false`, nginx → host ports 3003 + 5173).
 
 ## Setup (once)
 
@@ -51,9 +51,10 @@ Then restart `bun server` once after shared exports change (or leave `shared` wa
 | `bun server` | API with `bun --watch` |
 | `bun bundler` | Vite dev server |
 | `bun run shared` | `tsc --watch` on shared package |
-| `bun run start:server` | Compiled API (no watch) |
-| `bun run start:bundler` | Vite preview (built web) |
-| `bun run start` | Build + stack + both prod-like processes |
+| `bun run start:server` | Compiled API only — run `bun run build` first |
+| `bun run start:bundler` | Vite preview only — run `bun run build` first |
+| `bun run prod` | Build once + stack + API + preview together |
+| `bun run start` | Alias for `prod` |
 
 `bun server` and `bun bundler` are shorthand for `bun run server` / `bun run bundler`.
 
@@ -68,9 +69,17 @@ npm run bundler
 
 (API uses `bun --watch` in package.json — install Bun for the server script, or use `npm run dev -w @dcc-web/api` with tsx if you add it back.)
 
+## Email sign-in
+
+When `RESEND_API_KEY` and `MAIL_FROM` are set, the home page shows **Sign in / Create account** instead of dev login. Flow: register → verification email → click link → sign in.
+
+For local testing with real email, set the Resend vars in `.env` and restart the API. Without them, use **Dev DM / Dev Player** (enabled when `NODE_ENV` is not `production`).
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) §4 for Resend domain setup and production smoke tests.
+
 ## Dev login (DM vs player)
 
-The header exposes two local-only accounts (not Discord):
+In local development, the header exposes two local-only accounts:
 
 | Button | DB user | Use for |
 |--------|---------|---------|
