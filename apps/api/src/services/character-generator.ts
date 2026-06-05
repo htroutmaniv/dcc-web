@@ -1,17 +1,21 @@
 import {
+  abilityModifier,
   classMatchesRaceFilter,
   computeDccSaves,
   consumablePropertiesToRecord,
   CONSUMABLE_PRESETS_BY_NAME,
   DCC_CHARACTER_CLASSES,
   DCC_CLASS_HIT_DIE,
+  formatLuckySign,
+  rollBirthAugur,
   savesToStored,
   type DccCharacterClass,
 } from '@dcc-web/shared';
 import type { CharacterCombat, CharacterStats } from '@dcc-web/shared';
-import { luckyRollModifier, rollBirthAugur } from '../data/birth-augur.js';
 import { rollFunnelOccupation } from '../data/funnel-occupations.js';
+import { tradeGoodToItem } from '../data/occupation-trade-goods.js';
 import { secureRandomInt } from '../lib/rng.js';
+import { rollRandomCharacterName } from './name-service.js';
 
 const ALIGNMENTS = ['Lawful', 'Neutral', 'Chaotic', 'Unaligned'] as const;
 
@@ -19,16 +23,6 @@ const ABILITY_KEYS = ['str', 'agi', 'sta', 'per', 'int', 'lck'] as const;
 
 function roll3d6(): number {
   return secureRandomInt(1, 6) + secureRandomInt(1, 6) + secureRandomInt(1, 6);
-}
-
-function abilityModifier(score: number): number {
-  if (score <= 3) return -3;
-  if (score <= 5) return -2;
-  if (score <= 7) return -1;
-  if (score <= 13) return 0;
-  if (score <= 15) return 1;
-  if (score <= 17) return 2;
-  return 3;
 }
 
 function rollAbility(): { score: number; modifier: number } {
@@ -139,24 +133,19 @@ function occupationToItems(occupation: ReturnType<typeof rollFunnelOccupation>):
     },
   ];
   for (const g of occupation.goods) {
-    const preset =
-      CONSUMABLE_PRESETS_BY_NAME[g.name.trim().toLowerCase()];
-    if (preset) {
-      items.push({
-        category: 'disposable',
-        name: g.name,
-        quantity: 1,
-        notes: g.notes ?? '',
-        properties: consumablePropertiesToRecord({ ...preset }),
-      });
-      continue;
-    }
-    items.push({
-      category: 'misc',
-      name: g.name,
-      quantity: 1,
-      notes: g.notes,
-    });
+    items.push(
+      tradeGoodToItem(g.name, (name) => {
+        const preset = CONSUMABLE_PRESETS_BY_NAME[name.trim().toLowerCase()];
+        if (!preset) return null;
+        return {
+          category: 'disposable',
+          name,
+          quantity: 1,
+          notes: g.notes ?? '',
+          properties: consumablePropertiesToRecord({ ...preset }),
+        };
+      }),
+    );
   }
   return items;
 }
@@ -182,7 +171,7 @@ export function generateRandomCharacterData(options: RandomCharacterOptions): {
     (min, max) => secureRandomInt(min, max),
     lckMod,
   );
-  const augurMod = luckyRollModifier(lckMod);
+  const luckySign = formatLuckySign(augur, lckMod);
 
   const alignment = ALIGNMENTS[secureRandomInt(0, ALIGNMENTS.length - 1)]!;
 
@@ -198,7 +187,7 @@ export function generateRandomCharacterData(options: RandomCharacterOptions): {
     const hpMax = Math.max(1, secureRandomInt(1, 6) + staMod);
 
     return {
-      name: `Funnel ${secureRandomInt(100, 999)}`,
+      name: rollRandomCharacterName(secureRandomInt),
       className: occupation.name,
       level: 0,
       alignment,
@@ -209,7 +198,7 @@ export function generateRandomCharacterData(options: RandomCharacterOptions): {
           occupation: occupation.name,
           race: occupation.race ?? 'human',
           startingFunds: `${roll3d6Copper()} cp`,
-          luckySign: `${augur.name} (${augur.bonus}, ${augurMod >= 0 ? '+' : ''}${augurMod})`,
+          luckySign,
           languages: 'Common',
         },
         0,
@@ -228,7 +217,7 @@ export function generateRandomCharacterData(options: RandomCharacterOptions): {
   const hpMax = rollClassHp(className, staMod);
 
   return {
-    name: `${className} ${secureRandomInt(100, 999)}`,
+    name: rollRandomCharacterName(secureRandomInt),
     className,
     level,
     alignment,
@@ -236,7 +225,7 @@ export function generateRandomCharacterData(options: RandomCharacterOptions): {
     stats: statsFromAbilities(
       abilityRecord,
       {
-        luckySign: `${augur.name} (${augur.bonus}, ${augurMod >= 0 ? '+' : ''}${augurMod})`,
+        luckySign,
         languages: 'Common',
         startingFunds: `${roll3d6Copper()} cp`,
       },

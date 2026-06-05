@@ -56,6 +56,17 @@ enum MovementRequestStatus {
   rejected
 }
 
+enum OccupationRace {
+  elf
+  dwarf
+  halfling
+}
+
+enum CharacterNameKind {
+  first
+  last
+}
+
 model User {
   id           String   @id @default(uuid()) @db.Uuid
   email        String?  @unique
@@ -222,6 +233,33 @@ model MonsterItem {
 
   @@index([monsterId, sortOrder])
   @@map("monster_items")
+}
+
+model Occupation {
+  id                String          @id @default(uuid()) @db.Uuid
+  rollLow           Int             @map("roll_low")
+  rollHigh          Int             @map("roll_high")
+  name              String          @unique
+  race              OccupationRace?
+  trainedWeapon     String          @map("trained_weapon")
+  weaponDamage      String          @map("weapon_damage")
+  weaponAttackBonus Int             @default(0) @map("weapon_attack_bonus")
+  tradeGoods        String          @map("trade_goods")
+  sortOrder         Int             @default(0) @map("sort_order")
+
+  @@index([rollLow, rollHigh])
+  @@map("occupations")
+}
+
+model CharacterName {
+  id        String            @id @default(uuid()) @db.Uuid
+  kind      CharacterNameKind
+  name      String
+  sortOrder Int               @default(0) @map("sort_order")
+
+  @@unique([kind, name])
+  @@index([kind])
+  @@map("character_names")
 }
 
 model ItemCatalog {

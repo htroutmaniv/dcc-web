@@ -3,11 +3,19 @@ import { PrismaClient } from '@prisma/client';
 import { ITEM_CATALOG_SEED } from '../src/data/item-catalog-seed.js';
 import { MONSTER_CATALOG_SEED } from '../src/data/monster-catalog-seed.js';
 import { LOOT_POOL_SEED } from '../src/data/loot-pool-seed.js';
+import { seedOccupations } from '../src/data/occupation-seed.js';
+import { seedCharacterNames } from '../src/data/name-seed.js';
 import { defaultMonsterSheet } from '@dcc-web/shared';
 
 const prisma = new PrismaClient();
 
 async function main() {
+  const occupationCount = await seedOccupations(prisma);
+  console.log(`Seeded ${occupationCount} funnel occupations`);
+
+  const nameCount = await seedCharacterNames(prisma);
+  console.log(`Seeded ${nameCount} character names`);
+
   for (const row of ITEM_CATALOG_SEED) {
     await prisma.itemCatalog.upsert({
       where: {

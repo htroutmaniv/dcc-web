@@ -1,4 +1,5 @@
 import {
+  abilityModifier,
   computeDccSaves,
   formatStackUsesSummary,
   normalizeCharacterRace,
@@ -91,15 +92,7 @@ export const ABILITY_ROWS: { key: string; label: string }[] = [
   { key: 'lck', label: 'Luck' },
 ];
 
-export function abilityModifier(score: number): number {
-  if (score <= 3) return -3;
-  if (score <= 5) return -2;
-  if (score <= 7) return -1;
-  if (score <= 13) return 0;
-  if (score <= 15) return 1;
-  if (score <= 17) return 2;
-  return 3;
-}
+export { abilityModifier };
 
 function formatWeapon(item: { name: string; properties?: Record<string, unknown> }): string {
   const dmg = item.properties?.damage as string | undefined;

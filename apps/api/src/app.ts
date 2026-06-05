@@ -14,6 +14,8 @@ import { mapRoutes } from './routes/maps.js';
 import { itemRoutes } from './routes/items.js';
 import { initiativeRoutes } from './routes/initiative.js';
 import { monsterRoutes } from './routes/monsters.js';
+import { ensureOccupationsLoaded } from './services/occupation-service.js';
+import { ensureCharacterNamesLoaded } from './services/name-service.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -49,6 +51,9 @@ export async function buildApp() {
   await app.register(itemRoutes);
   await app.register(initiativeRoutes);
   await app.register(monsterRoutes);
+
+  await ensureOccupationsLoaded();
+  await ensureCharacterNamesLoaded();
 
   return app;
 }

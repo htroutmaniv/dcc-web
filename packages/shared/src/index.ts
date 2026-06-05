@@ -1,4 +1,6 @@
 export * from './types.js';
+export * from './ability-scores.js';
+export * from './birth-augur.js';
 export * from './dcc-classes.js';
 export * from './dcc-saves.js';
 export * from './item-properties.js';
