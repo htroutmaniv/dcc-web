@@ -54,6 +54,17 @@ function buildMemberRows(
     });
   }
 
+  const knownIds = new Set(rows.map((r) => r.userId));
+  for (const u of presenceUsers) {
+    if (knownIds.has(u.userId)) continue;
+    rows.push({
+      userId: u.userId,
+      displayName: u.displayName,
+      isDm: u.isDm,
+      isPresent: true,
+    });
+  }
+
   return rows.sort((a, b) => {
     if (a.isDm !== b.isDm) return a.isDm ? -1 : 1;
     if (a.isPresent !== b.isPresent) return a.isPresent ? -1 : 1;

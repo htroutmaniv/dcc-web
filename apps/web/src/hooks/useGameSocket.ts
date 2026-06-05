@@ -33,6 +33,7 @@ export interface GameSocketHandlers {
   onTokenUpdated?: (token: unknown) => void;
   onMapUpdated?: (actorUserId?: string) => void;
   onPresenceUpdated?: (users: GamePresenceUser[]) => void;
+  onRosterChanged?: (actorUserId?: string) => void;
 }
 
 /**
@@ -119,6 +120,10 @@ export function useGameSocket(
       }
     });
 
+    socket.on('game:roster_changed', (payload: { actorUserId?: string }) => {
+      handlersRef.current.onRosterChanged?.(payload?.actorUserId);
+    });
+
     socket.on('game:error', (payload: { message?: string }) => {
       console.warn('[game socket]', payload?.message ?? 'error');
     });
@@ -146,6 +151,7 @@ export function useGameSocket(
       socket.off('map:token_moved');
       socket.off('dice:rolled');
       socket.off('game:presence');
+      socket.off('game:roster_changed');
       socket.off('game:error');
       socket.off('connect_error');
       socket.off('disconnect');

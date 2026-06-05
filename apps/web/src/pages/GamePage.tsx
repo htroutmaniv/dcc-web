@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
 import { Alert, Box, Button, Chip, CircularProgress, Link } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -85,6 +85,8 @@ export default function GamePage() {
   const [lastRoll, setLastRoll] = useState<DiceResult | null>(null);
   const [menuTab, setMenuTab] = useState<GameMenuTab>('characters');
   const [presenceUsers, setPresenceUsers] = useState<GamePresenceUser[]>([]);
+  const detailRef = useRef(detail);
+  detailRef.current = detail;
   const [diceTrayCounts, setDiceTrayCounts] = useState<DiceTrayCounts>(emptyDiceTray);
   const [diceRolling, setDiceRolling] = useState(false);
   const [diceCharacterId, setDiceCharacterId] = useState<string | null>(null);
@@ -568,6 +570,19 @@ export default function GamePage() {
       },
       onPresenceUpdated: (users) => {
         setPresenceUsers(users);
+        const d = detailRef.current;
+        if (!d) return;
+        const rosterIds = new Set<string>([
+          d.game.dmUserId,
+          ...(d.game.players?.map((p) => p.user.id) ?? []),
+        ]);
+        if (users.some((u) => !rosterIds.has(u.userId))) {
+          void loadDetail().catch(() => {});
+        }
+      },
+      onRosterChanged: (actorUserId) => {
+        if (actorUserId && actorUserId === user?.id) return;
+        void loadDetail().catch(() => {});
       },
     },
     Boolean(gameId && detail),

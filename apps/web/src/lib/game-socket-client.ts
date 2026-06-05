@@ -4,11 +4,15 @@ let socket: Socket | null = null;
 let activeGameId: string | null = null;
 
 function createSocket(): Socket {
+  // Production uses HTTP/2 on 443 — polling works; WebSocket upgrade does not.
+  const transports: ('polling' | 'websocket')[] = import.meta.env.PROD
+    ? ['polling']
+    : ['polling', 'websocket'];
+
   const s = io(window.location.origin, {
     path: '/socket.io',
     withCredentials: true,
-    // Polling first — more reliable through reverse proxies; upgrades to WebSocket.
-    transports: ['polling', 'websocket'],
+    transports,
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,

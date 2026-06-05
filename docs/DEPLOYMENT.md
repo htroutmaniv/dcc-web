@@ -196,6 +196,8 @@ See previous sections for `dcc-api.service` and `dcc-web.service` units pointing
 
 | Symptom | Likely cause |
 |---------|----------------|
+| **hat3d.com won't load on the server PC** (hangs/timeouts) | Router **hairpin NAT** — your PC can't reach its own public IP. Add to `C:\Windows\System32\drivers\etc\hosts`: `127.0.0.1 hat3d.com www.hat3d.com` (or use another device on the internet to test). |
+| Page very slow / huge JS download | Rebuild nginx (gzip enabled) and web (`bun run build`). Ensure `bun run prod` is running API + vite preview. |
 | nginx container exits on start | Cert paths wrong — check `NGINX_SSL_CERT` / files under `LETSENCRYPT_DIR` |
 | Port 443 already in use | Another nginx/IIS service — stop it or use one stack only |
 | 502 Bad Gateway | API or vite preview not running on host |

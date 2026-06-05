@@ -198,6 +198,7 @@ export function GameSideMenu({
                 characters={characters}
                 players={players ?? []}
                 dmUserId={game.dmUserId}
+                presenceUsers={presenceUsers}
                 renderItem={(c) => {
                   const isTurn = isCharacterTurn(initiative ?? null, c.id);
                   const canEndTurn =

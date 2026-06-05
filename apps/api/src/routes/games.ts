@@ -1,6 +1,7 @@
 import { createGameSchema } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
 import { assertGameMember, generateInviteCode, isGameDm } from '../lib/game-access.js';
+import { emitToGame } from '../lib/game-socket.js';
 import { prisma } from '../lib/prisma.js';
 
 const gameListSelect = {
@@ -69,13 +70,15 @@ export async function gameRoutes(app: FastifyInstance) {
       return { game, role: 'dm' as const };
     }
 
-    await prisma.gamePlayer.upsert({
-      where: {
-        gameId_userId: { gameId: game.id, userId },
-      },
-      create: { gameId: game.id, userId, role: 'player' },
-      update: {},
+    const existing = await prisma.gamePlayer.findUnique({
+      where: { gameId_userId: { gameId: game.id, userId } },
     });
+    if (!existing) {
+      await prisma.gamePlayer.create({
+        data: { gameId: game.id, userId, role: 'player' },
+      });
+      emitToGame(app.io, game.id, 'game:roster_changed', { actorUserId: userId });
+    }
     return { game, role: 'player' as const };
   });
 
