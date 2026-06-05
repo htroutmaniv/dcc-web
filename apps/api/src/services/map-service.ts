@@ -1,0 +1,439 @@
+import {
+  computeUpperRightTokenGrid,
+  isMonsterKilled,
+  parseGameSettings,
+  parseMapDrawings,
+  resolveMapGridPreset,
+  type MapDrawing,
+  type MapGridPreset,
+  type MonsterStatsJson,
+} from '@dcc-web/shared';
+import type { Prisma } from '@prisma/client';
+import { mkdir, writeFile, unlink } from 'node:fs/promises';
+import path from 'node:path';
+import { prisma } from '../lib/prisma.js';
+
+const UPLOAD_DIR = path.join(process.cwd(), 'data', 'uploads', 'maps');
+
+export type MapTokenDto = {
+  id: string;
+  mapId: string;
+  kind: string;
+  label: string;
+  characterId: string | null;
+  monsterId: string | null;
+  x: number;
+  y: number;
+  zone: string;
+  color: string;
+  hpMax: number | null;
+  hpCurrent: number | null;
+  isDead: boolean;
+};
+
+export type GameMapDto = {
+  id: string;
+  gameId: string;
+  name: string;
+  sortOrder: number;
+  visible: boolean;
+  gridPreset: string;
+  imageUrl: string | null;
+  widthPx: number;
+  heightPx: number;
+  gridCellPx: number;
+  gridFtPerCell: number;
+  dmDrawings: MapDrawing[];
+  tokens: MapTokenDto[];
+};
+
+type MapTokenRow = {
+  id: string;
+  mapId: string;
+  kind: string;
+  label: string;
+  characterId: string | null;
+  monsterId: string | null;
+  x: Prisma.Decimal;
+  y: Prisma.Decimal;
+  zone: string;
+  color: string;
+  hpMax: number | null;
+  hpCurrent: number | null;
+  character?: { status: string } | null;
+  monster?: { hpCurrent: number; stats: unknown } | null;
+};
+
+function isMapTokenDead(row: MapTokenRow): boolean {
+  if (row.kind === 'pc' && row.character) {
+    return row.character.status === 'dead';
+  }
+  if (row.kind === 'monster' && row.monster) {
+    return (
+      isMonsterKilled({ stats: row.monster.stats as MonsterStatsJson | undefined }) ||
+      row.monster.hpCurrent <= 0
+    );
+  }
+  return false;
+}
+
+function toTokenDto(row: MapTokenRow): MapTokenDto {
+  return {
+    id: row.id,
+    mapId: row.mapId,
+    kind: row.kind,
+    label: row.label,
+    characterId: row.characterId,
+    monsterId: row.monsterId,
+    x: Number(row.x),
+    y: Number(row.y),
+    zone: row.zone,
+    color: row.color,
+    hpMax: row.hpMax,
+    hpCurrent: row.hpCurrent,
+    isDead: isMapTokenDead(row),
+  };
+}
+
+const mapTokenInclude = {
+  character: { select: { status: true } },
+  monster: { select: { hpCurrent: true, stats: true } },
+} as const;
+
+export async function deleteTokensForCharacter(characterId: string): Promise<void> {
+  await prisma.mapToken.deleteMany({ where: { characterId } });
+}
+
+export async function deleteTokensForMonster(monsterId: string): Promise<void> {
+  await prisma.mapToken.deleteMany({ where: { monsterId } });
+}
+
+function toMapDto(
+  row: {
+    id: string;
+    gameId: string;
+    name: string;
+    sortOrder: number;
+    visible: boolean;
+    gridPreset: string;
+    imageUrl: string | null;
+    widthPx: number;
+    heightPx: number;
+    gridCellPx: number;
+    gridFtPerCell: Prisma.Decimal;
+    dmDrawings: unknown;
+  },
+  tokens: MapTokenDto[],
+): GameMapDto {
+  const preset = resolveMapGridPreset(row.gridPreset);
+  return {
+    id: row.id,
+    gameId: row.gameId,
+    name: row.name,
+    sortOrder: row.sortOrder,
+    visible: row.visible,
+    gridPreset: row.gridPreset,
+    imageUrl: row.imageUrl,
+    widthPx: row.widthPx,
+    heightPx: row.heightPx,
+    gridCellPx: row.gridCellPx || preset.gridCellPx,
+    gridFtPerCell: Number(row.gridFtPerCell) || preset.gridFtPerCell,
+    dmDrawings: parseMapDrawings(row.dmDrawings),
+    tokens,
+  };
+}
+
+async function loadMapTokens(mapId: string): Promise<MapTokenDto[]> {
+  const tokens = await prisma.mapToken.findMany({
+    where: { mapId },
+    include: mapTokenInclude,
+  });
+  return tokens.map(toTokenDto);
+}
+
+async function loadMapDto(mapId: string): Promise<GameMapDto> {
+  const row = await prisma.gameMap.findUniqueOrThrow({ where: { id: mapId } });
+  return toMapDto(row, await loadMapTokens(mapId));
+}
+
+export async function listGameMaps(gameId: string): Promise<{
+  maps: GameMapDto[];
+  activeMapId: string | null;
+}> {
+  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
+  const settings = parseGameSettings(game.settings);
+  const rows = await prisma.gameMap.findMany({
+    where: { gameId },
+    orderBy: { sortOrder: 'asc' },
+  });
+  const maps: GameMapDto[] = [];
+  for (const row of rows) {
+    maps.push(toMapDto(row, await loadMapTokens(row.id)));
+  }
+  const activeMapId =
+    settings.activeMapId && maps.some((m) => m.id === settings.activeMapId)
+      ? settings.activeMapId
+      : maps.find((m) => m.visible)?.id ?? maps[0]?.id ?? null;
+  return { maps, activeMapId };
+}
+
+export async function createGameMap(
+  gameId: string,
+  input?: { name?: string; gridPreset?: MapGridPreset },
+): Promise<GameMapDto> {
+  const count = await prisma.gameMap.count({ where: { gameId } });
+  const preset = resolveMapGridPreset(input?.gridPreset);
+  const row = await prisma.gameMap.create({
+    data: {
+      gameId,
+      name: input?.name ?? `Map ${count + 1}`,
+      sortOrder: count,
+      gridPreset: preset.id,
+      gridCellPx: preset.gridCellPx,
+      gridFtPerCell: preset.gridFtPerCell,
+    },
+  });
+  if (count === 0) {
+    await setActiveMapId(gameId, row.id);
+  }
+  return loadMapDto(row.id);
+}
+
+export async function setActiveMapId(gameId: string, mapId: string): Promise<string | null> {
+  const map = await prisma.gameMap.findFirstOrThrow({ where: { id: mapId, gameId } });
+  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
+  const settings = parseGameSettings(game.settings);
+  await prisma.game.update({
+    where: { id: gameId },
+    data: {
+      settings: { ...settings, activeMapId: map.id } as Prisma.InputJsonValue,
+    },
+  });
+  return map.id;
+}
+
+async function saveMapImage(mapId: string, dataUrl: string): Promise<{
+  imageUrl: string;
+  widthPx: number;
+  heightPx: number;
+}> {
+  const m = dataUrl.match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/i);
+  if (!m) throw new Error('Invalid image data URL');
+  const ext = m[1]!.toLowerCase() === 'jpeg' ? 'jpg' : m[1]!.toLowerCase();
+  const buf = Buffer.from(m[2]!, 'base64');
+  if (buf.length > 4_000_000) throw new Error('Image too large (max 4MB)');
+  await mkdir(UPLOAD_DIR, { recursive: true });
+  const filename = `${mapId}.${ext}`;
+  const filePath = path.join(UPLOAD_DIR, filename);
+  await writeFile(filePath, buf);
+  return {
+    imageUrl: `/uploads/maps/${filename}`,
+    widthPx: 0,
+    heightPx: 0,
+  };
+}
+
+export async function patchGameMap(
+  gameId: string,
+  mapId: string,
+  patch: {
+    name?: string;
+    visible?: boolean;
+    gridPreset?: MapGridPreset;
+    dmDrawings?: MapDrawing[];
+    imageDataUrl?: string | null;
+    clearImage?: boolean;
+  },
+): Promise<GameMapDto> {
+  const existing = await prisma.gameMap.findFirstOrThrow({ where: { id: mapId, gameId } });
+  const data: Prisma.GameMapUpdateInput = {};
+
+  if (patch.name !== undefined) data.name = patch.name;
+  if (patch.visible !== undefined) data.visible = patch.visible;
+  if (patch.gridPreset !== undefined) {
+    const preset = resolveMapGridPreset(patch.gridPreset);
+    data.gridPreset = preset.id;
+    data.gridCellPx = preset.gridCellPx;
+    data.gridFtPerCell = preset.gridFtPerCell;
+  }
+  if (patch.dmDrawings !== undefined) {
+    data.dmDrawings = patch.dmDrawings as unknown as Prisma.InputJsonValue;
+  }
+  if (patch.clearImage) {
+    if (existing.imageUrl?.startsWith('/uploads/maps/')) {
+      const file = path.join(UPLOAD_DIR, path.basename(existing.imageUrl));
+      await unlink(file).catch(() => {});
+    }
+    data.imageUrl = null;
+    data.widthPx = 0;
+    data.heightPx = 0;
+  } else if (patch.imageDataUrl) {
+    const saved = await saveMapImage(mapId, patch.imageDataUrl);
+    data.imageUrl = saved.imageUrl;
+  }
+
+  await prisma.gameMap.update({ where: { id: mapId }, data });
+  return loadMapDto(mapId);
+}
+
+export async function deleteGameMap(
+  gameId: string,
+  mapId: string,
+): Promise<{ activeMapId: string | null }> {
+  const count = await prisma.gameMap.count({ where: { gameId } });
+  if (count <= 1) throw new Error('Cannot delete the only map');
+  const existing = await prisma.gameMap.findFirstOrThrow({ where: { id: mapId, gameId } });
+  if (existing.imageUrl?.startsWith('/uploads/maps/')) {
+    const file = path.join(UPLOAD_DIR, path.basename(existing.imageUrl));
+    await unlink(file).catch(() => {});
+  }
+  await prisma.gameMap.delete({ where: { id: mapId } });
+  const { maps, activeMapId } = await listGameMaps(gameId);
+  const nextActive = activeMapId ?? maps[0]?.id ?? null;
+  if (nextActive) await setActiveMapId(gameId, nextActive);
+  return { activeMapId: nextActive };
+}
+
+const PC_COLORS = ['#4a90d9', '#50c878', '#e8a838', '#b57edc', '#e85d5d', '#5bc0be'];
+
+async function pruneOrphanMapTokens(
+  mapId: string,
+  gameId: string,
+  characters: { id: string; status: string }[],
+  monsters: { id: string }[],
+): Promise<void> {
+  const charById = new Map(characters.map((c) => [c.id, c.status]));
+  const monsterIds = new Set(monsters.map((m) => m.id));
+  const tokens = await prisma.mapToken.findMany({ where: { mapId } });
+  for (const token of tokens) {
+    if (token.characterId) {
+      const status = charById.get(token.characterId);
+      if (!status || status === 'archived') {
+        await prisma.mapToken.delete({ where: { id: token.id } });
+      }
+      continue;
+    }
+    if (token.kind === 'monster' && (!token.monsterId || !monsterIds.has(token.monsterId))) {
+      await prisma.mapToken.delete({ where: { id: token.id } });
+    }
+  }
+}
+
+export async function syncMapTokens(gameId: string, mapId: string): Promise<GameMapDto> {
+  await prisma.gameMap.findFirstOrThrow({ where: { id: mapId, gameId } });
+  const allCharacters = await prisma.character.findMany({
+    where: { gameId },
+    select: { id: true, status: true, name: true },
+    orderBy: { name: 'asc' },
+  });
+  const characters = allCharacters.filter((c) => c.status === 'alive');
+  const monsters = await prisma.gameMonster.findMany({
+    where: { gameId },
+    orderBy: { sortOrder: 'asc' },
+  });
+  const activeMonsters = monsters.filter(
+    (m) => !isMonsterKilled({ stats: m.stats as MonsterStatsJson | undefined }),
+  );
+
+  const existing = await prisma.mapToken.findMany({ where: { mapId } });
+  let pcIndex = 0;
+
+  for (const c of characters) {
+    let token = existing.find((t) => t.characterId === c.id);
+    if (!token) {
+      token = await prisma.mapToken.create({
+        data: {
+          mapId,
+          kind: 'pc',
+          characterId: c.id,
+          label: c.name,
+          x: 2 + pcIndex,
+          y: 2,
+          zone: 'map',
+          color: PC_COLORS[pcIndex % PC_COLORS.length]!,
+        },
+      });
+      existing.push(token);
+    } else if (token.label !== c.name) {
+      await prisma.mapToken.update({
+        where: { id: token.id },
+        data: { label: c.name },
+      });
+    }
+    pcIndex += 1;
+  }
+
+  let monsterIndex = 0;
+  for (const m of activeMonsters) {
+    let token = existing.find((t) => t.monsterId === m.id);
+    if (!token) {
+      token = await prisma.mapToken.create({
+        data: {
+          mapId,
+          kind: 'monster',
+          monsterId: m.id,
+          label: m.name,
+          x: 8 + monsterIndex,
+          y: 2,
+          zone: 'map',
+          color: '#8b2635',
+        },
+      });
+      existing.push(token);
+    } else {
+      const updates: Prisma.MapTokenUpdateInput = {};
+      if (token.label !== m.name) updates.label = m.name;
+      if (token.zone !== 'map') updates.zone = 'map';
+      if (Object.keys(updates).length > 0) {
+        await prisma.mapToken.update({ where: { id: token.id }, data: updates });
+      }
+    }
+    monsterIndex += 1;
+  }
+
+  await pruneOrphanMapTokens(mapId, gameId, allCharacters, monsters);
+  return loadMapDto(mapId);
+}
+
+export async function syncActiveMapTokens(gameId: string): Promise<GameMapDto | null> {
+  const { activeMapId } = await listGameMaps(gameId);
+  if (!activeMapId) return null;
+  return syncMapTokens(gameId, activeMapId);
+}
+
+export async function layoutMapTokens(
+  gameId: string,
+  mapId: string,
+  options?: {
+    anchorRightCol?: number;
+    anchorTopRow?: number;
+    visibleLeft?: number;
+    visibleTop?: number;
+    visibleRight?: number;
+    visibleBottom?: number;
+  },
+): Promise<GameMapDto> {
+  await prisma.gameMap.findFirstOrThrow({ where: { id: mapId, gameId } });
+  await syncMapTokens(gameId, mapId);
+  const tokens = await prisma.mapToken.findMany({
+    where: { mapId, kind: { in: ['pc', 'monster'] }, zone: 'map' },
+    include: mapTokenInclude,
+    orderBy: [{ kind: 'asc' }, { sortOrder: 'asc' }, { label: 'asc' }],
+  });
+  const living = tokens.filter((t) => !isMapTokenDead(t));
+  const positions = computeUpperRightTokenGrid(living.length, options);
+  for (let i = 0; i < living.length; i++) {
+    const pos = positions[i]!;
+    await prisma.mapToken.update({
+      where: { id: living[i]!.id },
+      data: { x: pos.x, y: pos.y, zone: 'map' },
+    });
+  }
+  return loadMapDto(mapId);
+}
+
+export async function getMapForLegacy(gameId: string) {
+  const { maps, activeMapId } = await listGameMaps(gameId);
+  const active = maps.find((m) => m.id === activeMapId) ?? maps[0] ?? null;
+  return active;
+}

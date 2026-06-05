@@ -12,6 +12,7 @@ import type { FastifyInstance } from 'fastify';
 import { assertGameDm } from '../lib/assert-game-dm.js';
 import { assertGameMember } from '../lib/game-access.js';
 import { emitToGame } from '../lib/game-socket.js';
+import { syncActiveMapTokens } from '../services/map-service.js';
 import { prisma } from '../lib/prisma.js';
 import {
   deleteGameMonster,
@@ -245,7 +246,9 @@ export async function monsterRoutes(app: FastifyInstance) {
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
       const { monsters, initiative } = await spawnGameMonsters(gameId, parsed.data);
+      await syncActiveMapTokens(gameId);
       emitMonstersChanged(app, gameId, request.userId);
+      emitToGame(app.io, gameId, 'map:updated', { actorUserId: request.userId });
       if (initiative) {
         emitInitiativeUpdate(app, gameId, initiative, request.userId);
       }
@@ -287,7 +290,9 @@ export async function monsterRoutes(app: FastifyInstance) {
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
       const { monster, initiative } = await patchGameMonster(gameId, monsterId, parsed.data);
+      await syncActiveMapTokens(gameId);
       emitMonstersChanged(app, gameId, request.userId);
+      emitToGame(app.io, gameId, 'map:updated', { actorUserId: request.userId });
       if (initiative) {
         emitInitiativeUpdate(app, gameId, initiative, request.userId);
       }
@@ -366,8 +371,10 @@ export async function monsterRoutes(app: FastifyInstance) {
         throw app.httpErrors.createError(access.status, access.message);
       }
       const { initiative } = await deleteGameMonster(gameId, monsterId);
+      await syncActiveMapTokens(gameId);
       emitMonstersChanged(app, gameId, request.userId);
       emitInitiativeUpdate(app, gameId, initiative, request.userId);
+      emitToGame(app.io, gameId, 'map:updated', { actorUserId: request.userId });
       return { ok: true, initiative };
     },
   );

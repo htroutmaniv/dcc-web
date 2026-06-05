@@ -219,6 +219,36 @@ export const addMonstersToInitiativeSchema = z.object({
   monsterIds: z.array(z.string().uuid()).max(50).optional(),
 });
 
+export const createGameMapSchema = z.object({
+  name: z.string().min(1).max(80).optional(),
+  gridPreset: z.enum(['tactical', 'town', 'regional']).optional(),
+});
+
+export const patchGameMapSchema = z.object({
+  name: z.string().min(1).max(80).optional(),
+  visible: z.boolean().optional(),
+  gridPreset: z.enum(['tactical', 'town', 'regional']).optional(),
+  dmDrawings: z.array(z.record(z.unknown())).max(500).optional(),
+  imageDataUrl: z.string().max(6_000_000).optional().nullable(),
+  clearImage: z.boolean().optional(),
+});
+
+export const setActiveMapSchema = z.object({
+  mapId: z.string().uuid(),
+});
+
+/** Grid/layout coords may be negative when the viewport shows area outside the grid origin. */
+const layoutGridCoord = z.coerce.number().finite();
+
+export const layoutMapTokensSchema = z.object({
+  anchorRightCol: layoutGridCoord.optional(),
+  anchorTopRow: layoutGridCoord.optional(),
+  visibleLeft: layoutGridCoord.optional(),
+  visibleTop: layoutGridCoord.optional(),
+  visibleRight: layoutGridCoord.optional(),
+  visibleBottom: layoutGridCoord.optional(),
+});
+
 export const transferInventoryItemSchema = z.object({
   sourceType: z.enum(['character', 'monster']),
   sourceId: z.string().uuid(),

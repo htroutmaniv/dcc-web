@@ -1,7 +1,7 @@
 export type CharacterStatus = 'alive' | 'dead' | 'archived';
 export type CharacterSource = 'manual' | 'random' | 'purple_sorcerer' | 'import';
 export type ItemCategory = 'weapon' | 'armor' | 'treasure' | 'misc' | 'disposable';
-export type TokenKind = 'pc' | 'npc' | 'object';
+export type TokenKind = 'pc' | 'npc' | 'object' | 'monster';
 export type TokenZone = 'map' | 'holding';
 export type PlayerTokenMovement = 'free' | 'approval';
 export type MovementRequestStatus = 'pending' | 'accepted' | 'rejected';
@@ -12,6 +12,7 @@ export interface GameSettings {
   gridFtPerCell: number;
   playerTokenMovement: PlayerTokenMovement;
   initiative?: GameInitiativeState | null;
+  activeMapId?: string | null;
 }
 
 export const DEFAULT_GAME_SETTINGS: GameSettings = {

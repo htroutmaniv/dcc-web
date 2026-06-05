@@ -33,6 +33,9 @@ import {
   getTargetAc,
   type DiceRollKind,
   type GameInitiativeState,
+  type MapDrawTool,
+  type MapGridPreset,
+  type MapLayoutAnchor,
   buildMonsterKilledStats,
 } from '@dcc-web/shared';
 import { ApplyDamageDialog, type MapTokenTarget } from '../components/ApplyDamageDialog';
@@ -60,6 +63,7 @@ import { MONSTER_ATTACK_TARGET_KEY, readMonsterTargetMap } from '../utils/monste
 import { buildCombatTargetOptions } from '../components/CharacterListItem';
 import type { TransferInventoryResult } from '../components/inventory/TransferItemDialog';
 import type { DiceRollLogEntry } from '../types/dice-roll-log';
+import type { TacticalGameMap } from '../types/map';
 import { useGameSocket } from '../hooks/useGameSocket';
 import { formatError } from '../utils/errors';
 
@@ -106,6 +110,11 @@ export default function GamePage() {
   const [applyDamageRoll, setApplyDamageRoll] = useState<DiceRollLogEntry | null>(null);
   const [applyingDamage, setApplyingDamage] = useState(false);
   const [npcTokens, setNpcTokens] = useState<MapTokenTarget[]>([]);
+  const [maps, setMaps] = useState<TacticalGameMap[]>([]);
+  const [activeMapId, setActiveMapId] = useState<string | null>(null);
+  const [mapBusy, setMapBusy] = useState(false);
+  const [drawTool, setDrawTool] = useState<MapDrawTool>('select');
+  const [drawColor, setDrawColor] = useState('#c9a227');
 
   /** DM = game creator only (server sets isDm from dm_user_id). */
   const isDm = detail?.isDm === true;
@@ -125,14 +134,9 @@ export default function GamePage() {
     });
   }, []);
 
-  const loadDetail = useCallback(async () => {
-    if (!gameId) return;
-    const data = await api<GameDetail>(`/games/${gameId}`);
-    setDetail(data);
-    setInitiative(parseGameInitiative(data.game.settings));
-    const tokens = data.game.map?.tokens ?? [];
+  const syncNpcTokensFromMap = useCallback((map: TacticalGameMap | null) => {
     setNpcTokens(
-      tokens
+      (map?.tokens ?? [])
         .filter((t) => t.kind === 'npc')
         .map((t) => ({
           id: t.id,
@@ -142,7 +146,28 @@ export default function GamePage() {
           hpMax: t.hpMax,
         })),
     );
-  }, [gameId]);
+  }, []);
+
+  const loadMaps = useCallback(async () => {
+    if (!gameId) return;
+    const data = await api<{ maps: TacticalGameMap[]; activeMapId: string | null }>(
+      `/games/${gameId}/maps`,
+    );
+    setMaps(data.maps);
+    setActiveMapId(data.activeMapId);
+    const active = data.maps.find((m) => m.id === data.activeMapId) ?? data.maps[0] ?? null;
+    syncNpcTokensFromMap(active);
+  }, [gameId, syncNpcTokensFromMap]);
+
+  const loadDetail = useCallback(async () => {
+    if (!gameId) return;
+    const data = await api<GameDetail>(`/games/${gameId}`);
+    setDetail(data);
+    setInitiative(parseGameInitiative(data.game.settings));
+    const settings = parseGameSettings(data.game.settings);
+    if (settings.activeMapId) setActiveMapId(settings.activeMapId);
+    await loadMaps();
+  }, [gameId, loadMaps]);
 
   const loadDiceRolls = useCallback(async () => {
     if (!gameId) return;
@@ -516,7 +541,10 @@ export default function GamePage() {
         void loadDetail().catch(() => {});
       },
       onTokenUpdated: () => {
-        void loadDetail().catch(() => {});
+        void loadMaps().catch(() => {});
+      },
+      onMapUpdated: () => {
+        void loadMaps().catch(() => {});
       },
     },
     Boolean(gameId && detail),
@@ -577,6 +605,7 @@ export default function GamePage() {
       });
       handleMonsterUpdated(data.monster);
       if (data.initiative) applyInitiative(data.initiative);
+      await loadMaps();
       setError(null);
     } catch (e) {
       setError(formatError(e));
@@ -596,6 +625,7 @@ export default function GamePage() {
       setMonsters((prev) => prev.filter((m) => m.id !== monsterId));
       if (selectedMonster?.id === monsterId) setSelectedMonster(null);
       applyInitiative(data.initiative);
+      await loadMaps();
     } catch (e) {
       setError(formatError(e));
     } finally {
@@ -987,6 +1017,9 @@ export default function GamePage() {
         setSelectedCharacter(null);
       }
       await loadCharacters();
+      if (status === 'archived' || status === 'dead') {
+        await loadMaps();
+      }
       setError(null);
     } catch (e) {
       setError(formatError(e));
@@ -999,10 +1032,182 @@ export default function GamePage() {
   const archiveCharacter = (characterId: string) =>
     patchCharacterStatus(characterId, 'archived');
 
-  const gridFt =
-    detail?.game.map?.gridFtPerCell != null
-      ? Number(detail.game.map.gridFtPerCell)
-      : 5;
+  const activeMap = useMemo(
+    () => maps.find((m) => m.id === activeMapId) ?? maps[0] ?? null,
+    [maps, activeMapId],
+  );
+
+  const gridFt = activeMap?.gridFtPerCell ?? 5;
+
+  const setActiveMap = async (mapId: string) => {
+    if (!gameId) return;
+    setMapBusy(true);
+    try {
+      await api(`/games/${gameId}/maps/active`, {
+        method: 'PATCH',
+        body: JSON.stringify({ mapId }),
+      });
+      setActiveMapId(mapId);
+      const m = maps.find((x) => x.id === mapId) ?? null;
+      syncNpcTokensFromMap(m);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setMapBusy(false);
+    }
+  };
+
+  const cycleMap = (dir: -1 | 1) => {
+    if (maps.length < 2) return;
+    const idx = maps.findIndex((m) => m.id === activeMapId);
+    const next = (idx + dir + maps.length) % maps.length;
+    void setActiveMap(maps[next]!.id);
+  };
+
+  const addMap = async () => {
+    if (!gameId) return;
+    setMapBusy(true);
+    try {
+      const { map } = await api<{ map: TacticalGameMap }>(`/games/${gameId}/maps`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      setMaps((prev) => [...prev, map]);
+      await setActiveMap(map.id);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setMapBusy(false);
+    }
+  };
+
+  const deleteActiveMap = async () => {
+    if (!gameId || !activeMapId) return;
+    setMapBusy(true);
+    try {
+      const data = await api<{ activeMapId: string | null }>(
+        `/games/${gameId}/maps/${activeMapId}`,
+        { method: 'DELETE' },
+      );
+      await loadMaps();
+      if (data.activeMapId) setActiveMapId(data.activeMapId);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setMapBusy(false);
+    }
+  };
+
+  const patchActiveMap = async (body: Record<string, unknown>) => {
+    if (!gameId || !activeMapId) return;
+    setMapBusy(true);
+    try {
+      const { map } = await api<{ map: TacticalGameMap }>(
+        `/games/${gameId}/maps/${activeMapId}`,
+        { method: 'PATCH', body: JSON.stringify(body) },
+      );
+      setMaps((prev) => prev.map((m) => (m.id === map.id ? map : m)));
+      if (map.id === activeMapId) syncNpcTokensFromMap(map);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setMapBusy(false);
+    }
+  };
+
+  const uploadMapImage = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      void patchActiveMap({ imageDataUrl: reader.result as string });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const applyMapFromServer = useCallback(
+    (map: TacticalGameMap) => {
+      setMaps((prev) => prev.map((m) => (m.id === map.id ? map : m)));
+      if (map.id === activeMapId) syncNpcTokensFromMap(map);
+    },
+    [activeMapId, syncNpcTokensFromMap],
+  );
+
+  const autoSyncMapTokens = useCallback(async () => {
+    if (!gameId || !activeMapId || !isDm) return;
+    try {
+      const { map } = await api<{ map: TacticalGameMap }>(
+        `/games/${gameId}/maps/${activeMapId}/sync-tokens`,
+        { method: 'POST' },
+      );
+      applyMapFromServer(map);
+    } catch {
+      /* auto-sync is best-effort */
+    }
+  }, [gameId, activeMapId, isDm, applyMapFromServer]);
+
+  useEffect(() => {
+    if (!gameId || !detail || !isDm || !activeMapId) return;
+    void autoSyncMapTokens();
+  }, [gameId, detail, isDm, activeMapId, autoSyncMapTokens]);
+
+  const syncMapTokens = async () => {
+    if (!gameId || !activeMapId) return;
+    setMapBusy(true);
+    try {
+      const { map } = await api<{ map: TacticalGameMap }>(
+        `/games/${gameId}/maps/${activeMapId}/sync-tokens`,
+        { method: 'POST' },
+      );
+      applyMapFromServer(map);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setMapBusy(false);
+    }
+  };
+
+  const layoutMapTokens = async (anchor?: MapLayoutAnchor) => {
+    if (!gameId || !activeMapId) return;
+    setMapBusy(true);
+    try {
+      const { map } = await api<{ map: TacticalGameMap }>(
+        `/games/${gameId}/maps/${activeMapId}/layout-tokens`,
+        {
+          method: 'POST',
+          body: JSON.stringify(anchor ?? {}),
+        },
+      );
+      setMaps((prev) => prev.map((m) => (m.id === map.id ? map : m)));
+      syncNpcTokensFromMap(map);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setMapBusy(false);
+    }
+  };
+
+  const moveMapToken = async (tokenId: string, x: number, y: number) => {
+    setMaps((prev) =>
+      prev.map((m) =>
+        m.id !== activeMapId
+          ? m
+          : {
+              ...m,
+              tokens: m.tokens.map((t) =>
+                t.id === tokenId ? { ...t, x, y, zone: 'map' as const } : t,
+              ),
+            },
+      ),
+    );
+    try {
+      await api(`/tokens/${tokenId}/move`, {
+        method: 'PATCH',
+        body: JSON.stringify({ x, y, zone: 'map' }),
+      });
+    } catch (e) {
+      setError(formatError(e));
+      await loadMaps();
+    }
+  };
 
   const headerActions = (
     <>
@@ -1071,6 +1276,7 @@ export default function GamePage() {
           display: 'flex',
           minHeight: 0,
           height: 'calc(100vh - 64px)',
+          overflow: 'hidden',
         }}
       >
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -1108,6 +1314,7 @@ export default function GamePage() {
                 flexDirection: 'row',
                 p: 2,
                 gap: 0,
+                overflow: 'hidden',
               }}
             >
               {isDm && (
@@ -1141,8 +1348,40 @@ export default function GamePage() {
               >
                 <TacticalMap
                   gameId={gameId}
-                  gridFtPerCell={gridFt}
                   isDm={isDm}
+                  maps={maps}
+                  activeMap={activeMap}
+                  activeMapId={activeMapId}
+                  initiativeActive={initiative?.active ?? false}
+                  mapBusy={mapBusy}
+                  drawTool={drawTool}
+                  drawColor={drawColor}
+                  onDrawToolChange={setDrawTool}
+                  onDrawColorChange={setDrawColor}
+                  onSelectMap={(id) => void setActiveMap(id)}
+                  onPrevMap={() => cycleMap(-1)}
+                  onNextMap={() => cycleMap(1)}
+                  onAddMap={() => void addMap()}
+                  onDeleteMap={() => void deleteActiveMap()}
+                  onToggleMapVisible={() =>
+                    activeMap && void patchActiveMap({ visible: !activeMap.visible })
+                  }
+                  onGridPresetChange={(preset) => void patchActiveMap({ gridPreset: preset })}
+                  onUploadImage={uploadMapImage}
+                  onRemoveImage={() => void patchActiveMap({ clearImage: true })}
+                  onSyncTokens={() => void syncMapTokens()}
+                  onLayoutTokens={(anchor) => void layoutMapTokens(anchor)}
+                  onClearDrawings={() => void patchActiveMap({ dmDrawings: [] })}
+                  onDrawingsChange={(drawings) => void patchActiveMap({ dmDrawings: drawings })}
+                  onTokenMove={(tokenId, x, y) => void moveMapToken(tokenId, x, y)}
+                  canDragToken={(t) =>
+                    isDm ||
+                    Boolean(
+                      t.characterId &&
+                        characters.find((c) => c.id === t.characterId)?.ownerUserId ===
+                          user?.id,
+                    )
+                  }
                   rollLog={rollLog}
                   onClearRollLog={() => setRollLog([])}
                   onApplyDamageFromRoll={

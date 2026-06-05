@@ -4,11 +4,16 @@ import { DEFAULT_GAME_SETTINGS } from './types.js';
 
 export function parseGameSettings(settings: unknown): GameSettings {
   const s = settings as Partial<GameSettings>;
+  const raw = settings as { activeMapId?: string | null };
   return {
     gridFtPerCell: s.gridFtPerCell ?? DEFAULT_GAME_SETTINGS.gridFtPerCell,
     playerTokenMovement:
       s.playerTokenMovement ?? DEFAULT_GAME_SETTINGS.playerTokenMovement,
     initiative: parseGameInitiative(settings),
+    activeMapId:
+      typeof raw.activeMapId === 'string' && raw.activeMapId.length > 0
+        ? raw.activeMapId
+        : null,
   };
 }
 

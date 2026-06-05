@@ -26,6 +26,7 @@ export interface GameSocketHandlers {
     targetName: string;
   }) => void;
   onTokenUpdated?: (token: unknown) => void;
+  onMapUpdated?: (actorUserId?: string) => void;
 }
 
 /**
@@ -91,6 +92,14 @@ export function useGameSocket(
 
     socket.on('token:updated', (payload: { token?: unknown }) => {
       if (payload?.token) handlersRef.current.onTokenUpdated?.(payload.token);
+    });
+
+    socket.on('map:updated', (payload: { actorUserId?: string }) => {
+      handlersRef.current.onMapUpdated?.(payload?.actorUserId);
+    });
+
+    socket.on('map:token_moved', () => {
+      handlersRef.current.onMapUpdated?.();
     });
 
     socket.on(

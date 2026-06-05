@@ -11,6 +11,7 @@ import {
   startGameInitiative,
 } from '../services/initiative-service.js';
 import { emitToGame } from '../lib/game-socket.js';
+import { syncActiveMapTokens } from '../services/map-service.js';
 
 function emitInitiativeUpdate(
   app: FastifyInstance,
@@ -42,7 +43,9 @@ export async function initiativeRoutes(app: FastifyInstance) {
         throw app.httpErrors.createError(access.status, access.message);
       }
       const initiative = await startGameInitiative(gameId);
+      await syncActiveMapTokens(gameId);
       emitInitiativeUpdate(app, gameId, initiative, request.userId);
+      emitToGame(app.io, gameId, 'map:updated', { actorUserId: request.userId });
       return { initiative };
     },
   );

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "server": "bun --watch src/index.ts",
+    "server": "bun --watch src/index.ts ../../packages/shared/dist",
     "dev": "bun run server",
     "start": "bun dist/index.js",
     "db:generate": "bun ../../scripts/prisma-env.ts generate",

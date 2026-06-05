@@ -15,6 +15,7 @@ import {
 } from '../services/character-generator.js';
 import { applyCharacterStatus } from '../services/character-status.js';
 import { characterMovementRange } from '../services/movement.js';
+import { deleteTokensForCharacter, syncActiveMapTokens } from '../services/map-service.js';
 import { emitToGame } from '../lib/game-socket.js';
 
 function broadcastCharacter(
@@ -125,7 +126,9 @@ export async function characterRoutes(app: FastifyInstance) {
             noHalflings: parsed.data.noHalflings,
           });
           const character = await persistCharacter(gameId, ownerUserId, generated, 'random');
+          await syncActiveMapTokens(gameId);
           broadcastCharacter(request, gameId, character);
+          emitToGame(request.server.io, gameId, 'map:updated', { actorUserId: request.userId });
           return { character };
         }
 
@@ -135,7 +138,9 @@ export async function characterRoutes(app: FastifyInstance) {
           name: parsed.data.name,
         });
         const character = await persistCharacter(gameId, ownerUserId, generated, 'manual');
+        await syncActiveMapTokens(gameId);
         broadcastCharacter(request, gameId, character);
+        emitToGame(request.server.io, gameId, 'map:updated', { actorUserId: request.userId });
         return { character };
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Character creation failed';
@@ -276,6 +281,12 @@ export async function characterRoutes(app: FastifyInstance) {
           include: { items: { orderBy: { sortOrder: 'asc' } } },
         });
       });
+      if (statusChange === 'archived') {
+        await deleteTokensForCharacter(characterId);
+        emitToGame(request.server.io, existing.gameId, 'map:updated', {
+          actorUserId: request.userId,
+        });
+      }
       broadcastCharacter(request, existing.gameId, character);
       return { character };
     },

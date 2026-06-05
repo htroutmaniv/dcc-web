@@ -396,6 +396,8 @@ export async function deleteGameMonster(
   gameId: string,
   monsterId: string,
 ): Promise<{ initiative: GameInitiativeState | null }> {
+  const { deleteTokensForMonster } = await import('./map-service.js');
+  await deleteTokensForMonster(monsterId);
   await prisma.gameMonster.delete({ where: { id: monsterId, gameId } });
   const initiative = await syncMonsterGroupInitiative(gameId);
   return { initiative };

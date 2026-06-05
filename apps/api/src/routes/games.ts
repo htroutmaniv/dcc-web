@@ -52,9 +52,9 @@ export async function gameRoutes(app: FastifyInstance) {
         dmUserId: request.userId!,
         title: parsed.data.title,
         inviteCode: generateInviteCode(),
-        map: { create: {} },
+        maps: { create: { name: 'Main map' } },
       },
-      include: { map: true },
+      include: { maps: true },
     });
     return { game, role: 'dm' as const };
   });
@@ -88,7 +88,10 @@ export async function gameRoutes(app: FastifyInstance) {
     }
     const game = await prisma.game.findUniqueOrThrow({
       where: { id: gameId },
-      include: { map: { include: { tokens: true } }, players: { include: { user: true } } },
+      include: {
+        maps: { include: { tokens: true }, orderBy: { sortOrder: 'asc' } },
+        players: { include: { user: true } },
+      },
     });
     return {
       game,
