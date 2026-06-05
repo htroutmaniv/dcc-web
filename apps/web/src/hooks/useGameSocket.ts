@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import type { GameInitiativeState } from '@dcc-web/shared';
 import type { Character, DiceResult } from '../types/game';
+import type { DiceRollLogEntry } from '../types/dice-roll-log';
 
 export interface GameSocketHandlers {
   /** Fired when socket connects and joins the game room — good time to resync. */
@@ -12,11 +13,19 @@ export interface GameSocketHandlers {
     actorUserId?: string,
   ) => void;
   onDiceRolled?: (payload: {
-    result: DiceResult;
+    result: DiceRollLogEntry | DiceResult;
     characterId?: string;
     actorUserId?: string;
   }) => void;
   onMonstersChanged?: (actorUserId?: string) => void;
+  onDamageApplied?: (payload: {
+    targetType: string;
+    targetId: string;
+    amount: number;
+    hpAfter: number;
+    targetName: string;
+  }) => void;
+  onTokenUpdated?: (token: unknown) => void;
 }
 
 /**
@@ -74,6 +83,14 @@ export function useGameSocket(
 
     socket.on('monsters:changed', (payload: { actorUserId?: string }) => {
       handlersRef.current.onMonstersChanged?.(payload?.actorUserId);
+    });
+
+    socket.on('damage:applied', (payload) => {
+      handlersRef.current.onDamageApplied?.(payload);
+    });
+
+    socket.on('token:updated', (payload: { token?: unknown }) => {
+      if (payload?.token) handlersRef.current.onTokenUpdated?.(payload.token);
     });
 
     socket.on(

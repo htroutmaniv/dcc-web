@@ -5,6 +5,7 @@ import {
   FormControl,
   IconButton,
   InputLabel,
+  Link,
   MenuItem,
   Select,
   Stack,
@@ -15,7 +16,10 @@ import ShuffleIcon from '@mui/icons-material/Shuffle';
 import DeleteIcon from '@mui/icons-material/Delete';
 import {
   formatMonsterSummary,
+  getTargetAc,
   isActiveInPlay,
+  isMonsterActive,
+  isMonsterKilled,
   type GameInitiativeState,
   type GameMonsterInstance,
 } from '@dcc-web/shared';
@@ -25,34 +29,35 @@ interface MonsterQuickMenuProps {
   monsters: GameMonsterInstance[];
   characters: Character[];
   initiative: GameInitiativeState | null;
-  selectedMonsterId: string | null;
-  attackTargetId: string | null;
-  onSelectMonster: (id: string | null) => void;
-  onAttackTargetChange: (characterId: string | null) => void;
+  monsterTargetById: Record<string, string>;
+  sheetMonsterId?: string | null;
+  onMonsterTargetChange: (monsterId: string, characterId: string | null) => void;
   onPatchHp: (monster: GameMonsterInstance, hpCurrent: number) => void;
+  onKillMonster: (monster: GameMonsterInstance) => void;
   onDeleteMonster: (monsterId: string) => void;
   onRollAttack: (monster: GameMonsterInstance, target: Character) => void;
-  onOpenSheet?: (monsterId: string) => void;
+  onOpenSheet: (monsterId: string) => void;
   busy?: boolean;
-  lastAttackRoll?: string | null;
+  lastAttackSummary?: string | null;
 }
 
 export function MonsterQuickMenu({
   monsters,
   characters,
   initiative,
-  selectedMonsterId,
-  attackTargetId,
-  onSelectMonster,
-  onAttackTargetChange,
+  monsterTargetById,
+  sheetMonsterId,
+  onMonsterTargetChange,
   onPatchHp,
+  onKillMonster,
   onDeleteMonster,
   onRollAttack,
   onOpenSheet,
   busy,
-  lastAttackRoll,
+  lastAttackSummary,
 }: MonsterQuickMenuProps) {
-  const livingMonsters = monsters.filter((m) => m.hpCurrent > 0);
+  const activeMonsters = useMemo(() => monsters.filter((m) => !isMonsterKilled(m)), [monsters]);
+  const slainMonsters = useMemo(() => monsters.filter((m) => isMonsterKilled(m)), [monsters]);
   const targets = useMemo(
     () =>
       characters.filter(
@@ -66,27 +71,22 @@ export function MonsterQuickMenu({
     [characters],
   );
 
-  const selectedMonster =
-    livingMonsters.find((m) => m.id === selectedMonsterId) ?? livingMonsters[0] ?? null;
-  const selectedTarget = targets.find((c) => c.id === attackTargetId) ?? null;
-
-  const pickRandomTarget = () => {
+  const pickRandomTarget = (monsterId: string) => {
     if (targets.length === 0) return;
     const pick = targets[Math.floor(Math.random() * targets.length)]!;
-    onAttackTargetChange(pick.id);
+    onMonsterTargetChange(monsterId, pick.id);
   };
 
-  const rollAttack = () => {
-    if (!selectedMonster || !selectedTarget) return;
-    onRollAttack(selectedMonster, selectedTarget);
+  const lootLabel = (m: GameMonsterInstance) => {
+    const n = m.items?.length ?? 0;
+    return n === 0 ? 'No loot' : `${n} item${n === 1 ? '' : 's'}`;
   };
-
-  const primaryAttack = selectedMonster?.sheet?.attacks[0];
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0, flex: 1 }}>
       <Typography variant="caption" color="text.secondary" fontWeight={700}>
-        Monsters ({livingMonsters.length})
+        Monsters ({activeMonsters.length} active
+        {slainMonsters.length > 0 ? `, ${slainMonsters.length} slain` : ''})
       </Typography>
 
       {initiative?.active && (
@@ -95,148 +95,247 @@ export function MonsterQuickMenu({
         </Typography>
       )}
 
-      <FormControl size="small" fullWidth disabled={targets.length === 0}>
-        <InputLabel id="attack-target-label">Attack target</InputLabel>
-        <Select
-          labelId="attack-target-label"
-          label="Attack target"
-          value={attackTargetId ?? ''}
-          onChange={(e) => onAttackTargetChange(e.target.value || null)}
-        >
-          <MenuItem value="">
-            <em>Select PC</em>
-          </MenuItem>
-          {targets.map((c) => (
-            <MenuItem key={c.id} value={c.id}>
-              {c.name}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
-
-      <Stack direction="row" spacing={0.5}>
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={<ShuffleIcon />}
-          onClick={pickRandomTarget}
-          disabled={busy || targets.length === 0}
-          sx={{ flex: 1, fontSize: '0.7rem' }}
-        >
-          Random
-        </Button>
-        <Button
-          size="small"
-          variant="contained"
-          color="secondary"
-          startIcon={<CasinoIcon />}
-          onClick={rollAttack}
-          disabled={busy || !selectedMonster || !selectedTarget}
-          sx={{ flex: 1, fontSize: '0.7rem' }}
-        >
-          Attack
-        </Button>
-      </Stack>
-
-      {lastAttackRoll && (
+      {lastAttackSummary && (
         <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-word' }}>
-          {lastAttackRoll}
+          {lastAttackSummary}
         </Typography>
       )}
 
       <Box
         sx={{
           flex: 1,
-          minHeight: 80,
-          maxHeight: 220,
+          minHeight: 120,
           overflow: 'auto',
           border: 1,
           borderColor: 'divider',
           borderRadius: 1,
         }}
       >
-        {livingMonsters.length === 0 ? (
+        {activeMonsters.length === 0 && slainMonsters.length === 0 ? (
           <Typography variant="caption" color="text.secondary" sx={{ p: 1, display: 'block' }}>
-            No active monsters
+            No monsters in play
           </Typography>
         ) : (
-          livingMonsters.map((m) => {
-            const selected = m.id === (selectedMonsterId ?? livingMonsters[0]?.id);
-            return (
-              <Box
-                key={m.id}
-                onClick={() => onSelectMonster(m.id)}
-                onDoubleClick={() => onOpenSheet?.(m.id)}
-                title="Double-click for full sheet"
-                sx={{
-                  px: 1,
-                  py: 0.75,
-                  cursor: 'pointer',
-                  bgcolor: selected ? 'action.selected' : 'transparent',
-                  borderBottom: 1,
-                  borderColor: 'divider',
-                  '&:hover': { bgcolor: 'action.hover' },
-                }}
-              >
-                <Stack direction="row" alignItems="center" justifyContent="space-between">
-                  <Box sx={{ minWidth: 0, flex: 1 }}>
-                    <Typography variant="body2" fontWeight={selected ? 700 : 500} noWrap>
-                      {m.name}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" display="block" noWrap>
-                      {formatMonsterSummary(m)}
-                    </Typography>
-                  </Box>
-                  <IconButton
-                    size="small"
-                    color="error"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteMonster(m.id);
-                    }}
-                    disabled={busy}
-                  >
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                </Stack>
-                <Stack
-                  direction="row"
-                  spacing={0.25}
-                  alignItems="center"
-                  sx={{ mt: 0.25 }}
-                  onClick={(e) => e.stopPropagation()}
+          <>
+            {activeMonsters.map((m) => {
+              const targetId = monsterTargetById[m.id] ?? '';
+              const target = targets.find((c) => c.id === targetId);
+              const primaryAttack = m.sheet?.attacks[0];
+              const sheetOpen = sheetMonsterId === m.id;
+              const canFight = isMonsterActive(m);
+
+              return (
+                <Box
+                  key={m.id}
+                  sx={{
+                    px: 1,
+                    py: 0.75,
+                    bgcolor: sheetOpen ? 'action.selected' : 'transparent',
+                    borderBottom: 1,
+                    borderColor: 'divider',
+                  }}
                 >
-                  <Button
-                    size="small"
-                    sx={{ minWidth: 24, px: 0.25, py: 0 }}
-                    disabled={busy || m.hpCurrent <= 0}
-                    onClick={() => onPatchHp(m, m.hpCurrent - 1)}
-                  >
-                    −
-                  </Button>
-                  <Typography variant="caption" sx={{ minWidth: 40, textAlign: 'center' }}>
-                    {m.hpCurrent}/{m.hpMax}
-                  </Typography>
-                  <Button
-                    size="small"
-                    sx={{ minWidth: 24, px: 0.25, py: 0 }}
-                    disabled={busy || m.hpCurrent >= m.hpMax}
-                    onClick={() => onPatchHp(m, m.hpCurrent + 1)}
-                  >
-                    +
-                  </Button>
-                </Stack>
-              </Box>
-            );
-          })
+                  <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Link
+                        component="button"
+                        type="button"
+                        variant="body2"
+                        fontWeight={700}
+                        onClick={() => onOpenSheet(m.id)}
+                        sx={{
+                          textAlign: 'left',
+                          display: 'block',
+                          maxWidth: '100%',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {m.name}
+                      </Link>
+                      <Typography variant="caption" color="text.secondary" display="block" noWrap>
+                        {formatMonsterSummary(m)}
+                      </Typography>
+                    </Box>
+                    <Stack direction="row" spacing={0.25} alignItems="center">
+                      <Button
+                        size="small"
+                        color="error"
+                        variant="outlined"
+                        disabled={busy || isMonsterKilled(m)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onKillMonster(m);
+                        }}
+                        sx={{ minWidth: 0, px: 0.75, py: 0, fontSize: '0.65rem', lineHeight: 1.2 }}
+                      >
+                        Kill
+                      </Button>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={() => onDeleteMonster(m.id)}
+                        disabled={busy}
+                        aria-label={`Remove ${m.name}`}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                  </Stack>
+
+                  <Stack direction="row" spacing={0.25} alignItems="center" sx={{ mt: 0.5 }}>
+                    <Button
+                      size="small"
+                      sx={{ minWidth: 24, px: 0.25, py: 0 }}
+                      disabled={busy || m.hpCurrent <= 0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onPatchHp(m, m.hpCurrent - 1);
+                      }}
+                    >
+                      −
+                    </Button>
+                    <Typography variant="caption" sx={{ minWidth: 44, textAlign: 'center' }}>
+                      {m.hpCurrent}/{m.hpMax}
+                    </Typography>
+                    <Button
+                      size="small"
+                      sx={{ minWidth: 24, px: 0.25, py: 0 }}
+                      disabled={busy || m.hpCurrent >= m.hpMax}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onPatchHp(m, m.hpCurrent + 1);
+                      }}
+                    >
+                      +
+                    </Button>
+                  </Stack>
+
+                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }}>
+                    <FormControl
+                      size="small"
+                      sx={{ flex: 1, minWidth: 0 }}
+                      disabled={targets.length === 0 || !canFight}
+                    >
+                      <InputLabel id={`tgt-${m.id}`} sx={{ fontSize: '0.75rem' }}>
+                        Target
+                      </InputLabel>
+                      <Select
+                        labelId={`tgt-${m.id}`}
+                        label="Target"
+                        value={targetId}
+                        onChange={(e) => onMonsterTargetChange(m.id, e.target.value || null)}
+                        onClick={(e) => e.stopPropagation()}
+                        sx={{ fontSize: '0.8rem' }}
+                      >
+                        <MenuItem value="">
+                          <em>PC</em>
+                        </MenuItem>
+                        {targets.map((c) => (
+                          <MenuItem key={c.id} value={c.id}>
+                            {c.name} (AC {getTargetAc(c.combat)})
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <IconButton
+                      size="small"
+                      onClick={() => pickRandomTarget(m.id)}
+                      disabled={busy || targets.length === 0 || !canFight}
+                      title="Random target"
+                    >
+                      <ShuffleIcon fontSize="small" />
+                    </IconButton>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color="secondary"
+                      disabled={busy || !target || !canFight}
+                      onClick={() => target && onRollAttack(m, target)}
+                      sx={{ minWidth: 0, px: 0.75, fontSize: '0.7rem' }}
+                      startIcon={<CasinoIcon sx={{ fontSize: 14 }} />}
+                    >
+                      Atk
+                    </Button>
+                  </Stack>
+
+                  {primaryAttack && target && canFight && (
+                    <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.25 }}>
+                      +{primaryAttack.attackBonus} vs AC {getTargetAc(target.combat)} · {primaryAttack.damage}
+                    </Typography>
+                  )}
+                </Box>
+              );
+            })}
+
+            {slainMonsters.length > 0 && (
+              <>
+                <Typography
+                  variant="caption"
+                  color="error.main"
+                  fontWeight={700}
+                  sx={{ px: 1, pt: 1, pb: 0.25, display: 'block' }}
+                >
+                  Slain — click name for loot
+                </Typography>
+                {slainMonsters.map((m) => {
+                  const sheetOpen = sheetMonsterId === m.id;
+                  return (
+                    <Box
+                      key={m.id}
+                      sx={{
+                        px: 1,
+                        py: 0.6,
+                        bgcolor: sheetOpen ? 'action.selected' : 'action.hover',
+                        opacity: 0.92,
+                        borderBottom: 1,
+                        borderColor: 'divider',
+                      }}
+                    >
+                      <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
+                        <Box sx={{ minWidth: 0, flex: 1 }}>
+                          <Link
+                            component="button"
+                            type="button"
+                            variant="body2"
+                            fontWeight={600}
+                            color="error.light"
+                            onClick={() => onOpenSheet(m.id)}
+                            sx={{
+                              textAlign: 'left',
+                              display: 'block',
+                              maxWidth: '100%',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {m.name}
+                          </Link>
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            {lootLabel(m)}
+                          </Typography>
+                        </Box>
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => onDeleteMonster(m.id)}
+                          disabled={busy}
+                          aria-label={`Remove ${m.name} from slain list`}
+                          title="Remove from game"
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </Box>
+                  );
+                })}
+              </>
+            )}
+          </>
         )}
       </Box>
-
-      {selectedMonster && primaryAttack && (
-        <Typography variant="caption" color="text.secondary">
-          {primaryAttack.name}: +{primaryAttack.attackBonus} {primaryAttack.damage}
-        </Typography>
-      )}
     </Box>
   );
 }

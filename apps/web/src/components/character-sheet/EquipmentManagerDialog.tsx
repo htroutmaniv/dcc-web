@@ -20,6 +20,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import NotesIcon from '@mui/icons-material/Notes';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import {
   armorTooltipLines,
   consumableFlagsToProperties,
@@ -38,7 +39,13 @@ import {
   type EquipmentSectionKey,
 } from '@dcc-web/shared';
 import { api } from '../../api/client';
+import {
+  TransferItemDialog,
+  type TransferableItem,
+  type TransferInventoryResult,
+} from '../inventory/TransferItemDialog';
 import type { Character, CharacterItem } from '../../types/game';
+import type { GameMonsterInstance } from '@dcc-web/shared';
 import { formatError } from '../../utils/errors';
 
 interface CatalogEntry {
@@ -61,6 +68,10 @@ interface EquipmentManagerDialogProps {
   open: boolean;
   character: Character;
   canEdit: boolean;
+  gameId?: string;
+  partyCharacters?: Character[];
+  partyMonsters?: GameMonsterInstance[];
+  onInventoryTransferred?: (result: TransferInventoryResult) => void;
   onClose: () => void;
   onSaved: (character: Character) => void;
 }
@@ -631,12 +642,17 @@ export function EquipmentManagerDialog({
   open,
   character,
   canEdit,
+  gameId,
+  partyCharacters = [],
+  partyMonsters = [],
+  onInventoryTransferred,
   onClose,
   onSaved,
 }: EquipmentManagerDialogProps) {
   const [items, setItems] = useState<EquipmentItemDraft[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [transferItem, setTransferItem] = useState<TransferableItem | null>(null);
   const [itemForm, setItemForm] = useState<ItemFormState>({
     open: false,
     mode: 'add',
@@ -703,6 +719,24 @@ export function EquipmentManagerDialog({
     );
     setNotesItem(null);
   };
+
+  const handleTransferred = (result: TransferInventoryResult) => {
+    onInventoryTransferred?.(result);
+    const updated =
+      result.sourceCharacter?.id === character.id
+        ? result.sourceCharacter
+        : result.targetCharacter?.id === character.id
+          ? result.targetCharacter
+          : null;
+    if (updated?.items) {
+      setItems(updated.items.map(toDraft));
+    }
+  };
+
+  const canTransfer =
+    canEdit &&
+    gameId != null &&
+    (partyCharacters.some((c) => c.id !== character.id) || partyMonsters.length > 0);
 
   return (
     <>
@@ -777,6 +811,25 @@ export function EquipmentManagerDialog({
                               </IconButton>
                             </span>
                           </Tooltip>
+                          {canTransfer && !item.id.startsWith('new-') && (
+                            <Tooltip title="Transfer to another inventory">
+                              <IconButton
+                                size="small"
+                                onClick={() =>
+                                  setTransferItem({
+                                    id: item.id,
+                                    name: item.name,
+                                    category: item.category,
+                                    quantity: item.quantity,
+                                    notes: item.notes,
+                                    properties: item.properties,
+                                  })
+                                }
+                              >
+                                <SwapHorizIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                           {canEdit && (
                             <>
                               <IconButton
@@ -837,6 +890,21 @@ export function EquipmentManagerDialog({
           });
         }}
       />
+
+      {gameId && transferItem && (
+        <TransferItemDialog
+          open
+          onClose={() => setTransferItem(null)}
+          gameId={gameId}
+          sourceType="character"
+          sourceId={character.id}
+          sourceLabel={character.name}
+          item={transferItem}
+          characters={partyCharacters}
+          monsters={partyMonsters}
+          onTransferred={handleTransferred}
+        />
+      )}
 
       <Dialog open={notesItem != null} onClose={() => setNotesItem(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Item notes — {notesItem?.name}</DialogTitle>

@@ -8,24 +8,36 @@ import {
   IconButton,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import SaveIcon from '@mui/icons-material/Save';
 import AddIcon from '@mui/icons-material/Add';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import {
   defaultMonsterSheet,
+  isMonsterKilled,
   parseMonsterSheet,
   type GameMonsterInstance,
   type MonsterAttack,
   type MonsterSheetData,
 } from '@dcc-web/shared';
 import { api } from '../../api/client';
+import {
+  TransferItemDialog,
+  type TransferableItem,
+  type TransferInventoryResult,
+} from '../inventory/TransferItemDialog';
+import type { Character } from '../../types/game';
 import { formatError } from '../../utils/errors';
 
 interface MonsterSheetViewProps {
   gameId: string;
   monster: GameMonsterInstance;
+  partyCharacters?: Character[];
+  partyMonsters?: GameMonsterInstance[];
+  onInventoryTransferred?: (result: TransferInventoryResult) => void;
   onClose: () => void;
   onMonsterUpdated: (monster: GameMonsterInstance) => void;
 }
@@ -33,6 +45,9 @@ interface MonsterSheetViewProps {
 export function MonsterSheetView({
   gameId,
   monster: initial,
+  partyCharacters = [],
+  partyMonsters = [],
+  onInventoryTransferred,
   onClose,
   onMonsterUpdated,
 }: MonsterSheetViewProps) {
@@ -46,6 +61,7 @@ export function MonsterSheetView({
   const [notes, setNotes] = useState(initial.notes);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [transferItem, setTransferItem] = useState<TransferableItem | null>(null);
 
   useEffect(() => {
     setMonster(initial);
@@ -108,6 +124,24 @@ export function MonsterSheetView({
   }, [gameId, monster.id, sheet, hpCurrent, hpMax, ac, notes, onMonsterUpdated]);
 
   const items = monster.items ?? [];
+  const slain = isMonsterKilled(monster);
+
+  const handleTransferred = (result: TransferInventoryResult) => {
+    onInventoryTransferred?.(result);
+    const updated =
+      result.sourceMonster?.id === monster.id
+        ? result.sourceMonster
+        : result.targetMonster?.id === monster.id
+          ? result.targetMonster
+          : null;
+    if (updated) {
+      setMonster(updated);
+      onMonsterUpdated(updated);
+    }
+  };
+
+  const canTransfer =
+    partyCharacters.length > 0 || partyMonsters.some((m) => m.id !== monster.id);
 
   return (
     <Box
@@ -143,6 +177,11 @@ export function MonsterSheetView({
       </Stack>
 
       <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+        {slain && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Slain — HP is 0. Loot and equipment are listed below for distribution.
+          </Alert>
+        )}
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
             {error}
@@ -282,12 +321,45 @@ export function MonsterSheetView({
             No items (rolled from loot pool on spawn, if assigned).
           </Typography>
         ) : (
-          <Stack spacing={0.5}>
+          <Stack spacing={0.75}>
             {items.map((item) => (
-              <Typography key={item.id} variant="body2">
-                {item.name} ×{item.quantity}
-                {item.notes ? ` — ${item.notes}` : ''}
-              </Typography>
+              <Stack
+                key={item.id}
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+                sx={{
+                  py: 0.5,
+                  px: 1,
+                  border: 1,
+                  borderColor: 'divider',
+                  borderRadius: 1,
+                }}
+              >
+                <Typography variant="body2" sx={{ minWidth: 0, flex: 1 }}>
+                  {item.name} ×{item.quantity}
+                  {item.notes ? ` — ${item.notes}` : ''}
+                </Typography>
+                {canTransfer && (
+                  <Tooltip title="Transfer to PC or another creature">
+                    <IconButton
+                      size="small"
+                      onClick={() =>
+                        setTransferItem({
+                          id: item.id,
+                          name: item.name,
+                          category: item.category,
+                          quantity: item.quantity,
+                          notes: item.notes,
+                          properties: item.properties,
+                        })
+                      }
+                    >
+                      <SwapHorizIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Stack>
             ))}
           </Stack>
         )}
@@ -302,6 +374,21 @@ export function MonsterSheetView({
           sx={{ mt: 2 }}
         />
       </Box>
+
+      {transferItem && (
+        <TransferItemDialog
+          open
+          onClose={() => setTransferItem(null)}
+          gameId={gameId}
+          sourceType="monster"
+          sourceId={monster.id}
+          sourceLabel={monster.name}
+          item={transferItem}
+          characters={partyCharacters}
+          monsters={partyMonsters}
+          onTransferred={handleTransferred}
+        />
+      )}
     </Box>
   );
 }

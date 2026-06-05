@@ -280,6 +280,8 @@ model MapToken {
   zone         TokenZone @default(holding)
   color        String    @default("#c9a227")
   iconUrl      String?   @map("icon_url")
+  hpMax        Int?      @map("hp_max")
+  hpCurrent    Int?      @map("hp_current")
   sortOrder    Int       @default(0) @map("sort_order")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
@@ -300,6 +302,7 @@ model DiceRoll {
   modifier    Int
   total       Int
   reason      String?
+  rollKind    String   @default("unspecified") @map("roll_kind")
   createdAt   DateTime @default(now()) @map("created_at")
 
   game      Game       @relation(fields: [gameId], references: [id], onDelete: Cascade)

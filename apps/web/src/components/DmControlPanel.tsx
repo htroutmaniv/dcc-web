@@ -14,15 +14,15 @@ interface DmControlPanelProps {
   busy?: boolean;
   monsters: GameMonsterInstance[];
   characters: Character[];
-  selectedMonsterId: string | null;
-  attackTargetId: string | null;
-  onSelectMonster: (id: string | null) => void;
-  onAttackTargetChange: (id: string | null) => void;
+  monsterTargetById: Record<string, string>;
+  sheetMonsterId?: string | null;
+  onMonsterTargetChange: (monsterId: string, characterId: string | null) => void;
   onPatchMonsterHp: (monster: GameMonsterInstance, hpCurrent: number) => void;
+  onKillMonster: (monster: GameMonsterInstance) => void;
   onDeleteMonster: (monsterId: string) => void;
   onRollMonsterAttack: (monster: GameMonsterInstance, target: Character) => void;
-  onOpenMonsterSheet?: (monsterId: string) => void;
-  lastMonsterAttackRoll?: string | null;
+  onOpenMonsterSheet: (monsterId: string) => void;
+  lastAttackSummary?: string | null;
 }
 
 export function DmControlPanel({
@@ -33,15 +33,15 @@ export function DmControlPanel({
   busy = false,
   monsters,
   characters,
-  selectedMonsterId,
-  attackTargetId,
-  onSelectMonster,
-  onAttackTargetChange,
+  monsterTargetById,
+  sheetMonsterId,
+  onMonsterTargetChange,
   onPatchMonsterHp,
+  onKillMonster,
   onDeleteMonster,
   onRollMonsterAttack,
   onOpenMonsterSheet,
-  lastMonsterAttackRoll,
+  lastAttackSummary,
 }: DmControlPanelProps) {
   const active = initiative?.active ?? false;
 
@@ -117,16 +117,16 @@ export function DmControlPanel({
           monsters={monsters}
           characters={characters}
           initiative={initiative}
-          selectedMonsterId={selectedMonsterId}
-          attackTargetId={attackTargetId}
-          onSelectMonster={onSelectMonster}
-          onAttackTargetChange={onAttackTargetChange}
+          monsterTargetById={monsterTargetById}
+          sheetMonsterId={sheetMonsterId}
+          onMonsterTargetChange={onMonsterTargetChange}
           onPatchHp={onPatchMonsterHp}
+          onKillMonster={onKillMonster}
           onDeleteMonster={onDeleteMonster}
           onRollAttack={onRollMonsterAttack}
           onOpenSheet={onOpenMonsterSheet}
           busy={busy}
-          lastAttackRoll={lastMonsterAttackRoll}
+          lastAttackSummary={lastAttackSummary}
         />
       </Box>
     </Box>

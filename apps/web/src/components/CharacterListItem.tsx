@@ -14,18 +14,43 @@ import {
 import {
   getActiveLightItemId,
   isActiveInPlay,
+  isMonsterActive,
+  isMonsterKilled,
   listLightSourceOptions,
+  parseAttackOutcome,
+  stripRollTargetTag,
+  type GameMonsterInstance,
 } from '@dcc-web/shared';
 import { canExpendLightSource } from '../utils/consumables';
-import type { Character, DiceResult } from '../types/game';
-import type { CombatRollKind } from '../utils/combat-rolls';
+import type { Character } from '../types/game';
+import type { DiceRollLogEntry } from '../types/dice-roll-log';
+import type { CombatRollKind } from '../utils/character-rolls';
 import { getConsumableCounts, isUsingLightSource } from '../utils/consumables';
+import {
+  formatWeaponLabel,
+  getWeaponItems,
+  resolveSelectedWeaponId,
+} from '../utils/weapons';
+
+export type CombatTargetOption = {
+  type: 'monster' | 'npc';
+  id: string;
+  label: string;
+  ac: number;
+};
 
 interface CharacterListItemProps {
   character: Character;
   selected?: boolean;
   onSelect: () => void;
   onCombatRoll: (kind: CombatRollKind) => void;
+  onPatchHp?: (hpCurrent: number) => void;
+  canEditHp?: boolean;
+  hpAdjusting?: boolean;
+  onSelectWeapon?: (weaponId: string) => void;
+  combatTargets?: CombatTargetOption[];
+  attackTargetId?: string;
+  onAttackTargetChange?: (targetId: string | null) => void;
   onOpenConsume?: (kind: 'food' | 'drink') => void;
   onSelectActiveLight?: (lightItemId: string | null) => void;
   onToggleLightLit?: (lit: boolean) => void;
@@ -40,7 +65,7 @@ interface CharacterListItemProps {
   onEndTurn?: () => void;
   endingTurn?: boolean;
   rollingKind?: CombatRollKind | null;
-  lastRoll?: DiceResult | null;
+  lastRoll?: DiceRollLogEntry | null;
 }
 
 const ROLL_BUTTONS: { kind: CombatRollKind; label: string }[] = [
@@ -49,11 +74,38 @@ const ROLL_BUTTONS: { kind: CombatRollKind; label: string }[] = [
   { kind: 'damage', label: 'Dmg' },
 ];
 
+export function buildCombatTargetOptions(
+  monsters: GameMonsterInstance[],
+  npcTokens: { id: string; label: string }[],
+): CombatTargetOption[] {
+  const out: CombatTargetOption[] = [];
+  for (const m of monsters) {
+    if (isMonsterKilled(m) || !isMonsterActive(m)) continue;
+    out.push({
+      type: 'monster',
+      id: m.id,
+      label: m.name,
+      ac: m.ac,
+    });
+  }
+  for (const t of npcTokens) {
+    out.push({ type: 'npc', id: t.id, label: t.label, ac: 10 });
+  }
+  return out;
+}
+
 export function CharacterListItem({
   character,
   selected,
   onSelect,
   onCombatRoll,
+  onPatchHp,
+  canEditHp,
+  hpAdjusting,
+  onSelectWeapon,
+  combatTargets = [],
+  attackTargetId = '',
+  onAttackTargetChange,
   onOpenConsume,
   onSelectActiveLight,
   onToggleLightLit,
@@ -70,8 +122,13 @@ export function CharacterListItem({
   rollingKind,
   lastRoll,
 }: CharacterListItemProps) {
-  const hpCurrent = character.combat?.hpCurrent ?? '—';
-  const hpMax = character.combat?.hpMax ?? '—';
+  const hpNum =
+    typeof character.combat?.hpCurrent === 'number' ? character.combat.hpCurrent : null;
+  const hpMaxNum =
+    typeof character.combat?.hpMax === 'number' ? character.combat.hpMax : null;
+  const hpCurrent = hpNum ?? '—';
+  const hpMax = hpMaxNum ?? '—';
+  const canAdjustHp = Boolean(canEditHp && onPatchHp && hpNum !== null && hpMaxNum !== null);
   const ac = character.combat?.ac ?? '—';
   const isDead = character.status === 'dead';
   const deadColor = 'error.main';
@@ -85,6 +142,10 @@ export function CharacterListItem({
     : { ok: false as const, message: 'Select a light source' };
   const inPlay = isActiveInPlay(character);
   const showTurnHighlight = initiativeActive && isInitiativeTurn;
+  const weapons = getWeaponItems(character);
+  const selectedWeaponId = resolveSelectedWeaponId(character) ?? '';
+  const showCombatTargets = initiativeActive && combatTargets.length > 0;
+  const lastOutcome = lastRoll ? parseAttackOutcome(lastRoll.reason) : null;
 
   return (
     <Box
@@ -149,6 +210,36 @@ export function CharacterListItem({
         </Typography>
       </Box>
 
+      {canAdjustHp && (
+        <Stack
+          direction="row"
+          spacing={0.25}
+          alignItems="center"
+          sx={{ mt: 0.5 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Button
+            size="small"
+            sx={{ minWidth: 24, px: 0.25, py: 0 }}
+            disabled={hpAdjusting || hpNum! <= 0}
+            onClick={() => onPatchHp!(hpNum! - 1)}
+          >
+            −
+          </Button>
+          <Typography variant="caption" sx={{ minWidth: 52, textAlign: 'center' }}>
+            {hpNum}/{hpMaxNum}
+          </Typography>
+          <Button
+            size="small"
+            sx={{ minWidth: 24, px: 0.25, py: 0 }}
+            disabled={hpAdjusting || hpNum! >= hpMaxNum!}
+            onClick={() => onPatchHp!(hpNum! + 1)}
+          >
+            +
+          </Button>
+        </Stack>
+      )}
+
       <Box sx={{ mt: 0.75 }} onClick={(e) => e.stopPropagation()}>
         <FormControlLabel
           sx={{ ml: 0, alignItems: 'center', display: 'flex' }}
@@ -156,7 +247,7 @@ export function CharacterListItem({
             <Checkbox
               size="small"
               checked={inPlay}
-              disabled={!canToggleInPlay || isDead || consumableAdjusting}
+              disabled={!canToggleInPlay || isDead || consumableAdjusting || hpAdjusting}
               onChange={(e) => onToggleInPlay?.(e.target.checked)}
             />
           }
@@ -188,6 +279,49 @@ export function CharacterListItem({
           </Button>
         )}
       </Box>
+
+      {weapons.length > 0 && (
+        <Box sx={{ mt: 0.5 }} onClick={(e) => e.stopPropagation()}>
+          <FormControl size="small" fullWidth disabled={consumableAdjusting}>
+            <InputLabel id={`weapon-${character.id}`}>Weapon</InputLabel>
+            <Select
+              labelId={`weapon-${character.id}`}
+              label="Weapon"
+              value={selectedWeaponId}
+              onChange={(e) => onSelectWeapon?.(e.target.value)}
+            >
+              {weapons.map((w) => (
+                <MenuItem key={w.id} value={w.id}>
+                  {formatWeaponLabel(w)}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+      )}
+
+      {showCombatTargets && (
+        <Box sx={{ mt: 0.5 }} onClick={(e) => e.stopPropagation()}>
+          <FormControl size="small" fullWidth disabled={isRolling}>
+            <InputLabel id={`atk-tgt-${character.id}`}>Attack target</InputLabel>
+            <Select
+              labelId={`atk-tgt-${character.id}`}
+              label="Attack target"
+              value={attackTargetId}
+              onChange={(e) => onAttackTargetChange?.(e.target.value || null)}
+            >
+              <MenuItem value="">
+                <em>Select target</em>
+              </MenuItem>
+              {combatTargets.map((t) => (
+                <MenuItem key={`${t.type}-${t.id}`} value={`${t.type}:${t.id}`}>
+                  {t.label} (AC {t.ac})
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+      )}
 
       <Box sx={{ mt: 0.5 }} onClick={(e) => e.stopPropagation()}>
         <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
@@ -296,23 +430,51 @@ export function CharacterListItem({
         flexWrap="wrap"
         onClick={(e) => e.stopPropagation()}
       >
-        {ROLL_BUTTONS.map(({ kind, label }) => (
-          <Button
-            key={kind}
-            size="small"
-            variant="outlined"
-            disabled={isRolling}
-            onClick={() => onCombatRoll(kind)}
-            sx={{ minWidth: 0, py: 0.2, px: 0.75, fontSize: '0.7rem' }}
-          >
-            {rollingKind === kind ? <CircularProgress size={12} /> : label}
-          </Button>
-        ))}
+        {ROLL_BUTTONS.map(({ kind, label }) => {
+          const needsTarget =
+            initiativeActive && (kind === 'toHit' || kind === 'damage') && combatTargets.length > 0;
+          const disabled =
+            isRolling || (needsTarget && !attackTargetId);
+          return (
+            <Button
+              key={kind}
+              size="small"
+              variant="outlined"
+              disabled={disabled}
+              onClick={() => onCombatRoll(kind)}
+              sx={{ minWidth: 0, py: 0.2, px: 0.75, fontSize: '0.7rem' }}
+            >
+              {rollingKind === kind ? <CircularProgress size={12} /> : label}
+            </Button>
+          );
+        })}
       </Stack>
 
       {lastRoll && (
-        <Typography variant="caption" color="success.main" sx={{ mt: 0.5, display: 'block' }}>
-          <strong>{lastRoll.total}</strong> ({lastRoll.notation})
+        <Typography
+          variant="caption"
+          sx={{
+            mt: 0.5,
+            display: 'block',
+            color:
+              lastOutcome === 'hit'
+                ? 'success.main'
+                : lastOutcome === 'miss'
+                  ? 'error.main'
+                  : 'success.main',
+          }}
+        >
+          <strong>{lastRoll.total}</strong> ({stripRollTargetTag(lastRoll.reason) || lastRoll.notation})
+          {lastOutcome === 'hit' && (
+            <Box component="span" sx={{ ml: 0.5, fontWeight: 800 }}>
+              Success
+            </Box>
+          )}
+          {lastOutcome === 'miss' && (
+            <Box component="span" sx={{ ml: 0.5, fontWeight: 800 }}>
+              Failure
+            </Box>
+          )}
         </Typography>
       )}
     </Box>

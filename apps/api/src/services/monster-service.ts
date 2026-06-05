@@ -11,11 +11,13 @@ import {
   scaleMonsterStats,
   sortInitiativeEntries,
   spawnMonstersSchema,
+  isMonsterKilled,
   type GameInitiativeState,
   type GameMonsterInstance,
   type InitiativeEntry,
   type LootPoolEntry,
   type MonsterSheetData,
+  type MonsterStatsJson,
 } from '@dcc-web/shared';
 import type { Prisma } from '@prisma/client';
 import type { z } from 'zod';
@@ -67,7 +69,7 @@ function syncFlatFromSheet(
   };
 }
 
-function toMonsterInstance(
+export function toMonsterInstance(
   row: {
     id: string;
     gameId: string;
@@ -297,13 +299,20 @@ export async function patchGameMonster(
     stats?: Record<string, unknown>;
     combat?: Record<string, unknown>;
   },
-): Promise<GameMonsterInstance> {
+): Promise<{ monster: GameMonsterInstance; initiative: GameInitiativeState | null }> {
   const existing = await prisma.gameMonster.findFirstOrThrow({
     where: { id: monsterId, gameId },
   });
   const hpMax = patch.hpMax ?? existing.hpMax;
   let hpCurrent = patch.hpCurrent ?? existing.hpCurrent;
   if (hpCurrent > hpMax) hpCurrent = hpMax;
+
+  const statsBefore = existing.stats as MonsterStatsJson | undefined;
+  const statsAfter = (
+    patch.stats !== undefined ? patch.stats : existing.stats
+  ) as MonsterStatsJson | undefined;
+  const inInitiativeBefore =
+    existing.hpCurrent > 0 && !isMonsterKilled({ stats: statsBefore });
 
   let sheet = parseMonsterSheet(existing.sheet);
   if (patch.sheet) sheet = patch.sheet;
@@ -338,7 +347,23 @@ export async function patchGameMonster(
     },
     include: { items: { orderBy: { sortOrder: 'asc' } } },
   });
-  return toMonsterInstance(row, row.items);
+
+  const inInitiativeAfter =
+    row.hpCurrent > 0 && !isMonsterKilled({ stats: row.stats as MonsterStatsJson | undefined });
+  let initiative: GameInitiativeState | null = null;
+  if (inInitiativeBefore !== inInitiativeAfter) {
+    initiative = await syncMonsterGroupInitiative(gameId);
+  }
+
+  return { monster: toMonsterInstance(row, row.items), initiative };
+}
+
+function filterInitiativeMonsters<T extends { hpCurrent: number; stats: unknown }>(
+  rows: T[],
+): T[] {
+  return rows.filter(
+    (m) => m.hpCurrent > 0 && !isMonsterKilled({ stats: m.stats as MonsterStatsJson | undefined }),
+  );
 }
 
 export async function replaceMonsterItems(
@@ -382,9 +407,12 @@ export async function syncMonsterGroupInitiative(
 ): Promise<GameInitiativeState | null> {
   const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
   const state = parseGameInitiative(game.settings);
-  const living = await prisma.gameMonster.count({
+  const livingRows = await prisma.gameMonster.findMany({
     where: { gameId, hpCurrent: { gt: 0 } },
+    select: { initMod: true, stats: true, hpCurrent: true },
   });
+  const livingMonsters = filterInitiativeMonsters(livingRows);
+  const living = livingMonsters.length;
 
   if (living === 0) {
     if (!state?.active) return null;
@@ -399,11 +427,7 @@ export async function syncMonsterGroupInitiative(
     return next.active ? next : null;
   }
 
-  const monsters = await prisma.gameMonster.findMany({
-    where: { gameId, hpCurrent: { gt: 0 } },
-    select: { initMod: true },
-  });
-  const bestMod = Math.max(...monsters.map((m) => m.initMod), 0);
+  const bestMod = Math.max(...livingMonsters.map((m) => m.initMod), 0);
   const entryId = monsterGroupEntryId(gameId);
   const label = monsterGroupLabel(living);
 
@@ -442,16 +466,15 @@ export async function syncMonsterGroupInitiative(
 export async function buildMonsterGroupInitiativeEntry(
   gameId: string,
 ): Promise<InitiativeEntry | null> {
-  const living = await prisma.gameMonster.count({
+  const livingRows = await prisma.gameMonster.findMany({
     where: { gameId, hpCurrent: { gt: 0 } },
+    select: { initMod: true, stats: true, hpCurrent: true },
   });
+  const livingMonsters = filterInitiativeMonsters(livingRows);
+  const living = livingMonsters.length;
   if (living === 0) return null;
 
-  const monsters = await prisma.gameMonster.findMany({
-    where: { gameId, hpCurrent: { gt: 0 } },
-    select: { initMod: true },
-  });
-  const bestMod = Math.max(...monsters.map((m) => m.initMod), 0);
+  const bestMod = Math.max(...livingMonsters.map((m) => m.initMod), 0);
   const rolled = rollInitiativeForMod(bestMod);
   return {
     entryId: monsterGroupEntryId(gameId),

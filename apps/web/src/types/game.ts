@@ -75,9 +75,22 @@ export interface GameListEntry {
   role: GameMembershipRole;
 }
 
+export interface MapToken {
+  id: string;
+  kind: 'pc' | 'npc' | 'object';
+  label: string;
+  characterId?: string | null;
+  hpMax?: number | null;
+  hpCurrent?: number | null;
+}
+
 export interface GameDetail {
   game: Game & {
-    map?: { id: string; gridFtPerCell?: number } | null;
+    map?: {
+      id: string;
+      gridFtPerCell?: number;
+      tokens?: MapToken[];
+    } | null;
     players?: { user: User }[];
   };
   /** True only when the logged-in user created the game (dm_user_id). */

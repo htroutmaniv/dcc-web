@@ -4,6 +4,7 @@ import {
   patchGameMonsterSchema,
   replaceMonsterItemsSchema,
   spawnMonstersSchema,
+  transferInventoryItemSchema,
   upsertLootPoolSchema,
   upsertMonsterCatalogSchema,
 } from '@dcc-web/shared';
@@ -22,6 +23,7 @@ import {
   syncMonsterGroupInitiative,
 } from '../services/monster-service.js';
 import { getInitiativeFromGame } from '../services/initiative-service.js';
+import { transferInventoryItem } from '../services/inventory-transfer-service.js';
 
 function emitMonstersChanged(
   app: FastifyInstance,
@@ -284,9 +286,12 @@ export async function monsterRoutes(app: FastifyInstance) {
       const parsed = patchGameMonsterSchema.safeParse(request.body);
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
-      const monster = await patchGameMonster(gameId, monsterId, parsed.data);
+      const { monster, initiative } = await patchGameMonster(gameId, monsterId, parsed.data);
       emitMonstersChanged(app, gameId, request.userId);
-      return { monster };
+      if (initiative) {
+        emitInitiativeUpdate(app, gameId, initiative, request.userId);
+      }
+      return { monster, initiative };
     },
   );
 
@@ -308,6 +313,43 @@ export async function monsterRoutes(app: FastifyInstance) {
       const monster = await replaceMonsterItems(gameId, monsterId, parsed.data.items);
       emitMonstersChanged(app, gameId, request.userId);
       return { monster };
+    },
+  );
+
+  app.post(
+    '/games/:gameId/transfer-item',
+    { onRequest: [app.authenticate] },
+    async (request) => {
+      const { gameId } = request.params as { gameId: string };
+      const access = await assertGameDm(request.userId!, gameId);
+      if (!access.ok) {
+        throw app.httpErrors.createError(access.status, access.message);
+      }
+      const parsed = transferInventoryItemSchema.safeParse(request.body);
+      if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
+
+      try {
+        const result = await transferInventoryItem(gameId, parsed.data);
+        if (result.sourceCharacter) {
+          emitToGame(app.io, gameId, 'character:upsert', {
+            character: result.sourceCharacter,
+            actorUserId: request.userId,
+          });
+        }
+        if (result.targetCharacter) {
+          emitToGame(app.io, gameId, 'character:upsert', {
+            character: result.targetCharacter,
+            actorUserId: request.userId,
+          });
+        }
+        if (result.sourceMonster || result.targetMonster) {
+          emitMonstersChanged(app, gameId, request.userId);
+        }
+        return result;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Transfer failed';
+        return app.httpErrors.badRequest(msg);
+      }
     },
   );
 

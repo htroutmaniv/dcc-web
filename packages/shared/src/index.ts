@@ -13,4 +13,8 @@ export * from './item-uses.js';
 export * from './monsters.js';
 export * from './monster-sheet.js';
 export * from './monster-initiative.js';
+export * from './monster-status.js';
 export * from './loot.js';
+export * from './dice-roll-kind.js';
+export * from './combat-roll.js';
+export * from './dice-roll-target.js';

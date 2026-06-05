@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
 import { Alert, Box, Button, Chip, CircularProgress, Link } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -29,8 +29,13 @@ import {
   parseGameSettings,
   USING_LIGHT_SOURCE_KEY,
   type DiceTrayCounts,
+  attackRollHits,
+  getTargetAc,
+  type DiceRollKind,
   type GameInitiativeState,
+  buildMonsterKilledStats,
 } from '@dcc-web/shared';
+import { ApplyDamageDialog, type MapTokenTarget } from '../components/ApplyDamageDialog';
 import { ConsumeResourceDialog } from '../components/ConsumeResourceDialog';
 import { DmControlPanel } from '../components/DmControlPanel';
 import { InitiativeOrderPanel } from '../components/InitiativeOrderPanel';
@@ -45,6 +50,16 @@ import {
   type CharacterRollKind,
   type CombatRollKind,
 } from '../utils/character-rolls';
+import { characterRollKindToDiceKind, parseRollLogEntry } from '../utils/roll-log';
+import {
+  CHARACTER_ATTACK_TARGET_KEY,
+  parseAttackTargetRef,
+  readCharacterAttackTargetMap,
+} from '../utils/character-attack-target';
+import { MONSTER_ATTACK_TARGET_KEY, readMonsterTargetMap } from '../utils/monster-targets';
+import { buildCombatTargetOptions } from '../components/CharacterListItem';
+import type { TransferInventoryResult } from '../components/inventory/TransferItemDialog';
+import type { DiceRollLogEntry } from '../types/dice-roll-log';
 import { useGameSocket } from '../hooks/useGameSocket';
 import { formatError } from '../utils/errors';
 
@@ -66,11 +81,15 @@ export default function GamePage() {
   const [rollingCharacterId, setRollingCharacterId] = useState<string | null>(null);
   const [rollingKind, setRollingKind] = useState<CombatRollKind | null>(null);
   const [combatRollByCharacter, setCombatRollByCharacter] = useState<
-    Record<string, DiceResult>
+    Record<string, DiceRollLogEntry>
+  >({});
+  const [characterAttackTargetById, setCharacterAttackTargetById] = useState<
+    Record<string, string>
   >({});
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [creatingCharacter, setCreatingCharacter] = useState(false);
   const [consumableAdjustingId, setConsumableAdjustingId] = useState<string | null>(null);
+  const [hpAdjustingId, setHpAdjustingId] = useState<string | null>(null);
   const [consumeDialog, setConsumeDialog] = useState<{
     character: Character;
     kind: 'food' | 'drink';
@@ -80,10 +99,13 @@ export default function GamePage() {
   const [endTurnCharacterId, setEndTurnCharacterId] = useState<string | null>(null);
   const [monsters, setMonsters] = useState<GameMonsterInstance[]>([]);
   const [selectedMonster, setSelectedMonster] = useState<GameMonsterInstance | null>(null);
-  const [selectedMonsterId, setSelectedMonsterId] = useState<string | null>(null);
-  const [attackTargetId, setAttackTargetId] = useState<string | null>(null);
-  const [lastMonsterAttackRoll, setLastMonsterAttackRoll] = useState<string | null>(null);
+  const [monsterTargetById, setMonsterTargetById] = useState<Record<string, string>>({});
+  const [lastMonsterAttackSummary, setLastMonsterAttackSummary] = useState<string | null>(null);
   const [monsterBusy, setMonsterBusy] = useState(false);
+  const [rollLog, setRollLog] = useState<DiceRollLogEntry[]>([]);
+  const [applyDamageRoll, setApplyDamageRoll] = useState<DiceRollLogEntry | null>(null);
+  const [applyingDamage, setApplyingDamage] = useState(false);
+  const [npcTokens, setNpcTokens] = useState<MapTokenTarget[]>([]);
 
   /** DM = game creator only (server sets isDm from dm_user_id). */
   const isDm = detail?.isDm === true;
@@ -108,15 +130,78 @@ export default function GamePage() {
     const data = await api<GameDetail>(`/games/${gameId}`);
     setDetail(data);
     setInitiative(parseGameInitiative(data.game.settings));
+    const tokens = data.game.map?.tokens ?? [];
+    setNpcTokens(
+      tokens
+        .filter((t) => t.kind === 'npc')
+        .map((t) => ({
+          id: t.id,
+          label: t.label,
+          kind: t.kind,
+          hpCurrent: t.hpCurrent,
+          hpMax: t.hpMax,
+        })),
+    );
   }, [gameId]);
 
+  const loadDiceRolls = useCallback(async () => {
+    if (!gameId) return;
+    const data = await api<{ rolls: DiceRollLogEntry[] }>(
+      `/games/${gameId}/dice-rolls?limit=80`,
+    );
+    setRollLog(data.rolls);
+  }, [gameId]);
+
+  const appendRollLog = useCallback((entry: DiceRollLogEntry) => {
+    setRollLog((prev) => {
+      if (prev.some((r) => r.id === entry.id)) return prev;
+      return [...prev, entry].slice(-100);
+    });
+    setLastRoll(entry);
+  }, []);
+
+  const postDiceRoll = useCallback(
+    async (params: {
+      notation: string;
+      reason?: string;
+      rollKind?: DiceRollKind;
+      characterId?: string;
+      targetType?: 'character' | 'monster' | 'npc';
+      targetId?: string;
+    }) => {
+      if (!gameId) throw new Error('No game');
+      const { result } = await api<{ result: DiceRollLogEntry }>('/dice/roll', {
+        method: 'POST',
+        body: JSON.stringify({
+          gameId,
+          notation: params.notation,
+          reason: params.reason,
+          rollKind: params.rollKind,
+          characterId: params.characterId,
+          targetType: params.targetType,
+          targetId: params.targetId,
+        }),
+      });
+      const entry = parseRollLogEntry(result) ?? (result as DiceRollLogEntry);
+      appendRollLog(entry);
+      return entry;
+    },
+    [gameId, appendRollLog],
+  );
+
   const loadMonsters = useCallback(async () => {
-    if (!gameId || !detail?.isDm) return;
+    if (!gameId || !detail) return;
     const data = await api<{ monsters: GameMonsterInstance[] }>(
       `/games/${gameId}/monsters`,
     );
     setMonsters(data.monsters);
-  }, [gameId, detail?.isDm]);
+    if (detail.isDm) {
+      setMonsterTargetById((prev) => ({
+        ...readMonsterTargetMap(data.monsters),
+        ...prev,
+      }));
+    }
+  }, [gameId, detail]);
 
   const loadCharacters = useCallback(async () => {
     if (!gameId || !detail) return;
@@ -125,6 +210,10 @@ export default function GamePage() {
       `/games/${gameId}/characters${q}`,
     );
     setCharacters(data.characters);
+    setCharacterAttackTargetById((prev) => ({
+      ...readCharacterAttackTargetMap(data.characters),
+      ...prev,
+    }));
     setSelectedCharacter((prev) => {
       if (!prev) return null;
       return data.characters.find((c) => c.id === prev.id) ?? null;
@@ -134,7 +223,7 @@ export default function GamePage() {
   useEffect(() => {
     if (!gameId) return;
     setLoading(true);
-    void loadDetail()
+    void Promise.all([loadDetail(), loadDiceRolls()])
       .catch((e) => {
         setError(formatError(e));
         if (e instanceof ApiError && (e.status === 403 || e.status === 404)) {
@@ -142,14 +231,12 @@ export default function GamePage() {
         }
       })
       .finally(() => setLoading(false));
-  }, [gameId, loadDetail, navigate]);
+  }, [gameId, loadDetail, loadDiceRolls, navigate]);
 
   useEffect(() => {
     if (!detail) return;
     void loadCharacters().catch((e) => setError(formatError(e)));
-    if (detail.isDm) {
-      void loadMonsters().catch(() => {});
-    }
+    void loadMonsters().catch(() => {});
   }, [detail, loadCharacters, loadMonsters]);
 
   useEffect(() => {
@@ -191,23 +278,104 @@ export default function GamePage() {
     }
   };
 
+  const setCharacterWeapon = async (character: Character, weaponId: string) => {
+    const weapon = (character.items ?? []).find(
+      (i) => i.category === 'weapon' && i.id === weaponId,
+    );
+    if (!weapon) return;
+    const prevStats = character.stats ?? {};
+    const prevCustom = (prevStats.custom ?? {}) as Record<string, unknown>;
+    try {
+      const res = await api<{ character: Character } | Character>(
+        `/characters/${character.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            stats: {
+              ...prevStats,
+              custom: {
+                ...prevCustom,
+                selectedWeaponId: weaponId,
+                selectedWeaponName: weapon.name,
+              },
+            },
+          }),
+        },
+      );
+      const updated =
+        res && typeof res === 'object' && 'character' in res
+          ? res.character
+          : (res as Character);
+      if (updated?.id) applyCharacterFromServer(updated);
+    } catch (e) {
+      setError(formatError(e));
+    }
+  };
+
+  const setCharacterAttackTarget = async (characterId: string, targetRef: string | null) => {
+    setCharacterAttackTargetById((prev) => {
+      const next = { ...prev };
+      if (targetRef) next[characterId] = targetRef;
+      else delete next[characterId];
+      return next;
+    });
+    const c = characters.find((x) => x.id === characterId);
+    if (!c) return;
+    const prevCustom = (c.stats?.custom ?? {}) as Record<string, unknown>;
+    try {
+      const res = await api<{ character: Character } | Character>(
+        `/characters/${character.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            stats: {
+              ...c.stats,
+              custom: {
+                ...prevCustom,
+                [CHARACTER_ATTACK_TARGET_KEY]: targetRef ?? '',
+              },
+            },
+          }),
+        },
+      );
+      const updated =
+        res && typeof res === 'object' && 'character' in res
+          ? res.character
+          : (res as Character);
+      if (updated?.id) applyCharacterFromServer(updated);
+    } catch {
+      /* keep local selection */
+    }
+  };
+
+  const combatTargetOptions = useMemo(
+    () => buildCombatTargetOptions(monsters, npcTokens),
+    [monsters, npcTokens],
+  );
+
   const rollCharacterCombat = async (character: Character, kind: CombatRollKind) => {
     if (!gameId) return;
     const { notation, reason } = getCharacterRollSpec(character, kind);
+    const targetRef =
+      initiative?.active && (kind === 'toHit' || kind === 'damage')
+        ? characterAttackTargetById[character.id]
+        : undefined;
+    const parsedTarget = parseAttackTargetRef(targetRef);
+
     setRollingCharacterId(character.id);
     setRollingKind(kind);
     try {
-      const { result } = await api<{ result: DiceResult }>('/dice/roll', {
-        method: 'POST',
-        body: JSON.stringify({
-          gameId,
-          characterId: character.id,
-          notation,
-          reason,
+      const result = await postDiceRoll({
+        notation,
+        reason,
+        rollKind: characterRollKindToDiceKind(kind),
+        characterId: character.id,
+        ...(parsedTarget && {
+          targetType: parsedTarget.type,
+          targetId: parsedTarget.id,
         }),
       });
       setCombatRollByCharacter((prev) => ({ ...prev, [character.id]: result }));
-      setLastRoll(result);
       setError(null);
     } catch (e) {
       setError(formatError(e));
@@ -223,15 +391,11 @@ export default function GamePage() {
     if (!notation) return;
     setDiceRolling(true);
     try {
-      const { result } = await api<{ result: DiceResult }>('/dice/roll', {
-        method: 'POST',
-        body: JSON.stringify({
-          gameId,
-          notation,
-          reason: 'Table roll',
-        }),
+      await postDiceRoll({
+        notation,
+        reason: 'Table roll',
+        rollKind: 'unspecified',
       });
-      setLastRoll(result);
       setMenuTab('dice');
       setError(null);
     } catch (e) {
@@ -253,17 +417,13 @@ export default function GamePage() {
     setDiceRolling(true);
     setDiceQuickRollKind(kind);
     try {
-      const { result } = await api<{ result: DiceResult }>('/dice/roll', {
-        method: 'POST',
-        body: JSON.stringify({
-          gameId,
-          characterId: character.id,
-          notation,
-          reason,
-        }),
+      const result = await postDiceRoll({
+        notation,
+        reason,
+        rollKind: characterRollKindToDiceKind(kind),
+        characterId: character.id,
       });
       setCombatRollByCharacter((prev) => ({ ...prev, [character.id]: result }));
-      setLastRoll(result);
       setMenuTab('dice');
       setError(null);
     } catch (e) {
@@ -290,12 +450,47 @@ export default function GamePage() {
 
   const handleCharacterUpdated = applyCharacterFromServer;
 
+  const patchCharacterHp = async (character: Character, hpCurrent: number) => {
+    const hpMax =
+      typeof character.combat?.hpMax === 'number'
+        ? character.combat.hpMax
+        : Math.max(0, hpCurrent);
+    const nextHp = Math.max(0, Math.min(hpMax, hpCurrent));
+    setHpAdjustingId(character.id);
+    try {
+      const res = await api<{ character: Character } | Character>(
+        `/characters/${character.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            combat: {
+              ...(character.combat ?? {}),
+              hpCurrent: nextHp,
+              hpMax,
+            },
+          }),
+        },
+      );
+      const updated =
+        res && typeof res === 'object' && 'character' in res
+          ? res.character
+          : (res as Character);
+      if (updated?.id) applyCharacterFromServer(updated);
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setHpAdjustingId(null);
+    }
+  };
+
   useGameSocket(
     gameId,
     {
       onConnected: () => {
         void loadCharacters().catch(() => {});
-        if (isDm) void loadMonsters().catch(() => {});
+        void loadDiceRolls().catch(() => {});
+        void loadMonsters().catch(() => {});
       },
       onMonstersChanged: (actorUserId) => {
         if (actorUserId && actorUserId === user?.id) return;
@@ -308,12 +503,20 @@ export default function GamePage() {
       onInitiativeUpdated: (next) => {
         applyInitiative(next);
       },
-      onDiceRolled: ({ result, characterId, actorUserId }) => {
-        if (actorUserId && actorUserId === user?.id) return;
-        setLastRoll(result);
-        if (characterId) {
-          setCombatRollByCharacter((prev) => ({ ...prev, [characterId]: result }));
+      onDiceRolled: ({ result, characterId }) => {
+        const entry = parseRollLogEntry(result);
+        if (entry) appendRollLog(entry);
+        if (characterId && entry) {
+          setCombatRollByCharacter((prev) => ({ ...prev, [characterId]: entry }));
         }
+      },
+      onDamageApplied: () => {
+        void loadCharacters().catch(() => {});
+        void loadMonsters().catch(() => {});
+        void loadDetail().catch(() => {});
+      },
+      onTokenUpdated: () => {
+        void loadDetail().catch(() => {});
       },
     },
     Boolean(gameId && detail),
@@ -321,18 +524,60 @@ export default function GamePage() {
 
   const handleMonsterUpdated = useCallback((m: GameMonsterInstance) => {
     setMonsters((prev) => prev.map((x) => (x.id === m.id ? m : x)));
-    setSelectedMonster(m);
+    setSelectedMonster((prev) => (prev?.id === m.id ? m : prev));
   }, []);
+
+  const handleInventoryTransferred = useCallback(
+    (result: TransferInventoryResult) => {
+      if (result.sourceCharacter) handleCharacterUpdated(result.sourceCharacter);
+      if (result.targetCharacter) handleCharacterUpdated(result.targetCharacter);
+      if (result.sourceMonster) handleMonsterUpdated(result.sourceMonster);
+      if (result.targetMonster) handleMonsterUpdated(result.targetMonster);
+    },
+    [handleCharacterUpdated, handleMonsterUpdated],
+  );
 
   const patchMonsterHp = async (monster: GameMonsterInstance, hpCurrent: number) => {
     if (!gameId) return;
     setMonsterBusy(true);
     try {
-      const { monster: updated } = await api<{ monster: GameMonsterInstance }>(
-        `/games/${gameId}/monsters/${monster.id}`,
-        { method: 'PATCH', body: JSON.stringify({ hpCurrent }) },
-      );
-      handleMonsterUpdated(updated);
+      const body: Record<string, unknown> = { hpCurrent };
+      if (hpCurrent > 0 && monster.stats?.custom?.killed === true) {
+        body.stats = buildMonsterKilledStats(monster.stats, false);
+      }
+      const data = await api<{
+        monster: GameMonsterInstance;
+        initiative: GameInitiativeState | null;
+      }>(`/games/${gameId}/monsters/${monster.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      handleMonsterUpdated(data.monster);
+      if (data.initiative) applyInitiative(data.initiative);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setMonsterBusy(false);
+    }
+  };
+
+  const killMonster = async (monster: GameMonsterInstance) => {
+    if (!gameId) return;
+    setMonsterBusy(true);
+    try {
+      const data = await api<{
+        monster: GameMonsterInstance;
+        initiative: GameInitiativeState | null;
+      }>(`/games/${gameId}/monsters/${monster.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          hpCurrent: 0,
+          stats: buildMonsterKilledStats(monster.stats, true),
+        }),
+      });
+      handleMonsterUpdated(data.monster);
+      if (data.initiative) applyInitiative(data.initiative);
+      setError(null);
     } catch (e) {
       setError(formatError(e));
     } finally {
@@ -358,29 +603,119 @@ export default function GamePage() {
     }
   };
 
+  const setMonsterAttackTarget = async (monsterId: string, characterId: string | null) => {
+    setMonsterTargetById((prev) => {
+      const next = { ...prev };
+      if (characterId) next[monsterId] = characterId;
+      else delete next[monsterId];
+      return next;
+    });
+    const m = monsters.find((x) => x.id === monsterId);
+    if (!m || !gameId) return;
+    const prevCustom = (m.stats?.custom ?? {}) as Record<string, unknown>;
+    try {
+      const { monster: updated } = await api<{ monster: GameMonsterInstance }>(
+        `/games/${gameId}/monsters/${monsterId}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            stats: {
+              ...m.stats,
+              custom: {
+                ...prevCustom,
+                [MONSTER_ATTACK_TARGET_KEY]: characterId ?? '',
+              },
+            },
+          }),
+        },
+      );
+      handleMonsterUpdated(updated);
+    } catch {
+      /* keep local target selection */
+    }
+  };
+
   const rollMonsterAttack = async (monster: GameMonsterInstance, target: Character) => {
     if (!gameId) return;
     const atk = parseMonsterSheet(monster.sheet).attacks[0];
     const mod = Number(atk?.attackBonus ?? monster.attackBonus) || 0;
-    const notation = `1d20${mod >= 0 ? `+${mod}` : mod}`;
+    const ac = getTargetAc(target.combat);
+    const damageNotation = atk?.damage ?? monster.damage;
+    const atkLabel = atk?.name ?? 'attack';
+
     setMonsterBusy(true);
     try {
-      const { result } = await api<{ result: DiceResult }>('/dice/roll', {
-        method: 'POST',
-        body: JSON.stringify({
-          gameId,
-          notation,
-          reason: `${monster.name} vs ${target.name} (${atk?.name ?? 'attack'})`,
-        }),
+      const attackResult = await postDiceRoll({
+        notation: `1d20${mod >= 0 ? `+${mod}` : mod}`,
+        reason: `${monster.name} → ${target.name} ${atkLabel} (AC ${ac})`,
+        rollKind: 'attack',
       });
-      setLastMonsterAttackRoll(
-        `${monster.name} → ${target.name}: ${result.notation} = ${result.total} (dmg ${atk?.damage ?? monster.damage})`,
+      const natural = attackResult.rolls[0];
+      const hit = attackRollHits(attackResult.total, ac, natural);
+
+      if (!hit) {
+        setLastMonsterAttackSummary(
+          `${monster.name} missed ${target.name}: ${attackResult.total} vs AC ${ac}`,
+        );
+        setError(null);
+        return;
+      }
+
+      const damageResult = await postDiceRoll({
+        notation: damageNotation,
+        reason: `${monster.name} → ${target.name} damage`,
+        rollKind: 'damage',
+      });
+      const { hpAfter } = await api<{ hpAfter: number; targetName: string }>(
+        `/games/${gameId}/apply-damage`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            amount: damageResult.total,
+            targetType: 'character',
+            targetId: target.id,
+            rollLogId: damageResult.id,
+          }),
+        },
       );
-      setLastRoll(result);
+      await loadCharacters();
+      setLastMonsterAttackSummary(
+        `${monster.name} hit ${target.name} (${attackResult.total} vs AC ${ac}) for ${damageResult.total} → ${hpAfter} HP`,
+      );
+      setError(null);
     } catch (e) {
       setError(formatError(e));
     } finally {
       setMonsterBusy(false);
+    }
+  };
+
+  const applyDamageFromRoll = async (
+    targetType: 'character' | 'monster' | 'npc',
+    targetId: string,
+    amount: number,
+  ) => {
+    if (!gameId) return;
+    setApplyingDamage(true);
+    try {
+      await api(`/games/${gameId}/apply-damage`, {
+        method: 'POST',
+        body: JSON.stringify({
+          amount,
+          targetType,
+          targetId,
+          rollLogId: applyDamageRoll?.id,
+        }),
+      });
+      setApplyDamageRoll(null);
+      await loadCharacters();
+      if (isDm) await loadMonsters();
+      await loadDetail();
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setApplyingDamage(false);
     }
   };
 
@@ -389,7 +724,6 @@ export default function GamePage() {
     if (m) {
       setSelectedMonster(m);
       setSelectedCharacter(null);
-      setSelectedMonsterId(monsterId);
     }
   };
 
@@ -743,9 +1077,14 @@ export default function GamePage() {
           {selectedCharacter ? (
             <CharacterSheetView
               character={selectedCharacter}
+              gameId={gameId}
+              partyCharacters={characters}
+              partyMonsters={monsters}
               isDm={isDm}
               onClose={() => setSelectedCharacter(null)}
               onCharacterUpdated={handleCharacterUpdated}
+              onMonsterUpdated={handleMonsterUpdated}
+              onInventoryTransferred={handleInventoryTransferred}
               onMarkDead={markDead}
               onRevive={reviveCharacter}
               onArchive={archiveCharacter}
@@ -754,8 +1093,11 @@ export default function GamePage() {
             <MonsterSheetView
               gameId={gameId}
               monster={selectedMonster}
+              partyCharacters={characters}
+              partyMonsters={monsters}
               onClose={() => setSelectedMonster(null)}
               onMonsterUpdated={handleMonsterUpdated}
+              onInventoryTransferred={handleInventoryTransferred}
             />
           ) : (
             <Box
@@ -777,15 +1119,15 @@ export default function GamePage() {
                   busy={initiativeBusy || monsterBusy}
                   monsters={monsters}
                   characters={characters}
-                  selectedMonsterId={selectedMonsterId}
-                  attackTargetId={attackTargetId}
-                  onSelectMonster={setSelectedMonsterId}
-                  onAttackTargetChange={setAttackTargetId}
+                  monsterTargetById={monsterTargetById}
+                  sheetMonsterId={selectedMonster?.id ?? null}
+                  onMonsterTargetChange={setMonsterAttackTarget}
                   onPatchMonsterHp={patchMonsterHp}
+                  onKillMonster={killMonster}
                   onDeleteMonster={deleteMonsterQuick}
                   onRollMonsterAttack={rollMonsterAttack}
                   onOpenMonsterSheet={openMonsterSheet}
-                  lastMonsterAttackRoll={lastMonsterAttackRoll}
+                  lastAttackSummary={lastMonsterAttackSummary}
                 />
               )}
               <Box
@@ -797,7 +1139,16 @@ export default function GamePage() {
                   flexDirection: 'column',
                 }}
               >
-                <TacticalMap gridFtPerCell={gridFt} isDm={isDm} />
+                <TacticalMap
+                  gameId={gameId}
+                  gridFtPerCell={gridFt}
+                  isDm={isDm}
+                  rollLog={rollLog}
+                  onClearRollLog={() => setRollLog([])}
+                  onApplyDamageFromRoll={
+                    isDm ? (roll) => setApplyDamageRoll(roll) : undefined
+                  }
+                />
                 <InitiativeOrderPanel initiative={initiative} />
               </Box>
             </Box>
@@ -827,6 +1178,12 @@ export default function GamePage() {
             setMenuTab('characters');
           }}
           onCombatRoll={rollCharacterCombat}
+          onPatchCharacterHp={patchCharacterHp}
+          hpAdjustingId={hpAdjustingId}
+          onSelectWeapon={setCharacterWeapon}
+          combatTargetOptions={combatTargetOptions}
+          characterAttackTargetById={characterAttackTargetById}
+          onCharacterAttackTargetChange={setCharacterAttackTarget}
           onOpenConsume={openConsumeDialog}
           onSelectActiveLight={selectActiveLight}
           onToggleLightLit={toggleLightLit}
@@ -853,6 +1210,16 @@ export default function GamePage() {
         onClose={() => setCreateDialogOpen(false)}
         onSubmit={createCharacter}
         submitting={creatingCharacter}
+      />
+      <ApplyDamageDialog
+        open={applyDamageRoll != null}
+        roll={applyDamageRoll}
+        characters={characters}
+        monsters={monsters}
+        npcTokens={npcTokens}
+        onClose={() => setApplyDamageRoll(null)}
+        onApply={applyDamageFromRoll}
+        applying={applyingDamage}
       />
       <ConsumeResourceDialog
         open={consumeDialog != null}

@@ -1,15 +1,32 @@
+import { useRef } from 'react';
 import { Box, Typography } from '@mui/material';
 import GridOnIcon from '@mui/icons-material/GridOn';
+import { RollTrackerPanel } from './RollTrackerPanel';
+import type { DiceRollLogEntry } from '../types/dice-roll-log';
 
 interface TacticalMapProps {
+  gameId?: string;
   gridFtPerCell?: number;
   isDm?: boolean;
+  rollLog?: DiceRollLogEntry[];
+  onClearRollLog?: () => void;
+  onApplyDamageFromRoll?: (roll: DiceRollLogEntry) => void;
 }
 
 /** Placeholder for react-konva map — upload, tokens, movement radius. */
-export function TacticalMap({ gridFtPerCell = 5, isDm }: TacticalMapProps) {
+export function TacticalMap({
+  gameId,
+  gridFtPerCell = 5,
+  isDm,
+  rollLog = [],
+  onClearRollLog,
+  onApplyDamageFromRoll,
+}: TacticalMapProps) {
+  const mapRef = useRef<HTMLDivElement>(null);
+
   return (
     <Box
+      ref={mapRef}
       sx={{
         flex: 1,
         minHeight: 0,
@@ -56,6 +73,14 @@ export function TacticalMap({ gridFtPerCell = 5, isDm }: TacticalMapProps) {
           Map canvas (upload, tokens, movement radius) will render here.
         </Typography>
       </Box>
+      <RollTrackerPanel
+        gameId={gameId}
+        containerRef={mapRef}
+        rolls={rollLog}
+        isDm={isDm}
+        onClear={onClearRollLog}
+        onApplyDamage={isDm ? onApplyDamageFromRoll : undefined}
+      />
     </Box>
   );
 }

@@ -17,7 +17,9 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import {
+  buildMonsterKilledStats,
   formatMonsterSummary,
+  isMonsterKilled,
   scaleMonsterStats,
   type GameInitiativeState,
   type GameMonsterInstance,
@@ -157,16 +159,42 @@ export function MonsterPanel({
     setLocalBusy(true);
     onError?.(null);
     try {
-      const data = await api<{ monster: GameMonsterInstance }>(
-        `/games/${gameId}/monsters/${monster.id}`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({ hpCurrent }),
-        },
-      );
-      onMonstersChange(
-        monsters.map((m) => (m.id === monster.id ? data.monster : m)),
-      );
+      const body: Record<string, unknown> = { hpCurrent };
+      if (hpCurrent > 0 && isMonsterKilled(monster)) {
+        body.stats = buildMonsterKilledStats(monster.stats, false);
+      }
+      const data = await api<{
+        monster: GameMonsterInstance;
+        initiative?: GameInitiativeState | null;
+      }>(`/games/${gameId}/monsters/${monster.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      onMonstersChange(monsters.map((m) => (m.id === monster.id ? data.monster : m)));
+      if (data.initiative) onInitiativeChange?.(data.initiative);
+    } catch (e) {
+      onError?.(formatError(e));
+    } finally {
+      setLocalBusy(false);
+    }
+  };
+
+  const killMonster = async (monster: GameMonsterInstance) => {
+    setLocalBusy(true);
+    onError?.(null);
+    try {
+      const data = await api<{
+        monster: GameMonsterInstance;
+        initiative?: GameInitiativeState | null;
+      }>(`/games/${gameId}/monsters/${monster.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          hpCurrent: 0,
+          stats: buildMonsterKilledStats(monster.stats, true),
+        }),
+      });
+      onMonstersChange(monsters.map((m) => (m.id === monster.id ? data.monster : m)));
+      if (data.initiative) onInitiativeChange?.(data.initiative);
     } catch (e) {
       onError?.(formatError(e));
     } finally {
@@ -452,7 +480,23 @@ export function MonsterPanel({
                   <DeleteIcon fontSize="small" />
                 </IconButton>
               </Stack>
-              <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.75 }}>
+              <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.75 }} flexWrap="wrap">
+                {!isMonsterKilled(m) ? (
+                  <Button
+                    size="small"
+                    color="error"
+                    variant="outlined"
+                    disabled={disabled}
+                    onClick={() => void killMonster(m)}
+                    sx={{ fontSize: '0.7rem' }}
+                  >
+                    Kill
+                  </Button>
+                ) : (
+                  <Typography variant="caption" color="error.main" fontWeight={600}>
+                    Slain
+                  </Typography>
+                )}
                 <Button
                   size="small"
                   variant="outlined"
@@ -474,6 +518,13 @@ export function MonsterPanel({
                 >
                   +
                 </Button>
+                {isMonsterKilled(m) && (
+                  <Typography variant="caption" color="text.secondary">
+                    {(m.items?.length ?? 0) > 0
+                      ? `${m.items!.length} loot item(s)`
+                      : 'No loot'}
+                  </Typography>
+                )}
               </Stack>
             </Box>
           ))}

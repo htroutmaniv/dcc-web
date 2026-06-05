@@ -33,14 +33,21 @@ import {
   NO_EQUIP_ID,
 } from '../../utils/armor';
 import { getActiveWeapon, weaponStatsFromItem } from '../../utils/weapons';
+import type { GameMonsterInstance } from '@dcc-web/shared';
+import type { TransferInventoryResult } from '../inventory/TransferItemDialog';
 import { EquipmentManagerDialog } from './EquipmentManagerDialog';
 import { Level0CharacterSheet } from './Level0CharacterSheet';
 
 interface CharacterSheetViewProps {
   character: Character;
+  gameId?: string;
+  partyCharacters?: Character[];
+  partyMonsters?: GameMonsterInstance[];
+  onInventoryTransferred?: (result: TransferInventoryResult) => void;
   onClose: () => void;
   /** Called after a successful save; optional for backwards compatibility */
   onCharacterUpdated?: (character: Character) => void;
+  onMonsterUpdated?: (monster: GameMonsterInstance) => void;
   onRevive?: (characterId: string) => void;
   onArchive?: (characterId: string) => void;
   onMarkDead?: (characterId: string) => void;
@@ -49,8 +56,13 @@ interface CharacterSheetViewProps {
 
 export function CharacterSheetView({
   character: characterProp,
+  gameId,
+  partyCharacters = [],
+  partyMonsters = [],
+  onInventoryTransferred,
   onClose,
   onCharacterUpdated,
+  onMonsterUpdated,
   onRevive,
   onArchive,
   onMarkDead,
@@ -457,6 +469,14 @@ export function CharacterSheetView({
         open={equipmentOpen}
         character={character}
         canEdit={canEdit}
+        gameId={gameId}
+        partyCharacters={partyCharacters}
+        partyMonsters={partyMonsters}
+        onInventoryTransferred={(result) => {
+          onInventoryTransferred?.(result);
+          if (result.sourceMonster) onMonsterUpdated?.(result.sourceMonster);
+          if (result.targetMonster) onMonsterUpdated?.(result.targetMonster);
+        }}
         onClose={() => setEquipmentOpen(false)}
         onSaved={handleEquipmentSaved}
       />

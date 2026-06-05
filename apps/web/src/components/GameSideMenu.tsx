@@ -14,10 +14,11 @@ import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import GroupsIcon from '@mui/icons-material/Groups';
 import MapIcon from '@mui/icons-material/Map';
 import PestControlIcon from '@mui/icons-material/PestControl';
-import { CharacterListItem } from './CharacterListItem';
+import { CharacterListItem, type CombatTargetOption } from './CharacterListItem';
 import { DiceTabPanel } from './DiceTabPanel';
 import { MonsterPanel } from './MonsterPanel';
-import type { Character, DiceResult, Game, User } from '../types/game';
+import type { Character, Game, User } from '../types/game';
+import type { DiceRollLogEntry } from '../types/dice-roll-log';
 import {
   isCharacterTurn,
   type DiceTrayCounts,
@@ -36,7 +37,7 @@ interface GameSideMenuProps {
   players?: { user: User }[];
   tab: GameMenuTab;
   onTabChange: (tab: GameMenuTab) => void;
-  lastRoll: DiceResult | null;
+  lastRoll: DiceRollLogEntry | null;
   diceTrayCounts: DiceTrayCounts;
   onDiceTrayCountsChange: (counts: DiceTrayCounts) => void;
   onResetDiceTray: () => void;
@@ -49,6 +50,12 @@ interface GameSideMenuProps {
   diceQuickRollKind?: CharacterRollKind | null;
   onSelectCharacter: (character: Character) => void;
   onCombatRoll: (character: Character, kind: CombatRollKind) => void;
+  onPatchCharacterHp?: (character: Character, hpCurrent: number) => void;
+  hpAdjustingId?: string | null;
+  onSelectWeapon?: (character: Character, weaponId: string) => void;
+  combatTargetOptions?: CombatTargetOption[];
+  characterAttackTargetById?: Record<string, string>;
+  onCharacterAttackTargetChange?: (characterId: string, targetRef: string | null) => void;
   onOpenConsume: (character: Character, kind: 'food' | 'drink') => void;
   onSelectActiveLight: (character: Character, lightItemId: string | null) => void;
   onToggleLightLit: (character: Character, lit: boolean) => void;
@@ -92,6 +99,12 @@ export function GameSideMenu({
   diceQuickRollKind,
   onSelectCharacter,
   onCombatRoll,
+  onPatchCharacterHp,
+  hpAdjustingId,
+  onSelectWeapon,
+  combatTargetOptions = [],
+  characterAttackTargetById = {},
+  onCharacterAttackTargetChange,
   onOpenConsume,
   onSelectActiveLight,
   onToggleLightLit,
@@ -193,6 +206,19 @@ export function GameSideMenu({
                       selected={selectedCharacterId === c.id}
                       onSelect={() => onSelectCharacter(c)}
                       onCombatRoll={(kind) => onCombatRoll(c, kind)}
+                      onPatchHp={
+                        onPatchCharacterHp
+                          ? (hp) => onPatchCharacterHp(c, hp)
+                          : undefined
+                      }
+                      canEditHp={canEditCharacter(c)}
+                      hpAdjusting={hpAdjustingId === c.id}
+                      onSelectWeapon={(weaponId) => onSelectWeapon?.(c, weaponId)}
+                      combatTargets={combatTargetOptions}
+                      attackTargetId={characterAttackTargetById[c.id] ?? ''}
+                      onAttackTargetChange={(ref) =>
+                        onCharacterAttackTargetChange?.(c.id, ref)
+                      }
                       onOpenConsume={(kind) => onOpenConsume(c, kind)}
                       onSelectActiveLight={(lightItemId) =>
                         onSelectActiveLight(c, lightItemId)
