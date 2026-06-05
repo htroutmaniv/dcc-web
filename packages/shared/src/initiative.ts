@@ -1,13 +1,15 @@
 /** Stored on character.stats.custom — character is eligible for initiative / in play. */
 export const ACTIVE_IN_PLAY_KEY = 'activeInPlay';
 
-export type InitiativeEntryKind = 'character' | 'monster';
+export type InitiativeEntryKind = 'character' | 'monster' | 'monster_group';
 
 export interface InitiativeEntry {
   entryId: string;
   kind: InitiativeEntryKind;
   /** Set when kind is character. */
   characterId?: string;
+  /** @deprecated Per-monster initiative; use monster_group. */
+  monsterId?: string;
   name: string;
   initiative: number;
   d20Roll?: number;

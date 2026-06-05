@@ -16,6 +16,7 @@ export interface GameSocketHandlers {
     characterId?: string;
     actorUserId?: string;
   }) => void;
+  onMonstersChanged?: (actorUserId?: string) => void;
 }
 
 /**
@@ -70,6 +71,10 @@ export function useGameSocket(
         );
       },
     );
+
+    socket.on('monsters:changed', (payload: { actorUserId?: string }) => {
+      handlersRef.current.onMonstersChanged?.(payload?.actorUserId);
+    });
 
     socket.on(
       'dice:rolled',

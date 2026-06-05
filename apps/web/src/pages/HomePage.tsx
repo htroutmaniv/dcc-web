@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -17,6 +17,7 @@ import {
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
 import LoginIcon from '@mui/icons-material/Login';
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import { api } from '../api/client';
@@ -138,6 +139,15 @@ export default function HomePage() {
                     onClick={createGame}
                   >
                     Create game (you are DM)
+                  </Button>
+                  <Button
+                    component={RouterLink}
+                    to="/bestiary"
+                    variant="outlined"
+                    fullWidth
+                    startIcon={<MenuBookIcon />}
+                  >
+                    Bestiary editor
                   </Button>
                 </Stack>
                 <Divider sx={{ my: 2 }} />

@@ -3,12 +3,21 @@ import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import HomePage from './pages/HomePage';
 import GamePage from './pages/GamePage';
+import BestiaryPage from './pages/BestiaryPage';
 
 export default function App() {
   return (
     <AuthProvider>
       <Routes>
         <Route path="/" element={<HomePage />} />
+        <Route
+          path="/bestiary"
+          element={
+            <ProtectedRoute>
+              <BestiaryPage />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/game/:gameId"
           element={

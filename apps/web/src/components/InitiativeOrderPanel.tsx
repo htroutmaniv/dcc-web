@@ -1,6 +1,7 @@
 import { Box, Typography } from '@mui/material';
 import {
   getCurrentTurnEntry,
+  isMonsterGroupEntry,
   type GameInitiativeState,
 } from '@dcc-web/shared';
 
@@ -59,6 +60,11 @@ export function InitiativeOrderPanel({ initiative }: InitiativeOrderPanelProps) 
                 }}
               >
                 {index + 1}. {entry.name}
+                {(entry.kind === 'monster' || entry.kind === 'monster_group' || isMonsterGroupEntry(entry)) && (
+                  <Box component="span" sx={{ ml: 0.35, opacity: 0.65, fontSize: '0.7rem', color: 'secondary.main' }}>
+                    (monsters)
+                  </Box>
+                )}
                 <Box component="span" sx={{ opacity: 0.75, ml: 0.5 }}>
                   ({entry.initiative}
                   {entry.d20Roll != null && entry.modifier != null

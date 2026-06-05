@@ -12,6 +12,7 @@ import {
 } from '@dcc-web/shared';
 import { secureRandomInt } from '../lib/rng.js';
 import { prisma } from '../lib/prisma.js';
+import { buildMonsterGroupInitiativeEntry } from './monster-service.js';
 
 function mergeSettings(
   current: unknown,
@@ -74,7 +75,11 @@ export async function startGameInitiative(gameId: string): Promise<GameInitiativ
     });
   }
 
-  const order = sortInitiativeEntries(entries);
+  const monsterGroup = await buildMonsterGroupInitiativeEntry(gameId);
+  const order = sortInitiativeEntries([
+    ...entries,
+    ...(monsterGroup ? [monsterGroup] : []),
+  ]);
   const state: GameInitiativeState = {
     active: order.length > 0,
     round: 1,

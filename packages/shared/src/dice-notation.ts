@@ -67,6 +67,9 @@ export function parseDiceNotation(notation: string): {
 }
 
 function validatePart(count: number, sides: number): void {
+  if (!Number.isFinite(count) || !Number.isFinite(sides)) {
+    throw new Error('Invalid dice notation: non-numeric count or sides');
+  }
   if (count < 1 || count > 100) throw new Error('Die count out of range');
   if (sides < 2 || sides > 1000) throw new Error('Die sides out of range');
 }

@@ -10,3 +10,7 @@ export * from './movement.js';
 export * from './initiative.js';
 export * from './character-race.js';
 export * from './item-uses.js';
+export * from './monsters.js';
+export * from './monster-sheet.js';
+export * from './monster-initiative.js';
+export * from './loot.js';

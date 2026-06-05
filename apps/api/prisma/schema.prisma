@@ -85,6 +85,7 @@ model Game {
   dm              User              @relation("DmGames", fields: [dmUserId], references: [id])
   players         GamePlayer[]
   characters      Character[]
+  monsters        GameMonster[]
   map             GameMap?
   diceRolls       DiceRoll[]
   movementRequests MovementRequest[]
@@ -137,6 +138,88 @@ model Character {
   @@index([gameId, ownerUserId])
   @@index([gameId, status])
   @@map("characters")
+}
+
+model LootPool {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String   @default("")
+  entries     Json     @default("[]")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  monsters MonsterCatalog[]
+
+  @@map("loot_pools")
+}
+
+model MonsterCatalog {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String   @default("")
+  baseLevel   Int      @default(1) @map("base_level")
+  hitDice     String   @default("1d8") @map("hit_dice")
+  ac          Int      @default(12)
+  attackBonus Int      @default(0) @map("attack_bonus")
+  damage      String   @default("1d6")
+  initMod     Int      @default(0) @map("init_mod")
+  speed       Int      @default(30)
+  hpAvg       Int?     @map("hp_avg")
+  tags        String[] @default([])
+  sheet       Json     @default("{}")
+  stats       Json     @default("{}")
+  combat      Json     @default("{}")
+  lootPoolId  String?  @map("loot_pool_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  lootPool  LootPool?     @relation(fields: [lootPoolId], references: [id], onDelete: SetNull)
+  instances GameMonster[]
+
+  @@map("monster_catalog")
+}
+
+model GameMonster {
+  id          String   @id @default(uuid()) @db.Uuid
+  gameId      String   @map("game_id") @db.Uuid
+  catalogId   String?  @map("catalog_id") @db.Uuid
+  name        String
+  scaleLevel  Int      @default(1) @map("scale_level")
+  hitDice     String   @default("1d8") @map("hit_dice")
+  ac          Int      @default(12)
+  attackBonus Int      @default(0) @map("attack_bonus")
+  damage      String   @default("1d6")
+  initMod     Int      @default(0) @map("init_mod")
+  speed       Int      @default(30)
+  hpMax       Int      @map("hp_max")
+  hpCurrent   Int      @map("hp_current")
+  notes       String   @default("")
+  sheet       Json     @default("{}")
+  stats       Json     @default("{}")
+  combat      Json     @default("{}")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  game    Game            @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  catalog MonsterCatalog? @relation(fields: [catalogId], references: [id], onDelete: SetNull)
+  items   MonsterItem[]
+
+  @@index([gameId, sortOrder])
+  @@map("game_monsters")
+}
+
+model MonsterItem {
+  id         String       @id @default(uuid()) @db.Uuid
+  monsterId  String       @map("monster_id") @db.Uuid
+  category   ItemCategory
+  name       String
+  quantity   Int          @default(1)
+  properties Json         @default("{}")
+  sortOrder  Int          @default(0) @map("sort_order")
+  notes      String       @default("")
+
+  monster GameMonster @relation(fields: [monsterId], references: [id], onDelete: Cascade)
+
+  @@index([monsterId, sortOrder])
+  @@map("monster_items")
 }
 
 model ItemCatalog {

@@ -10,12 +10,14 @@ import {
 } from '../components/CreateCharacterDialog';
 import { GameSideMenu, type GameMenuTab } from '../components/GameSideMenu';
 import { CharacterSheetView } from '../components/character-sheet/CharacterSheetView';
+import { MonsterSheetView } from '../components/monster-sheet/MonsterSheetView';
 import { TacticalMap } from '../components/TacticalMap';
 import { useAuth } from '../context/AuthContext';
 import {
   ACTIVE_IN_PLAY_KEY,
   ACTIVE_LIGHT_ITEM_ID_KEY,
   buildDiceNotation,
+  parseMonsterSheet,
   countConsumables,
   emptyDiceTray,
   getActiveLightItemId,
@@ -32,7 +34,7 @@ import {
 import { ConsumeResourceDialog } from '../components/ConsumeResourceDialog';
 import { DmControlPanel } from '../components/DmControlPanel';
 import { InitiativeOrderPanel } from '../components/InitiativeOrderPanel';
-import type { Character, DiceResult, GameDetail } from '../types/game';
+import type { Character, DiceResult, GameDetail, GameMonsterInstance } from '../types/game';
 import {
   buildItemsAfterActivateLight,
   buildItemsAfterConsume,
@@ -76,6 +78,12 @@ export default function GamePage() {
   const [initiative, setInitiative] = useState<GameInitiativeState | null>(null);
   const [initiativeBusy, setInitiativeBusy] = useState(false);
   const [endTurnCharacterId, setEndTurnCharacterId] = useState<string | null>(null);
+  const [monsters, setMonsters] = useState<GameMonsterInstance[]>([]);
+  const [selectedMonster, setSelectedMonster] = useState<GameMonsterInstance | null>(null);
+  const [selectedMonsterId, setSelectedMonsterId] = useState<string | null>(null);
+  const [attackTargetId, setAttackTargetId] = useState<string | null>(null);
+  const [lastMonsterAttackRoll, setLastMonsterAttackRoll] = useState<string | null>(null);
+  const [monsterBusy, setMonsterBusy] = useState(false);
 
   /** DM = game creator only (server sets isDm from dm_user_id). */
   const isDm = detail?.isDm === true;
@@ -101,6 +109,14 @@ export default function GamePage() {
     setDetail(data);
     setInitiative(parseGameInitiative(data.game.settings));
   }, [gameId]);
+
+  const loadMonsters = useCallback(async () => {
+    if (!gameId || !detail?.isDm) return;
+    const data = await api<{ monsters: GameMonsterInstance[] }>(
+      `/games/${gameId}/monsters`,
+    );
+    setMonsters(data.monsters);
+  }, [gameId, detail?.isDm]);
 
   const loadCharacters = useCallback(async () => {
     if (!gameId || !detail) return;
@@ -131,7 +147,10 @@ export default function GamePage() {
   useEffect(() => {
     if (!detail) return;
     void loadCharacters().catch((e) => setError(formatError(e)));
-  }, [detail, loadCharacters]);
+    if (detail.isDm) {
+      void loadMonsters().catch(() => {});
+    }
+  }, [detail, loadCharacters, loadMonsters]);
 
   useEffect(() => {
     if (characters.length === 0) {
@@ -276,6 +295,11 @@ export default function GamePage() {
     {
       onConnected: () => {
         void loadCharacters().catch(() => {});
+        if (isDm) void loadMonsters().catch(() => {});
+      },
+      onMonstersChanged: (actorUserId) => {
+        if (actorUserId && actorUserId === user?.id) return;
+        void loadMonsters().catch(() => {});
       },
       onCharacterUpsert: (character, actorUserId) => {
         if (actorUserId && actorUserId === user?.id) return;
@@ -294,6 +318,80 @@ export default function GamePage() {
     },
     Boolean(gameId && detail),
   );
+
+  const handleMonsterUpdated = useCallback((m: GameMonsterInstance) => {
+    setMonsters((prev) => prev.map((x) => (x.id === m.id ? m : x)));
+    setSelectedMonster(m);
+  }, []);
+
+  const patchMonsterHp = async (monster: GameMonsterInstance, hpCurrent: number) => {
+    if (!gameId) return;
+    setMonsterBusy(true);
+    try {
+      const { monster: updated } = await api<{ monster: GameMonsterInstance }>(
+        `/games/${gameId}/monsters/${monster.id}`,
+        { method: 'PATCH', body: JSON.stringify({ hpCurrent }) },
+      );
+      handleMonsterUpdated(updated);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setMonsterBusy(false);
+    }
+  };
+
+  const deleteMonsterQuick = async (monsterId: string) => {
+    if (!gameId) return;
+    setMonsterBusy(true);
+    try {
+      const data = await api<{ initiative: GameInitiativeState | null }>(
+        `/games/${gameId}/monsters/${monsterId}`,
+        { method: 'DELETE' },
+      );
+      setMonsters((prev) => prev.filter((m) => m.id !== monsterId));
+      if (selectedMonster?.id === monsterId) setSelectedMonster(null);
+      applyInitiative(data.initiative);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setMonsterBusy(false);
+    }
+  };
+
+  const rollMonsterAttack = async (monster: GameMonsterInstance, target: Character) => {
+    if (!gameId) return;
+    const atk = parseMonsterSheet(monster.sheet).attacks[0];
+    const mod = Number(atk?.attackBonus ?? monster.attackBonus) || 0;
+    const notation = `1d20${mod >= 0 ? `+${mod}` : mod}`;
+    setMonsterBusy(true);
+    try {
+      const { result } = await api<{ result: DiceResult }>('/dice/roll', {
+        method: 'POST',
+        body: JSON.stringify({
+          gameId,
+          notation,
+          reason: `${monster.name} vs ${target.name} (${atk?.name ?? 'attack'})`,
+        }),
+      });
+      setLastMonsterAttackRoll(
+        `${monster.name} → ${target.name}: ${result.notation} = ${result.total} (dmg ${atk?.damage ?? monster.damage})`,
+      );
+      setLastRoll(result);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setMonsterBusy(false);
+    }
+  };
+
+  const openMonsterSheet = (monsterId: string) => {
+    const m = monsters.find((x) => x.id === monsterId);
+    if (m) {
+      setSelectedMonster(m);
+      setSelectedCharacter(null);
+      setSelectedMonsterId(monsterId);
+    }
+  };
 
   const canEditCharacter = useCallback(
     (c: Character) => isDm || (user != null && c.ownerUserId === user.id),
@@ -652,6 +750,13 @@ export default function GamePage() {
               onRevive={reviveCharacter}
               onArchive={archiveCharacter}
             />
+          ) : selectedMonster && isDm ? (
+            <MonsterSheetView
+              gameId={gameId}
+              monster={selectedMonster}
+              onClose={() => setSelectedMonster(null)}
+              onMonsterUpdated={handleMonsterUpdated}
+            />
           ) : (
             <Box
               sx={{
@@ -669,7 +774,18 @@ export default function GamePage() {
                   onStartInitiative={startInitiative}
                   onAdvanceTurn={advanceInitiative}
                   onEndInitiative={endInitiative}
-                  busy={initiativeBusy}
+                  busy={initiativeBusy || monsterBusy}
+                  monsters={monsters}
+                  characters={characters}
+                  selectedMonsterId={selectedMonsterId}
+                  attackTargetId={attackTargetId}
+                  onSelectMonster={setSelectedMonsterId}
+                  onAttackTargetChange={setAttackTargetId}
+                  onPatchMonsterHp={patchMonsterHp}
+                  onDeleteMonster={deleteMonsterQuick}
+                  onRollMonsterAttack={rollMonsterAttack}
+                  onOpenMonsterSheet={openMonsterSheet}
+                  lastMonsterAttackRoll={lastMonsterAttackRoll}
                 />
               )}
               <Box
@@ -726,6 +842,10 @@ export default function GamePage() {
           onEndTurn={endTurn}
           endTurnCharacterId={endTurnCharacterId}
           currentUserId={user?.id}
+          monsters={monsters}
+          onMonstersChange={setMonsters}
+          onMonsterInitiativeChange={applyInitiative}
+          onMonsterPanelError={setError}
         />
       </Box>
       <CreateCharacterDialog

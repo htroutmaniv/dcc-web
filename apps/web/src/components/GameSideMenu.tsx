@@ -13,17 +13,20 @@ import CasinoIcon from '@mui/icons-material/Casino';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import GroupsIcon from '@mui/icons-material/Groups';
 import MapIcon from '@mui/icons-material/Map';
+import PestControlIcon from '@mui/icons-material/PestControl';
 import { CharacterListItem } from './CharacterListItem';
 import { DiceTabPanel } from './DiceTabPanel';
+import { MonsterPanel } from './MonsterPanel';
 import type { Character, DiceResult, Game, User } from '../types/game';
 import {
   isCharacterTurn,
   type DiceTrayCounts,
   type GameInitiativeState,
+  type GameMonsterInstance,
 } from '@dcc-web/shared';
 import type { CharacterRollKind, CombatRollKind } from '../utils/character-rolls';
 
-export type GameMenuTab = 'characters' | 'dice' | 'session';
+export type GameMenuTab = 'characters' | 'monsters' | 'dice' | 'session';
 
 interface GameSideMenuProps {
   game: Game;
@@ -61,6 +64,11 @@ interface GameSideMenuProps {
   onEndTurn: (character: Character) => void;
   endTurnCharacterId?: string | null;
   currentUserId?: string;
+  monsters?: GameMonsterInstance[];
+  onMonstersChange?: (monsters: GameMonsterInstance[]) => void;
+  onMonsterInitiativeChange?: (initiative: GameInitiativeState | null) => void;
+  monsterPanelBusy?: boolean;
+  onMonsterPanelError?: (message: string | null) => void;
 }
 
 export function GameSideMenu({
@@ -99,6 +107,11 @@ export function GameSideMenu({
   onEndTurn,
   endTurnCharacterId,
   currentUserId,
+  monsters = [],
+  onMonstersChange,
+  onMonsterInitiativeChange,
+  monsterPanelBusy,
+  onMonsterPanelError,
 }: GameSideMenuProps) {
   const initiativeActive = initiative?.active ?? false;
   return (
@@ -132,6 +145,14 @@ export function GameSideMenu({
         sx={{ borderBottom: 1, borderColor: 'divider' }}
       >
         <Tab icon={<GroupsIcon />} iconPosition="start" label="PCs" value="characters" />
+        {isDm && (
+          <Tab
+            icon={<PestControlIcon />}
+            iconPosition="start"
+            label="Monsters"
+            value="monsters"
+          />
+        )}
         <Tab icon={<CasinoIcon />} iconPosition="start" label="Dice" value="dice" />
         <Tab icon={<MapIcon />} iconPosition="start" label="Info" value="session" />
       </Tabs>
@@ -197,6 +218,18 @@ export function GameSideMenu({
               </List>
             )}
           </>
+        )}
+
+        {tab === 'monsters' && isDm && onMonstersChange && (
+          <MonsterPanel
+            gameId={game.id}
+            monsters={monsters}
+            initiative={initiative ?? null}
+            busy={monsterPanelBusy}
+            onMonstersChange={onMonstersChange}
+            onInitiativeChange={onMonsterInitiativeChange}
+            onError={onMonsterPanelError}
+          />
         )}
 
         {tab === 'dice' && (

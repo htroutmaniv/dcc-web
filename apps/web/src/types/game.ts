@@ -16,6 +16,7 @@ export interface Game {
 }
 
 export type { GameInitiativeState };
+export type { GameMonsterInstance } from '@dcc-web/shared';
 
 export interface CharacterAbility {
   score: number;
