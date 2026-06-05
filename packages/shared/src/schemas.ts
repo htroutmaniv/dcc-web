@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const diceRollRequestSchema = z.object({
   gameId: z.string().uuid(),
   characterId: z.string().uuid().optional(),
-  notation: z.string().min(1).max(64),
+  notation: z.string().min(1).max(128),
   reason: z.string().max(256).optional(),
 });
 
@@ -14,6 +14,10 @@ export const gameSettingsSchema = z.object({
 
 export const createGameSchema = z.object({
   title: z.string().min(1).max(120),
+});
+
+export const initiativeEndTurnSchema = z.object({
+  characterId: z.string().uuid().optional(),
 });
 
 const patchItemSchema = z.object({

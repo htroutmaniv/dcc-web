@@ -10,7 +10,7 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
-import type { ConsumableTrackKind } from '@dcc-web/shared';
+import { isActiveInPlay, type ConsumableTrackKind } from '@dcc-web/shared';
 import type { Character, DiceResult } from '../types/game';
 import type { CombatRollKind } from '../utils/combat-rolls';
 import { getConsumableCounts, isUsingLightSource } from '../utils/consumables';
@@ -24,6 +24,13 @@ interface CharacterListItemProps {
   onToggleLightSource?: (using: boolean) => void;
   consumableAdjusting?: boolean;
   canEditConsumables?: boolean;
+  canToggleInPlay?: boolean;
+  onToggleInPlay?: (active: boolean) => void;
+  initiativeActive?: boolean;
+  isInitiativeTurn?: boolean;
+  canEndTurn?: boolean;
+  onEndTurn?: () => void;
+  endingTurn?: boolean;
   rollingKind?: CombatRollKind | null;
   lastRoll?: DiceResult | null;
 }
@@ -134,6 +141,13 @@ export function CharacterListItem({
   onToggleLightSource,
   consumableAdjusting,
   canEditConsumables,
+  canToggleInPlay,
+  onToggleInPlay,
+  initiativeActive,
+  isInitiativeTurn,
+  canEndTurn,
+  onEndTurn,
+  endingTurn,
   rollingKind,
   lastRoll,
 }: CharacterListItemProps) {
@@ -145,6 +159,8 @@ export function CharacterListItem({
   const isRolling = rollingKind != null;
   const counts = getConsumableCounts(character);
   const lightSourceActive = isUsingLightSource(character);
+  const inPlay = isActiveInPlay(character);
+  const showTurnHighlight = initiativeActive && isInitiativeTurn;
 
   return (
     <Box
@@ -153,9 +169,18 @@ export function CharacterListItem({
         mb: 0.5,
         py: 1.25,
         px: 1.5,
-        border: 1,
-        borderColor: selected ? 'primary.main' : 'divider',
-        bgcolor: selected ? 'action.selected' : 'transparent',
+        border: 2,
+        borderColor: showTurnHighlight
+          ? 'warning.main'
+          : selected
+            ? 'primary.main'
+            : 'divider',
+        bgcolor: showTurnHighlight
+          ? 'rgba(201, 162, 39, 0.12)'
+          : selected
+            ? 'action.selected'
+            : 'transparent',
+        boxShadow: showTurnHighlight ? '0 0 12px rgba(201, 162, 39, 0.35)' : 'none',
       }}
     >
       <Box
@@ -200,7 +225,47 @@ export function CharacterListItem({
         </Typography>
       </Box>
 
-      <Box sx={{ mt: 1 }} onClick={(e) => e.stopPropagation()}>
+      <Box sx={{ mt: 0.75 }} onClick={(e) => e.stopPropagation()}>
+        <FormControlLabel
+          sx={{ ml: 0, alignItems: 'center', display: 'flex' }}
+          control={
+            <Checkbox
+              size="small"
+              checked={inPlay}
+              disabled={!canToggleInPlay || isDead || consumableAdjusting}
+              onChange={(e) => onToggleInPlay?.(e.target.checked)}
+            />
+          }
+          label={
+            <Typography variant="caption" color="text.secondary">
+              In play
+            </Typography>
+          }
+        />
+        {showTurnHighlight && (
+          <Typography
+            variant="caption"
+            sx={{ color: 'warning.main', fontWeight: 800, display: 'block', mb: 0.5 }}
+          >
+            Active turn
+          </Typography>
+        )}
+        {canEndTurn && (
+          <Button
+            size="small"
+            variant="contained"
+            color="warning"
+            fullWidth
+            sx={{ mb: 0.75, py: 0.35, fontSize: '0.72rem' }}
+            disabled={endingTurn}
+            onClick={() => onEndTurn?.()}
+          >
+            {endingTurn ? <CircularProgress size={14} color="inherit" /> : 'End turn'}
+          </Button>
+        )}
+      </Box>
+
+      <Box sx={{ mt: 0.5 }} onClick={(e) => e.stopPropagation()}>
         <Stack spacing={0.5}>
           {TRACKERS.map(({ kind, label }) =>
             kind === 'light' ? (

@@ -1,3 +1,4 @@
+import { parseGameInitiative } from './initiative.js';
 import type { CharacterStats, GameSettings, MovementRange } from './types.js';
 import { DEFAULT_GAME_SETTINGS } from './types.js';
 
@@ -7,6 +8,7 @@ export function parseGameSettings(settings: unknown): GameSettings {
     gridFtPerCell: s.gridFtPerCell ?? DEFAULT_GAME_SETTINGS.gridFtPerCell,
     playerTokenMovement:
       s.playerTokenMovement ?? DEFAULT_GAME_SETTINGS.playerTokenMovement,
+    initiative: parseGameInitiative(settings),
   };
 }
 

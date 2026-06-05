@@ -13,14 +13,28 @@ import { CharacterSheetView } from '../components/character-sheet/CharacterSheet
 import { TacticalMap } from '../components/TacticalMap';
 import { useAuth } from '../context/AuthContext';
 import {
+  ACTIVE_IN_PLAY_KEY,
+  buildDiceNotation,
   countConsumables,
+  emptyDiceTray,
+  isCharacterTurn,
   isUsingLightSource,
+  parseGameInitiative,
+  parseGameSettings,
   USING_LIGHT_SOURCE_KEY,
   type ConsumableTrackKind,
+  type DiceTrayCounts,
+  type GameInitiativeState,
 } from '@dcc-web/shared';
+import { DmControlPanel } from '../components/DmControlPanel';
+import { InitiativeOrderPanel } from '../components/InitiativeOrderPanel';
 import type { Character, DiceResult, GameDetail } from '../types/game';
 import { buildItemsAfterConsumableDelta } from '../utils/consumables';
-import { getCombatRollSpec, type CombatRollKind } from '../utils/combat-rolls';
+import {
+  getCharacterRollSpec,
+  type CharacterRollKind,
+  type CombatRollKind,
+} from '../utils/character-rolls';
 import { formatError } from '../utils/errors';
 
 export default function GamePage() {
@@ -33,7 +47,10 @@ export default function GamePage() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [lastRoll, setLastRoll] = useState<DiceResult | null>(null);
   const [menuTab, setMenuTab] = useState<GameMenuTab>('characters');
-  const [diceNotation, setDiceNotation] = useState('1d20');
+  const [diceTrayCounts, setDiceTrayCounts] = useState<DiceTrayCounts>(emptyDiceTray);
+  const [diceRolling, setDiceRolling] = useState(false);
+  const [diceCharacterId, setDiceCharacterId] = useState<string | null>(null);
+  const [diceQuickRollKind, setDiceQuickRollKind] = useState<CharacterRollKind | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
   const [rollingCharacterId, setRollingCharacterId] = useState<string | null>(null);
   const [rollingKind, setRollingKind] = useState<CombatRollKind | null>(null);
@@ -43,13 +60,32 @@ export default function GamePage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [creatingCharacter, setCreatingCharacter] = useState(false);
   const [consumableAdjustingId, setConsumableAdjustingId] = useState<string | null>(null);
+  const [initiative, setInitiative] = useState<GameInitiativeState | null>(null);
+  const [initiativeBusy, setInitiativeBusy] = useState(false);
+  const [endTurnCharacterId, setEndTurnCharacterId] = useState<string | null>(null);
 
   const isDm = detail?.isDm ?? false;
+
+  const applyInitiative = useCallback((next: GameInitiativeState | null) => {
+    setInitiative(next);
+    setDetail((prev) => {
+      if (!prev) return prev;
+      const settings = parseGameSettings(prev.game.settings);
+      return {
+        ...prev,
+        game: {
+          ...prev.game,
+          settings: { ...settings, initiative: next },
+        },
+      };
+    });
+  }, []);
 
   const loadDetail = useCallback(async () => {
     if (!gameId) return;
     const data = await api<GameDetail>(`/games/${gameId}`);
     setDetail(data);
+    setInitiative(parseGameInitiative(data.game.settings));
   }, [gameId]);
 
   const loadCharacters = useCallback(async () => {
@@ -83,6 +119,22 @@ export default function GamePage() {
     void loadCharacters().catch((e) => setError(formatError(e)));
   }, [detail, loadCharacters]);
 
+  useEffect(() => {
+    if (characters.length === 0) {
+      setDiceCharacterId(null);
+      return;
+    }
+    setDiceCharacterId((prev) =>
+      prev && characters.some((c) => c.id === prev) ? prev : characters[0]!.id,
+    );
+  }, [characters]);
+
+  useEffect(() => {
+    if (selectedCharacter) {
+      setDiceCharacterId(selectedCharacter.id);
+    }
+  }, [selectedCharacter?.id]);
+
   const createCharacter = async (payload: CreateCharacterPayload) => {
     if (!gameId) return;
     setCreatingCharacter(true);
@@ -108,7 +160,7 @@ export default function GamePage() {
 
   const rollCharacterCombat = async (character: Character, kind: CombatRollKind) => {
     if (!gameId) return;
-    const { notation, reason } = getCombatRollSpec(character, kind);
+    const { notation, reason } = getCharacterRollSpec(character, kind);
     setRollingCharacterId(character.id);
     setRollingKind(kind);
     try {
@@ -132,14 +184,17 @@ export default function GamePage() {
     }
   };
 
-  const rollDice = async () => {
+  const rollDiceTray = async () => {
     if (!gameId) return;
+    const notation = buildDiceNotation(diceTrayCounts);
+    if (!notation) return;
+    setDiceRolling(true);
     try {
       const { result } = await api<{ result: DiceResult }>('/dice/roll', {
         method: 'POST',
         body: JSON.stringify({
           gameId,
-          notation: diceNotation,
+          notation,
           reason: 'Table roll',
         }),
       });
@@ -148,6 +203,41 @@ export default function GamePage() {
       setError(null);
     } catch (e) {
       setError(formatError(e));
+    } finally {
+      setDiceRolling(false);
+    }
+  };
+
+  const resetDiceTray = () => {
+    setDiceTrayCounts(emptyDiceTray());
+  };
+
+  const rollCharacterQuickRoll = async (kind: CharacterRollKind) => {
+    if (!gameId || !diceCharacterId) return;
+    const character = characters.find((c) => c.id === diceCharacterId);
+    if (!character) return;
+    const { notation, reason } = getCharacterRollSpec(character, kind);
+    setDiceRolling(true);
+    setDiceQuickRollKind(kind);
+    try {
+      const { result } = await api<{ result: DiceResult }>('/dice/roll', {
+        method: 'POST',
+        body: JSON.stringify({
+          gameId,
+          characterId: character.id,
+          notation,
+          reason,
+        }),
+      });
+      setCombatRollByCharacter((prev) => ({ ...prev, [character.id]: result }));
+      setLastRoll(result);
+      setMenuTab('dice');
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setDiceRolling(false);
+      setDiceQuickRollKind(null);
     }
   };
 
@@ -204,6 +294,78 @@ export default function GamePage() {
       setError(formatError(e));
     } finally {
       setConsumableAdjustingId(null);
+    }
+  };
+
+  const toggleInPlay = async (character: Character, active: boolean) => {
+    if (!canEditCharacter(character)) return;
+    setConsumableAdjustingId(character.id);
+    try {
+      const prevStats = character.stats ?? {};
+      const prevCustom = (prevStats.custom ?? {}) as Record<string, unknown>;
+      const { character: updated } = await api<{ character: Character }>(
+        `/characters/${character.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            stats: {
+              ...prevStats,
+              custom: { ...prevCustom, [ACTIVE_IN_PLAY_KEY]: active },
+            },
+          }),
+        },
+      );
+      handleCharacterUpdated(updated);
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setConsumableAdjustingId(null);
+    }
+  };
+
+  const runInitiativeAction = async (
+    path: string,
+    method: 'POST' = 'POST',
+    body?: unknown,
+  ) => {
+    if (!gameId) return;
+    setInitiativeBusy(true);
+    try {
+      const res = await api<{ initiative: GameInitiativeState | null }>(
+        `/games/${gameId}/initiative${path}`,
+        { method, body: body ? JSON.stringify(body) : undefined },
+      );
+      applyInitiative(res.initiative ?? null);
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setInitiativeBusy(false);
+    }
+  };
+
+  const startInitiative = () => void runInitiativeAction('/start');
+  const advanceInitiative = () => void runInitiativeAction('/advance');
+  const endInitiative = () => void runInitiativeAction('/end');
+
+  const endTurn = async (character: Character) => {
+    if (!gameId) return;
+    setEndTurnCharacterId(character.id);
+    try {
+      const res = await api<{ initiative: GameInitiativeState | null }>(
+        `/games/${gameId}/initiative/end-turn`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ characterId: character.id }),
+        },
+      );
+      applyInitiative(res.initiative ?? null);
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setEndTurnCharacterId(null);
     }
   };
 
@@ -346,8 +508,37 @@ export default function GamePage() {
               onArchive={archiveCharacter}
             />
           ) : (
-            <Box sx={{ flex: 1, p: 2, display: 'flex', flexDirection: 'column' }}>
-              <TacticalMap gridFtPerCell={gridFt} isDm={isDm} />
+            <Box
+              sx={{
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'row',
+                p: 2,
+                gap: 0,
+              }}
+            >
+              {isDm && (
+                <DmControlPanel
+                  initiative={initiative}
+                  onStartInitiative={startInitiative}
+                  onAdvanceTurn={advanceInitiative}
+                  onEndInitiative={endInitiative}
+                  busy={initiativeBusy}
+                />
+              )}
+              <Box
+                sx={{
+                  flex: 1,
+                  minWidth: 0,
+                  position: 'relative',
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
+              >
+                <TacticalMap gridFtPerCell={gridFt} isDm={isDm} />
+                <InitiativeOrderPanel initiative={initiative} />
+              </Box>
             </Box>
           )}
         </Box>
@@ -361,7 +552,15 @@ export default function GamePage() {
           onTabChange={setMenuTab}
           lastRoll={lastRoll}
           onAddCharacter={() => setCreateDialogOpen(true)}
-          onRollD20={rollDice}
+          diceTrayCounts={diceTrayCounts}
+          onDiceTrayCountsChange={setDiceTrayCounts}
+          onResetDiceTray={resetDiceTray}
+          diceRolling={diceRolling}
+          onRollDiceTray={rollDiceTray}
+          diceCharacterId={diceCharacterId}
+          onDiceCharacterIdChange={setDiceCharacterId}
+          onCharacterQuickRoll={rollCharacterQuickRoll}
+          diceQuickRollKind={diceQuickRollKind}
           onSelectCharacter={(c) => {
             setSelectedCharacter(c);
             setMenuTab('characters');
@@ -375,8 +574,11 @@ export default function GamePage() {
           rollingKind={rollingKind}
           combatRollByCharacter={combatRollByCharacter}
           selectedCharacterId={selectedCharacter?.id}
-          diceNotation={diceNotation}
-          onDiceNotationChange={setDiceNotation}
+          initiative={initiative}
+          onToggleInPlay={toggleInPlay}
+          onEndTurn={endTurn}
+          endTurnCharacterId={endTurnCharacterId}
+          currentUserId={user?.id}
         />
       </Box>
       <CreateCharacterDialog

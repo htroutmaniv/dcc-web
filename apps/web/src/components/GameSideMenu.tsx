@@ -1,5 +1,4 @@
 import {
-  Alert,
   Box,
   Button,
   Divider,
@@ -8,7 +7,6 @@ import {
   ListItemText,
   Tab,
   Tabs,
-  TextField,
   Typography,
 } from '@mui/material';
 import CasinoIcon from '@mui/icons-material/Casino';
@@ -16,9 +14,15 @@ import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import GroupsIcon from '@mui/icons-material/Groups';
 import MapIcon from '@mui/icons-material/Map';
 import { CharacterListItem } from './CharacterListItem';
+import { DiceTabPanel } from './DiceTabPanel';
 import type { Character, DiceResult, Game, User } from '../types/game';
-import type { ConsumableTrackKind } from '@dcc-web/shared';
-import type { CombatRollKind } from '../utils/combat-rolls';
+import {
+  isCharacterTurn,
+  type ConsumableTrackKind,
+  type DiceTrayCounts,
+  type GameInitiativeState,
+} from '@dcc-web/shared';
+import type { CharacterRollKind, CombatRollKind } from '../utils/character-rolls';
 
 export type GameMenuTab = 'characters' | 'dice' | 'session';
 
@@ -31,8 +35,16 @@ interface GameSideMenuProps {
   tab: GameMenuTab;
   onTabChange: (tab: GameMenuTab) => void;
   lastRoll: DiceResult | null;
+  diceTrayCounts: DiceTrayCounts;
+  onDiceTrayCountsChange: (counts: DiceTrayCounts) => void;
+  onResetDiceTray: () => void;
+  diceRolling?: boolean;
   onAddCharacter: () => void;
-  onRollD20: () => void;
+  onRollDiceTray: () => void;
+  diceCharacterId: string | null;
+  onDiceCharacterIdChange: (id: string | null) => void;
+  onCharacterQuickRoll: (kind: CharacterRollKind) => void;
+  diceQuickRollKind?: CharacterRollKind | null;
   onSelectCharacter: (character: Character) => void;
   onCombatRoll: (character: Character, kind: CombatRollKind) => void;
   onAdjustConsumable: (character: Character, kind: ConsumableTrackKind, delta: number) => void;
@@ -43,8 +55,11 @@ interface GameSideMenuProps {
   rollingKind?: CombatRollKind | null;
   combatRollByCharacter?: Record<string, DiceResult>;
   selectedCharacterId?: string | null;
-  diceNotation: string;
-  onDiceNotationChange: (value: string) => void;
+  initiative?: GameInitiativeState | null;
+  onToggleInPlay: (character: Character, active: boolean) => void;
+  onEndTurn: (character: Character) => void;
+  endTurnCharacterId?: string | null;
+  currentUserId?: string;
 }
 
 export function GameSideMenu({
@@ -56,8 +71,16 @@ export function GameSideMenu({
   tab,
   onTabChange,
   lastRoll,
+  diceTrayCounts,
+  onDiceTrayCountsChange,
+  onResetDiceTray,
+  diceRolling,
   onAddCharacter,
-  onRollD20,
+  onRollDiceTray,
+  diceCharacterId,
+  onDiceCharacterIdChange,
+  onCharacterQuickRoll,
+  diceQuickRollKind,
   onSelectCharacter,
   onCombatRoll,
   onAdjustConsumable,
@@ -68,13 +91,17 @@ export function GameSideMenu({
   rollingKind,
   combatRollByCharacter,
   selectedCharacterId,
-  diceNotation,
-  onDiceNotationChange,
+  initiative,
+  onToggleInPlay,
+  onEndTurn,
+  endTurnCharacterId,
+  currentUserId,
 }: GameSideMenuProps) {
+  const initiativeActive = initiative?.active ?? false;
   return (
     <Box
       sx={{
-        width: 340,
+        width: { xs: 320, sm: 420 },
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
@@ -129,54 +156,58 @@ export function GameSideMenu({
               </Typography>
             ) : (
               <List disablePadding>
-                {characters.map((c) => (
-                  <CharacterListItem
-                    key={c.id}
-                    character={c}
-                    selected={selectedCharacterId === c.id}
-                    onSelect={() => onSelectCharacter(c)}
-                    onCombatRoll={(kind) => onCombatRoll(c, kind)}
-                    onAdjustConsumable={(kind, delta) => onAdjustConsumable(c, kind, delta)}
-                    onToggleLightSource={(using) => onToggleLightSource(c, using)}
-                    consumableAdjusting={consumableAdjustingId === c.id}
-                    canEditConsumables={canEditCharacter(c)}
-                    rollingKind={
-                      rollingCharacterId === c.id ? (rollingKind ?? null) : null
-                    }
-                    lastRoll={combatRollByCharacter?.[c.id]}
-                  />
-                ))}
+                {characters.map((c) => {
+                  const isTurn = isCharacterTurn(initiative ?? null, c.id);
+                  const canEndTurn =
+                    initiativeActive &&
+                    isTurn &&
+                    (isDm || (currentUserId != null && c.ownerUserId === currentUserId));
+                  return (
+                    <CharacterListItem
+                      key={c.id}
+                      character={c}
+                      selected={selectedCharacterId === c.id}
+                      onSelect={() => onSelectCharacter(c)}
+                      onCombatRoll={(kind) => onCombatRoll(c, kind)}
+                      onAdjustConsumable={(kind, delta) =>
+                        onAdjustConsumable(c, kind, delta)
+                      }
+                      onToggleLightSource={(using) => onToggleLightSource(c, using)}
+                      consumableAdjusting={consumableAdjustingId === c.id}
+                      canEditConsumables={canEditCharacter(c)}
+                      canToggleInPlay={canEditCharacter(c)}
+                      onToggleInPlay={(active) => onToggleInPlay(c, active)}
+                      initiativeActive={initiativeActive}
+                      isInitiativeTurn={isTurn}
+                      canEndTurn={canEndTurn}
+                      onEndTurn={() => onEndTurn(c)}
+                      endingTurn={endTurnCharacterId === c.id}
+                      rollingKind={
+                        rollingCharacterId === c.id ? (rollingKind ?? null) : null
+                      }
+                      lastRoll={combatRollByCharacter?.[c.id]}
+                    />
+                  );
+                })}
               </List>
             )}
           </>
         )}
 
         {tab === 'dice' && (
-          <>
-            <TextField
-              size="small"
-              label="Notation"
-              value={diceNotation}
-              onChange={(e) => onDiceNotationChange(e.target.value)}
-              fullWidth
-              sx={{ mb: 1 }}
-              placeholder="1d20+2"
-            />
-            <Button
-              fullWidth
-              variant="contained"
-              startIcon={<CasinoIcon />}
-              onClick={onRollD20}
-            >
-              Roll (server)
-            </Button>
-            {lastRoll && (
-              <Alert severity="success" sx={{ mt: 2 }}>
-                <strong>{lastRoll.total}</strong> — [{lastRoll.rolls.join(', ')}]
-                {lastRoll.modifier !== 0 && ` ${lastRoll.modifier >= 0 ? '+' : ''}${lastRoll.modifier}`}
-              </Alert>
-            )}
-          </>
+          <DiceTabPanel
+            characters={characters}
+            diceCharacterId={diceCharacterId}
+            onDiceCharacterIdChange={onDiceCharacterIdChange}
+            counts={diceTrayCounts}
+            onCountsChange={onDiceTrayCountsChange}
+            onRollTray={onRollDiceTray}
+            onResetTray={onResetDiceTray}
+            onQuickRoll={onCharacterQuickRoll}
+            lastRoll={lastRoll}
+            rolling={diceRolling}
+            quickRollKind={diceQuickRollKind}
+          />
         )}
 
         {tab === 'session' && (

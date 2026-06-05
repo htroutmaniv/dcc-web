@@ -4,13 +4,18 @@ export interface User {
   avatarUrl?: string | null;
 }
 
+import type { GameInitiativeState, GameSettings } from '@dcc-web/shared';
+
 export interface Game {
   id: string;
   title: string;
   inviteCode: string;
   dmUserId: string;
   status?: string;
+  settings?: GameSettings;
 }
+
+export type { GameInitiativeState };
 
 export interface CharacterAbility {
   score: number;
