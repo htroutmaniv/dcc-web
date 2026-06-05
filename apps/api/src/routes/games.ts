@@ -89,6 +89,7 @@ export async function gameRoutes(app: FastifyInstance) {
     const game = await prisma.game.findUniqueOrThrow({
       where: { id: gameId },
       include: {
+        dm: { select: { id: true, displayName: true, avatarUrl: true } },
         maps: { include: { tokens: true }, orderBy: { sortOrder: 'asc' } },
         players: { include: { user: true } },
       },

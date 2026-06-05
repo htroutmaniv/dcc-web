@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { io, type Socket } from 'socket.io-client';
+import { registerGameSocket, unregisterGameSocket } from '../lib/game-socket-client';
 import type { GameInitiativeState } from '@dcc-web/shared';
-import type { Character, DiceResult } from '../types/game';
+import type { Character, DiceResult, GamePresenceUser } from '../types/game';
 import type { DiceRollLogEntry } from '../types/dice-roll-log';
 
 export interface GameSocketHandlers {
@@ -27,6 +28,7 @@ export interface GameSocketHandlers {
   }) => void;
   onTokenUpdated?: (token: unknown) => void;
   onMapUpdated?: (actorUserId?: string) => void;
+  onPresenceUpdated?: (users: GamePresenceUser[]) => void;
 }
 
 /**
@@ -57,6 +59,7 @@ export function useGameSocket(
     socket.on('connect', onConnect);
 
     socket.on('game:joined', () => {
+      registerGameSocket(socket, gameId);
       handlersRef.current.onConnected?.();
     });
 
@@ -115,12 +118,22 @@ export function useGameSocket(
       },
     );
 
+    socket.on('game:presence', (payload: { users?: GamePresenceUser[] }) => {
+      if (Array.isArray(payload?.users)) {
+        handlersRef.current.onPresenceUpdated?.(payload.users);
+      }
+    });
+
     socket.on('game:error', (payload: { message?: string }) => {
       console.warn('[game socket]', payload?.message ?? 'error');
     });
 
     return () => {
       socket.off('connect', onConnect);
+      unregisterGameSocket(socket);
+      if (socket.connected) {
+        socket.emit('game:leave', { gameId });
+      }
       socket.disconnect();
     };
   }, [gameId, enabled]);

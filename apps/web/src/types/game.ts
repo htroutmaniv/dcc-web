@@ -11,6 +11,7 @@ export interface Game {
   title: string;
   inviteCode: string;
   dmUserId: string;
+  dm?: User;
   status?: string;
   settings?: GameSettings;
 }
@@ -70,6 +71,12 @@ export interface DiceResult {
 
 export type GameMembershipRole = 'dm' | 'player';
 
+export interface GamePresenceUser {
+  userId: string;
+  displayName: string;
+  isDm?: boolean;
+}
+
 export interface GameListEntry {
   game: Game;
   role: GameMembershipRole;
@@ -86,6 +93,7 @@ export interface MapToken {
 
 export interface GameDetail {
   game: Game & {
+    dm?: User;
     map?: {
       id: string;
       gridFtPerCell?: number;

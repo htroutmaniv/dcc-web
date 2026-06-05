@@ -1,10 +1,7 @@
 import {
   Box,
   Button,
-  Divider,
   List,
-  ListItem,
-  ListItemText,
   Tab,
   Tabs,
   Typography,
@@ -12,14 +9,15 @@ import {
 import CasinoIcon from '@mui/icons-material/Casino';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import GroupsIcon from '@mui/icons-material/Groups';
-import MapIcon from '@mui/icons-material/Map';
+import PeopleIcon from '@mui/icons-material/People';
 import PestControlIcon from '@mui/icons-material/PestControl';
+import { GamePresencePanel } from './GamePresencePanel';
 import { CharacterListItem, type CombatTargetOption } from './CharacterListItem';
 import { DmCharacterSections } from './DmCharacterSections';
 import type { DiceResult } from '../types/game';
 import { DiceTabPanel } from './DiceTabPanel';
 import { MonsterPanel } from './MonsterPanel';
-import type { Character, Game, User } from '../types/game';
+import type { Character, Game, GamePresenceUser, User } from '../types/game';
 import type { DiceRollLogEntry } from '../types/dice-roll-log';
 import {
   isCharacterTurn,
@@ -29,7 +27,7 @@ import {
 } from '@dcc-web/shared';
 import type { CharacterRollKind, CombatRollKind } from '../utils/character-rolls';
 
-export type GameMenuTab = 'characters' | 'monsters' | 'dice' | 'session';
+export type GameMenuTab = 'characters' | 'monsters' | 'dice' | 'presence';
 
 interface GameSideMenuProps {
   game: Game;
@@ -78,6 +76,7 @@ interface GameSideMenuProps {
   onMonsterInitiativeChange?: (initiative: GameInitiativeState | null) => void;
   monsterPanelBusy?: boolean;
   onMonsterPanelError?: (message: string | null) => void;
+  presenceUsers?: GamePresenceUser[];
 }
 
 export function GameSideMenu({
@@ -127,6 +126,7 @@ export function GameSideMenu({
   onMonsterInitiativeChange,
   monsterPanelBusy,
   onMonsterPanelError,
+  presenceUsers = [],
 }: GameSideMenuProps) {
   const initiativeActive = initiative?.active ?? false;
   return (
@@ -169,7 +169,7 @@ export function GameSideMenu({
           />
         )}
         <Tab icon={<CasinoIcon />} iconPosition="start" label="Dice" value="dice" />
-        <Tab icon={<MapIcon />} iconPosition="start" label="Info" value="session" />
+        <Tab icon={<PeopleIcon />} iconPosition="start" label="In game" value="presence" />
       </Tabs>
 
       <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
@@ -330,37 +330,14 @@ export function GameSideMenu({
           />
         )}
 
-        {tab === 'session' && (
-          <>
-            <Typography variant="body2" color="text.secondary" paragraph>
-              Role: <strong>{isDm ? 'Dungeon Master' : 'Player'}</strong>
-            </Typography>
-            <Divider sx={{ my: 1 }} />
-            <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
-              Players in game
-            </Typography>
-            {players?.length ? (
-              <List dense>
-                {players.map((p) => (
-                  <ListItem key={p.user.id} disablePadding>
-                    <ListItemText primary={p.user.displayName} />
-                  </ListItem>
-                ))}
-              </List>
-            ) : (
-              <Typography variant="body2" color="text.secondary">
-                No players listed yet.
-              </Typography>
-            )}
-            {isDm && (
-              <>
-                <Divider sx={{ my: 2 }} />
-                <Typography variant="caption" color="text.secondary">
-                  DM map tools (reset tokens, clear map) will appear here.
-                </Typography>
-              </>
-            )}
-          </>
+        {tab === 'presence' && (
+          <GamePresencePanel
+            dmUserId={game.dmUserId}
+            dmDisplayName={game.dm?.displayName ?? 'Dungeon Master'}
+            players={players}
+            presenceUsers={presenceUsers}
+            currentUserId={currentUserId}
+          />
         )}
       </Box>
     </Box>

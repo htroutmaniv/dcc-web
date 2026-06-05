@@ -3,6 +3,13 @@ import { Server } from 'socket.io';
 import { config } from './lib/config.js';
 import { buildApp } from './app.js';
 import { assertGameMember } from './lib/game-access.js';
+import {
+  addGamePresence,
+  removeGamePresence,
+  removeSocketPresence,
+  trackGameJoin,
+  trackGameLeave,
+} from './lib/game-presence.js';
 import { getUserIdFromSocketCookie } from './lib/game-socket.js';
 
 const app = await buildApp();
@@ -39,11 +46,30 @@ io.on('connection', (socket) => {
         return;
       }
       socket.join(`game:${gameId}`);
+      trackGameJoin(socket, gameId);
+      await addGamePresence(io, gameId, userId, socket.id);
       socket.emit('game:joined', { gameId });
     } catch {
       socket.emit('game:error', { message: 'Join failed' });
     }
   });
+
+  socket.on('game:leave', (payload: { gameId?: string }) => {
+    const gameId = payload?.gameId;
+    const userId = socket.data.userId as string | undefined;
+    if (!gameId || !userId) return;
+    void socket.leave(`game:${gameId}`);
+    trackGameLeave(socket, gameId);
+    removeGamePresence(io, gameId, userId, socket.id);
+  });
+
+  const clearPresence = () => {
+    removeSocketPresence(io, socket);
+  };
+
+  // Rooms are still populated on disconnecting; disconnect fires after cleanup.
+  socket.on('disconnecting', clearPresence);
+  socket.on('disconnect', clearPresence);
 });
 
 app.log.info(`API listening on ${config.host}:${config.port}`);

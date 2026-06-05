@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { api } from '../api/client';
+import { leaveActiveGameSocket } from '../lib/game-socket-client';
 import type { User } from '../types/game';
 
 interface AuthContextValue {
@@ -54,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    leaveActiveGameSocket();
     await api('/auth/logout', { method: 'POST' });
     setUser(null);
   }, []);

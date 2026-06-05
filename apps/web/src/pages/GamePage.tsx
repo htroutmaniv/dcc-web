@@ -43,7 +43,13 @@ import { ApplyDamageDialog, type MapTokenTarget } from '../components/ApplyDamag
 import { ConsumeResourceDialog } from '../components/ConsumeResourceDialog';
 import { DmControlPanel } from '../components/DmControlPanel';
 import { InitiativeOrderPanel } from '../components/InitiativeOrderPanel';
-import type { Character, DiceResult, GameDetail, GameMonsterInstance } from '../types/game';
+import type {
+  Character,
+  DiceResult,
+  GameDetail,
+  GameMonsterInstance,
+  GamePresenceUser,
+} from '../types/game';
 import {
   buildItemsAfterActivateLight,
   buildItemsAfterConsume,
@@ -78,6 +84,7 @@ export default function GamePage() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [lastRoll, setLastRoll] = useState<DiceResult | null>(null);
   const [menuTab, setMenuTab] = useState<GameMenuTab>('characters');
+  const [presenceUsers, setPresenceUsers] = useState<GamePresenceUser[]>([]);
   const [diceTrayCounts, setDiceTrayCounts] = useState<DiceTrayCounts>(emptyDiceTray);
   const [diceRolling, setDiceRolling] = useState(false);
   const [diceCharacterId, setDiceCharacterId] = useState<string | null>(null);
@@ -559,9 +566,16 @@ export default function GamePage() {
       onMapUpdated: () => {
         void loadMaps().catch(() => {});
       },
+      onPresenceUpdated: (users) => {
+        setPresenceUsers(users);
+      },
     },
     Boolean(gameId && detail),
   );
+
+  useEffect(() => {
+    setPresenceUsers([]);
+  }, [gameId]);
 
   const handleMonsterUpdated = useCallback((m: GameMonsterInstance) => {
     setMonsters((prev) => prev.map((x) => (x.id === m.id ? m : x)));
@@ -1458,6 +1472,7 @@ export default function GamePage() {
           onMonstersChange={setMonsters}
           onMonsterInitiativeChange={applyInitiative}
           onMonsterPanelError={setError}
+          presenceUsers={presenceUsers}
         />
       </Box>
       <CreateCharacterDialog
