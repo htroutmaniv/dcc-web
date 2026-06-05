@@ -64,7 +64,8 @@ Good/poor by class: Warrior (Fort), Cleric (Fort/Will), Wizard (Will), Thief (Re
 
 - **Alignment**: random Lawful / Neutral / Chaotic / Unaligned.
 - **Starting funds**: 3d6 copper pieces (`stats.custom.startingFunds`).
-- **Birth augur (lucky sign)**: d20 on `birth-augur.ts`; modifier = **augur roll − Luck score**, stored in `stats.custom.luckySign` (bonus type per augur entry).
+- **Birth augur (lucky sign)**: d20 on `birth-augur.ts`, adjusted by **Luck modifier** to pick the sign; the permanent bonus on that roll type is the **Luck modifier at creation** (DCC core p.19), stored in `stats.custom.luckySign`.
+- **Race**: `stats.custom.race` — `human`, `elf`, `dwarf`, or `halfling` (from occupation on random roll; editable on sheet).
 - **Name**: `Funnel ###` until the player renames.
 
 ## Random generation — level 1+

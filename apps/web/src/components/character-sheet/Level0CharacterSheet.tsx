@@ -2,7 +2,13 @@ import { Box, Button, MenuItem, Select, Stack } from '@mui/material';
 import InventoryIcon from '@mui/icons-material/Inventory';
 import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
-import { computeDccSaves, formatSaveModifier } from '@dcc-web/shared';
+import {
+  CHARACTER_RACES,
+  computeDccSaves,
+  formatSaveModifier,
+  raceLabel,
+  type CharacterRace,
+} from '@dcc-web/shared';
 import {
   armorStatsFromEntry,
   deriveArmorOnSheet,
@@ -207,6 +213,32 @@ export function Level0CharacterSheet({
             </FieldBox>
           )}
         </Box>
+        {data.level === 0 && (
+          <Box sx={{ flex: '0 1 140px' }}>
+            <SectionLabel>Race:</SectionLabel>
+            {editing ? (
+              <Select
+                fullWidth
+                size="small"
+                value={data.race}
+                onChange={(e) =>
+                  patch(data, onChange, { race: e.target.value as CharacterRace })
+                }
+                sx={{ ...armorSelectSx, mt: 0.5 }}
+              >
+                {CHARACTER_RACES.map((r) => (
+                  <MenuItem key={r} value={r}>
+                    {raceLabel(r)}
+                  </MenuItem>
+                ))}
+              </Select>
+            ) : (
+              <FieldBox sx={{ mt: 0.5 }}>
+                <SheetText sx={{ fontWeight: 600 }}>{raceLabel(data.race)}</SheetText>
+              </FieldBox>
+            )}
+          </Box>
+        )}
         <Box sx={{ flex: '1 1 200px' }}>
           <SectionLabel>Occupation:</SectionLabel>
           {editing ? (

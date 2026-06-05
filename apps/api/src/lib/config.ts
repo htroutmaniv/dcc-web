@@ -18,4 +18,8 @@ export const config = {
   },
   sessionCookieName: process.env.SESSION_COOKIE_NAME ?? 'dcc_session',
   storagePath: process.env.STORAGE_PATH ?? './uploads',
+  /** Separate DM/player dev accounts; disabled in production unless ENABLE_DEV_LOGIN=true */
+  enableDevLogin:
+    process.env.NODE_ENV !== 'production' ||
+    process.env.ENABLE_DEV_LOGIN === 'true',
 };

@@ -21,6 +21,7 @@ export const initiativeEndTurnSchema = z.object({
 });
 
 const patchItemSchema = z.object({
+  id: z.string().uuid().optional(),
   category: z.enum(['weapon', 'armor', 'treasure', 'misc', 'disposable']),
   name: z.string().min(1).max(200),
   quantity: z.number().int().min(0).max(9999).optional(),

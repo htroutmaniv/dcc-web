@@ -2,6 +2,7 @@ import { initiativeEndTurnSchema } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
 import { assertGameDm } from '../lib/assert-game-dm.js';
 import { assertGameMember } from '../lib/game-access.js';
+import { prisma } from '../lib/prisma.js';
 import {
   advanceGameInitiative,
   endCharacterTurn,
@@ -9,14 +10,15 @@ import {
   getInitiativeFromGame,
   startGameInitiative,
 } from '../services/initiative-service.js';
-import { prisma } from '../lib/prisma.js';
+import { emitToGame } from '../lib/game-socket.js';
 
 function emitInitiativeUpdate(
   app: FastifyInstance,
   gameId: string,
   initiative: ReturnType<typeof getInitiativeFromGame>,
+  actorUserId?: string,
 ) {
-  app.io?.to(`game:${gameId}`).emit('initiative:updated', { gameId, initiative });
+  emitToGame(app.io, gameId, 'initiative:updated', { initiative, actorUserId });
 }
 
 export async function initiativeRoutes(app: FastifyInstance) {
@@ -40,7 +42,7 @@ export async function initiativeRoutes(app: FastifyInstance) {
         throw app.httpErrors.createError(access.status, access.message);
       }
       const initiative = await startGameInitiative(gameId);
-      emitInitiativeUpdate(app, gameId, initiative);
+      emitInitiativeUpdate(app, gameId, initiative, request.userId);
       return { initiative };
     },
   );
@@ -55,7 +57,7 @@ export async function initiativeRoutes(app: FastifyInstance) {
         throw app.httpErrors.createError(access.status, access.message);
       }
       const initiative = await advanceGameInitiative(gameId);
-      emitInitiativeUpdate(app, gameId, initiative);
+      emitInitiativeUpdate(app, gameId, initiative, request.userId);
       return { initiative };
     },
   );
@@ -70,7 +72,7 @@ export async function initiativeRoutes(app: FastifyInstance) {
         throw app.httpErrors.createError(access.status, access.message);
       }
       await endGameInitiative(gameId);
-      emitInitiativeUpdate(app, gameId, null);
+      emitInitiativeUpdate(app, gameId, null, request.userId);
       return { initiative: null };
     },
   );
@@ -95,7 +97,7 @@ export async function initiativeRoutes(app: FastifyInstance) {
           isDm: access.isDm,
           characterId: parsed.data.characterId,
         });
-        emitInitiativeUpdate(app, gameId, initiative);
+        emitInitiativeUpdate(app, gameId, initiative, request.userId);
         return { initiative };
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Cannot end turn';

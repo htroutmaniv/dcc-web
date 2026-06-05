@@ -78,12 +78,33 @@ export const ITEM_CATALOG_SEED: SeedRow[] = [
     properties: { slot: 'shield', acBonus: 2, speedPenalty: 0, checkPenalty: -1 },
   },
   // Consumables
-  { category: 'disposable', name: 'Torch', properties: { light: true } },
-  { category: 'disposable', name: 'Lantern', properties: { light: true } },
-  { category: 'disposable', name: 'Oil flask', properties: { light: true } },
+  {
+    category: 'disposable',
+    name: 'Torch',
+    properties: { light: true, consumedWhenEmpty: true },
+  },
+  {
+    category: 'disposable',
+    name: 'Lantern',
+    properties: { light: true, requiresFuel: true },
+  },
+  { category: 'disposable', name: 'Oil flask', properties: { fuel: true, uses: 2 } },
   { category: 'disposable', name: 'Rations (1 day)', properties: { food: true } },
-  { category: 'disposable', name: 'Waterskin', properties: { drink: true } },
-  { category: 'disposable', name: 'Holy water', properties: { drink: true } },
+  {
+    category: 'disposable',
+    name: 'Waterskin',
+    properties: {
+      vessel: true,
+      capacity: 3,
+      usesRemaining: 3,
+      unitLabel: 'day',
+    },
+  },
+  {
+    category: 'disposable',
+    name: 'Holy water',
+    properties: { vessel: true, capacity: 1, usesRemaining: 1, unitLabel: 'use' },
+  },
   { category: 'disposable', name: 'Bandages', properties: {} },
   { category: 'disposable', name: 'Antitoxin', properties: { poisonous: true } },
   { category: 'disposable', name: 'Alchemist fire', properties: { poisonous: true } },

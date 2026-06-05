@@ -1,13 +1,22 @@
 import { prisma } from './prisma.js';
 
+/** Only the game creator (dm_user_id) is DM — not co_dm or other player roles. */
+export function isGameDm(game: { dmUserId: string }, userId: string): boolean {
+  return game.dmUserId === userId;
+}
+
 export async function assertGameMember(userId: string, gameId: string) {
   const game = await prisma.game.findUnique({ where: { id: gameId } });
   if (!game) return { ok: false as const, status: 404, message: 'Game not found' };
-  if (game.dmUserId === userId) return { ok: true as const, game, isDm: true };
+  if (isGameDm(game, userId)) {
+    return { ok: true as const, game, isDm: true };
+  }
   const member = await prisma.gamePlayer.findUnique({
     where: { gameId_userId: { gameId, userId } },
   });
-  if (!member) return { ok: false as const, status: 403, message: 'Not a member of this game' };
+  if (!member) {
+    return { ok: false as const, status: 403, message: 'Not a member of this game' };
+  }
   return { ok: true as const, game, isDm: false };
 }
 

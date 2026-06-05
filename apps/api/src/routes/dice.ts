@@ -1,6 +1,7 @@
 import { diceRollRequestSchema } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
 import { assertGameMember } from '../lib/game-access.js';
+import { emitToGame } from '../lib/game-socket.js';
 import { rollAndPersist } from '../services/dice.js';
 
 export async function diceRoutes(app: FastifyInstance) {
@@ -21,9 +22,10 @@ export async function diceRoutes(app: FastifyInstance) {
       reason: parsed.data.reason,
     });
 
-    request.server.io?.to(`game:${parsed.data.gameId}`).emit('dice:rolled', {
-      ...result,
-      userId: request.userId,
+    emitToGame(request.server.io, parsed.data.gameId, 'dice:rolled', {
+      result,
+      actorUserId: request.userId,
+      characterId: parsed.data.characterId,
     });
 
     return { result };

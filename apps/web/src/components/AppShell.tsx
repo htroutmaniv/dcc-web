@@ -6,12 +6,10 @@ import {
   Chip,
   Link,
   Stack,
-  TextField,
   Toolbar,
   Typography,
 } from '@mui/material';
 import { useAuth } from '../context/AuthContext';
-import { useState } from 'react';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -28,7 +26,6 @@ export function AppShell({
   actions,
 }: AppShellProps) {
   const { user, health, devLogin, logout } = useAuth();
-  const [displayName, setDisplayName] = useState('Adventurer');
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
@@ -72,21 +69,29 @@ export function AppShell({
               </Button>
             </Stack>
           ) : (
-            <Stack direction="row" spacing={1} alignItems="center">
-              <TextField
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+              <Button
                 size="small"
-                label="Name"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                sx={{ width: 120 }}
-              />
-              <Button size="small" variant="contained" onClick={() => void devLogin(displayName)}>
-                Dev login
+                variant="contained"
+                color="primary"
+                onClick={() => void devLogin('dm')}
+              >
+                Dev DM
+              </Button>
+              <Button
+                size="small"
+                variant="contained"
+                color="secondary"
+                onClick={() => void devLogin('player')}
+              >
+                Dev Player
               </Button>
               <Button
                 size="small"
                 variant="outlined"
-                onClick={() => { window.location.href = '/api/auth/discord'; }}
+                onClick={() => {
+                  window.location.href = '/api/auth/discord';
+                }}
               >
                 Discord
               </Button>

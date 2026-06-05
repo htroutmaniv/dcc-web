@@ -5,6 +5,13 @@ import { prisma } from '../lib/prisma.js';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 
+export const DEV_AUTH_ACCOUNTS = {
+  dm: { email: 'dev-dm@localhost', displayName: 'Dev DM' },
+  player: { email: 'dev-player@localhost', displayName: 'Dev Player' },
+} as const;
+
+export type DevAuthAccount = keyof typeof DEV_AUTH_ACCOUNTS;
+
 /** Origin for redirects (preserves port, e.g. localhost:8080). */
 function requestOrigin(request: FastifyRequest): string {
   const proto =
@@ -18,13 +25,21 @@ function requestOrigin(request: FastifyRequest): string {
 }
 
 export async function authRoutes(app: FastifyInstance) {
-  /** Dev login — replace with Discord in production */
+  /**
+   * Dev login — two fixed accounts (DM vs player) for local testing.
+   * Body: { account: "dm" | "player", displayName?: string }
+   */
   app.post('/auth/dev-login', async (request, reply) => {
-    const body = request.body as { displayName?: string };
-    const displayName = body?.displayName?.trim() || 'Dev Player';
+    if (!config.enableDevLogin) {
+      return reply.status(403).send({ error: 'Dev login is disabled' });
+    }
+    const body = request.body as { account?: string; displayName?: string };
+    const account: DevAuthAccount = body?.account === 'dm' ? 'dm' : 'player';
+    const preset = DEV_AUTH_ACCOUNTS[account];
+    const displayName = body?.displayName?.trim() || preset.displayName;
     const user = await prisma.user.upsert({
-      where: { email: 'dev@localhost' },
-      create: { email: 'dev@localhost', displayName },
+      where: { email: preset.email },
+      create: { email: preset.email, displayName },
       update: { displayName },
     });
     const token = app.jwt.sign({ sub: user.id }, { expiresIn: '7d' });
@@ -34,7 +49,10 @@ export async function authRoutes(app: FastifyInstance) {
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60,
     });
-    return { user: { id: user.id, displayName: user.displayName } };
+    return {
+      user: { id: user.id, displayName: user.displayName, email: preset.email },
+      account,
+    };
   });
 
   app.get('/auth/me', { onRequest: [app.authenticate] }, async (request) => {

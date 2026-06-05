@@ -3,14 +3,20 @@ import {
   Button,
   Checkbox,
   CircularProgress,
+  FormControl,
   FormControlLabel,
-  IconButton,
+  InputLabel,
+  MenuItem,
+  Select,
   Stack,
   Typography,
 } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import RemoveIcon from '@mui/icons-material/Remove';
-import { isActiveInPlay, type ConsumableTrackKind } from '@dcc-web/shared';
+import {
+  getActiveLightItemId,
+  isActiveInPlay,
+  listLightSourceOptions,
+} from '@dcc-web/shared';
+import { canExpendLightSource } from '../utils/consumables';
 import type { Character, DiceResult } from '../types/game';
 import type { CombatRollKind } from '../utils/combat-rolls';
 import { getConsumableCounts, isUsingLightSource } from '../utils/consumables';
@@ -20,8 +26,10 @@ interface CharacterListItemProps {
   selected?: boolean;
   onSelect: () => void;
   onCombatRoll: (kind: CombatRollKind) => void;
-  onAdjustConsumable?: (kind: ConsumableTrackKind, delta: number) => void;
-  onToggleLightSource?: (using: boolean) => void;
+  onOpenConsume?: (kind: 'food' | 'drink') => void;
+  onSelectActiveLight?: (lightItemId: string | null) => void;
+  onToggleLightLit?: (lit: boolean) => void;
+  onExpendActiveLight?: () => void;
   consumableAdjusting?: boolean;
   canEditConsumables?: boolean;
   canToggleInPlay?: boolean;
@@ -41,104 +49,15 @@ const ROLL_BUTTONS: { kind: CombatRollKind; label: string }[] = [
   { kind: 'damage', label: 'Dmg' },
 ];
 
-const TRACKERS: { kind: ConsumableTrackKind; label: string; short: string }[] = [
-  { kind: 'food', label: 'Rations', short: 'Food' },
-  { kind: 'drink', label: 'Water', short: 'Drink' },
-  { kind: 'light', label: 'Light sources', short: 'Light' },
-];
-
-function ConsumableRow({
-  label,
-  value,
-  disabled,
-  onDelta,
-}: {
-  label: string;
-  value: number;
-  disabled?: boolean;
-  onDelta: (delta: number) => void;
-}) {
-  return (
-    <Stack direction="row" alignItems="center" spacing={0.25} sx={{ minWidth: 0 }}>
-      <Typography variant="caption" sx={{ flex: 1, minWidth: 52 }} noWrap>
-        {label}
-      </Typography>
-      <IconButton
-        size="small"
-        disabled={disabled || value <= 0}
-        onClick={() => onDelta(-1)}
-        sx={{ p: 0.25 }}
-        aria-label={`Decrease ${label}`}
-      >
-        <RemoveIcon sx={{ fontSize: 16 }} />
-      </IconButton>
-      <Typography variant="caption" fontWeight={700} sx={{ minWidth: 16, textAlign: 'center' }}>
-        {value}
-      </Typography>
-      <IconButton
-        size="small"
-        disabled={disabled}
-        onClick={() => onDelta(1)}
-        sx={{ p: 0.25 }}
-        aria-label={`Increase ${label}`}
-      >
-        <AddIcon sx={{ fontSize: 16 }} />
-      </IconButton>
-    </Stack>
-  );
-}
-
-function LightSourceRow({
-  label,
-  value,
-  using,
-  disabled,
-  onDelta,
-  onToggleUsing,
-}: {
-  label: string;
-  value: number;
-  using: boolean;
-  disabled?: boolean;
-  onDelta: (delta: number) => void;
-  onToggleUsing: (using: boolean) => void;
-}) {
-  return (
-    <Box>
-      <ConsumableRow
-        label={label}
-        value={value}
-        disabled={disabled}
-        onDelta={onDelta}
-      />
-      <FormControlLabel
-        sx={{ ml: 0, mt: -0.25, alignItems: 'center' }}
-        control={
-          <Checkbox
-            size="small"
-            checked={using}
-            disabled={disabled || value <= 0}
-            onChange={(e) => onToggleUsing(e.target.checked)}
-            sx={{ py: 0.25 }}
-          />
-        }
-        label={
-          <Typography variant="caption" color="text.secondary">
-            Using light source
-          </Typography>
-        }
-      />
-    </Box>
-  );
-}
-
 export function CharacterListItem({
   character,
   selected,
   onSelect,
   onCombatRoll,
-  onAdjustConsumable,
-  onToggleLightSource,
+  onOpenConsume,
+  onSelectActiveLight,
+  onToggleLightLit,
+  onExpendActiveLight,
   consumableAdjusting,
   canEditConsumables,
   canToggleInPlay,
@@ -158,7 +77,12 @@ export function CharacterListItem({
   const deadColor = 'error.main';
   const isRolling = rollingKind != null;
   const counts = getConsumableCounts(character);
-  const lightSourceActive = isUsingLightSource(character);
+  const activeLightId = getActiveLightItemId(character);
+  const isLit = isUsingLightSource(character);
+  const lightOptions = listLightSourceOptions(character.items ?? []);
+  const expendCheck = activeLightId
+    ? canExpendLightSource(character.items ?? [], activeLightId)
+    : { ok: false as const, message: 'Select a light source' };
   const inPlay = isActiveInPlay(character);
   const showTurnHighlight = initiativeActive && isInitiativeTurn;
 
@@ -212,7 +136,7 @@ export function CharacterListItem({
             ·
           </Box>
           AC {ac}
-          {lightSourceActive && counts.light > 0 && (
+          {isLit && (
             <>
               <Box component="span" sx={{ mx: 1, opacity: 0.5 }}>
                 ·
@@ -266,29 +190,103 @@ export function CharacterListItem({
       </Box>
 
       <Box sx={{ mt: 0.5 }} onClick={(e) => e.stopPropagation()}>
-        <Stack spacing={0.5}>
-          {TRACKERS.map(({ kind, label }) =>
-            kind === 'light' ? (
-              <LightSourceRow
-                key={kind}
-                label={label}
-                value={counts.light}
-                using={lightSourceActive}
-                disabled={!canEditConsumables || consumableAdjusting}
-                onDelta={(delta) => onAdjustConsumable?.(kind, delta)}
-                onToggleUsing={(checked) => onToggleLightSource?.(checked)}
-              />
-            ) : (
-              <ConsumableRow
-                key={kind}
-                label={label}
-                value={counts[kind]}
-                disabled={!canEditConsumables || consumableAdjusting}
-                onDelta={(delta) => onAdjustConsumable?.(kind, delta)}
-              />
-            ),
-          )}
+        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+          Food {counts.food} · Drink {counts.drink} · Fuel {counts.fuel}
+        </Typography>
+        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
+          <Button
+            size="small"
+            variant="outlined"
+            disabled={!canEditConsumables || consumableAdjusting || counts.food <= 0}
+            onClick={() => onOpenConsume?.('food')}
+            sx={{ minWidth: 0, py: 0.2, px: 0.75, fontSize: '0.7rem' }}
+          >
+            Eat
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            disabled={!canEditConsumables || consumableAdjusting || counts.drink <= 0}
+            onClick={() => onOpenConsume?.('drink')}
+            sx={{ minWidth: 0, py: 0.2, px: 0.75, fontSize: '0.7rem' }}
+          >
+            Drink
+          </Button>
         </Stack>
+        <FormControl
+          size="small"
+          fullWidth
+          disabled={!canEditConsumables || consumableAdjusting || lightOptions.length === 0}
+          sx={{ mb: 0.5 }}
+        >
+          <InputLabel id={`light-${character.id}`}>Light source</InputLabel>
+          <Select
+            labelId={`light-${character.id}`}
+            label="Light source"
+            value={activeLightId ?? ''}
+            onChange={(e) => {
+              const v = e.target.value;
+              onSelectActiveLight?.(v === '' ? null : v);
+            }}
+          >
+            <MenuItem value="">
+              <em>None</em>
+            </MenuItem>
+            {lightOptions.map((opt) => (
+              <MenuItem key={opt.item.id} value={opt.item.id}>
+                {opt.label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+          <FormControlLabel
+            sx={{ ml: 0, mr: 0 }}
+            control={
+              <Checkbox
+                size="small"
+                checked={isLit}
+                disabled={
+                  !canEditConsumables ||
+                  consumableAdjusting ||
+                  !activeLightId
+                }
+                onChange={(e) => onToggleLightLit?.(e.target.checked)}
+              />
+            }
+            label={
+              <Typography variant="caption" color="text.secondary">
+                Lit
+              </Typography>
+            }
+          />
+          <Button
+            size="small"
+            variant="outlined"
+            color="warning"
+            disabled={
+              !canEditConsumables ||
+              consumableAdjusting ||
+              !activeLightId ||
+              !expendCheck.ok
+            }
+            onClick={() => onExpendActiveLight?.()}
+            sx={{ minWidth: 0, py: 0.2, px: 0.75, fontSize: '0.7rem' }}
+            title={expendCheck.ok ? undefined : expendCheck.message}
+          >
+            Expend
+          </Button>
+        </Stack>
+        {lightOptions.length === 0 && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+            Add a torch or lantern + fuel in Manage equipment.
+          </Typography>
+        )}
+        {activeLightId && !expendCheck.ok && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+            {expendCheck.message}
+          </Typography>
+        )}
       </Box>
 
       <Stack

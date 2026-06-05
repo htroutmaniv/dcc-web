@@ -15,7 +15,7 @@ interface AuthContextValue {
   health: string | null;
   loading: boolean;
   refresh: () => Promise<void>;
-  devLogin: (displayName: string) => Promise<void>;
+  devLogin: (account: 'dm' | 'player') => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -43,10 +43,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const devLogin = useCallback(
-    async (displayName: string) => {
+    async (account: 'dm' | 'player') => {
       await api('/auth/dev-login', {
         method: 'POST',
-        body: JSON.stringify({ displayName }),
+        body: JSON.stringify({ account }),
       });
       await refresh();
     },

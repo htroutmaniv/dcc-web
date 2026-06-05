@@ -23,13 +23,18 @@ import NotesIcon from '@mui/icons-material/Notes';
 import {
   armorTooltipLines,
   consumableFlagsToProperties,
+  consumablePropertiesToRecord,
   EQUIPMENT_SECTIONS,
   EQUIPMENT_SECTION_TO_CATEGORY,
   formatArmorSummary,
   formatConsumableTags,
+  formatStackUsesSummary,
   formatWeaponSummary,
-  parseConsumableFlags,
+  getStackUsesAvailable,
+  parseConsumableProperties,
+  usesPerUnit,
   type ConsumableFlags,
+  type ConsumableProperties,
   type EquipmentSectionKey,
 } from '@dcc-web/shared';
 import { api } from '../../api/client';
@@ -93,7 +98,7 @@ function sectionForItem(item: EquipmentItemDraft): EquipmentSectionKey {
 
 function ItemSummary({ item }: { item: EquipmentItemDraft }) {
   if (item.category === 'disposable') {
-    const tags = formatConsumableTags(parseConsumableFlags(item.properties));
+    const tags = formatConsumableTags(parseConsumableProperties(item.properties));
     return tags ? (
       <Typography variant="caption" color="text.secondary">
         {tags}
@@ -355,30 +360,37 @@ function ItemFormDialog({
 
           {form.category === 'disposable' && (
             <>
-              <FormGroup row sx={{ gap: 1 }}>
+              <FormGroup row sx={{ gap: 1, flexWrap: 'wrap' }}>
                 {(
                   [
                     ['food', 'Food'],
-                    ['drink', 'Drink'],
-                    ['poisonous', 'Poisonous'],
+                    ['vessel', 'Vessel (drinks)'],
+                    ['fuel', 'Fuel (oil)'],
                     ['light', 'Light source'],
+                    ['requiresFuel', 'Needs fuel (lantern)'],
+                    ['poisonous', 'Poisonous'],
+                    ['consumedWhenEmpty', 'Remove when empty'],
                   ] as const
                 ).map(([key, label]) => {
-                  const flags = parseConsumableFlags(form.properties);
+                  const props = parseConsumableProperties(form.properties);
+                  const checked = Boolean(props[key as keyof ConsumableProperties]);
                   return (
                     <FormControlLabel
                       key={key}
                       control={
                         <Checkbox
                           size="small"
-                          checked={Boolean(flags[key])}
+                          checked={checked}
                           onChange={(e) => {
-                            const next: ConsumableFlags = { ...flags, [key]: e.target.checked };
+                            const next: ConsumableProperties = {
+                              ...props,
+                              [key]: e.target.checked,
+                            };
                             setForm((f) =>
                               f
                                 ? {
                                     ...f,
-                                    properties: consumableFlagsToProperties(next),
+                                    properties: consumablePropertiesToRecord(next),
                                   }
                                 : f,
                             );
@@ -390,6 +402,80 @@ function ItemFormDialog({
                   );
                 })}
               </FormGroup>
+              {parseConsumableProperties(form.properties).vessel && (
+                <Stack direction="row" spacing={1}>
+                  <TextField
+                    label="Capacity"
+                    type="number"
+                    size="small"
+                    value={Number(parseConsumableProperties(form.properties).capacity ?? 1)}
+                    onChange={(e) => {
+                      const props = parseConsumableProperties(form.properties);
+                      const cap = Math.max(1, Number.parseInt(e.target.value, 10) || 1);
+                      setForm((f) =>
+                        f
+                          ? {
+                              ...f,
+                              properties: consumablePropertiesToRecord({
+                                ...props,
+                                capacity: cap,
+                                usesRemaining: props.usesRemaining ?? cap,
+                              }),
+                            }
+                          : f,
+                      );
+                    }}
+                  />
+                  <TextField
+                    label="Uses remaining"
+                    type="number"
+                    size="small"
+                    value={Number(
+                      parseConsumableProperties(form.properties).usesRemaining ??
+                        parseConsumableProperties(form.properties).capacity ??
+                        1,
+                    )}
+                    onChange={(e) => {
+                      const props = parseConsumableProperties(form.properties);
+                      const uses = Math.max(
+                        0,
+                        Number.parseInt(e.target.value, 10) || 0,
+                      );
+                      setForm((f) =>
+                        f
+                          ? {
+                              ...f,
+                              properties: consumablePropertiesToRecord({
+                                ...props,
+                                usesRemaining: uses,
+                              }),
+                            }
+                          : f,
+                      );
+                    }}
+                  />
+                  <TextField
+                    label="Unit label"
+                    size="small"
+                    value={parseConsumableProperties(form.properties).unitLabel ?? ''}
+                    onChange={(e) => {
+                      const props = parseConsumableProperties(form.properties);
+                      setForm((f) =>
+                        f
+                          ? {
+                              ...f,
+                              properties: consumablePropertiesToRecord({
+                                ...props,
+                                unitLabel: e.target.value.trim() || undefined,
+                              }),
+                            }
+                          : f,
+                      );
+                    }}
+                    placeholder="day, oil, …"
+                  />
+                </Stack>
+              )}
               <TextField
                 label="Quantity"
                 type="number"
@@ -402,19 +488,125 @@ function ItemFormDialog({
                   )
                 }
               />
+              {!parseConsumableProperties(form.properties).vessel && (
+                <Stack direction="row" spacing={1} flexWrap="wrap">
+                  <TextField
+                    label="Uses (per item)"
+                    type="number"
+                    size="small"
+                    value={usesPerUnit(form.properties)}
+                    onChange={(e) => {
+                      const props = parseConsumableProperties(form.properties);
+                      const uses = Math.max(1, Number.parseInt(e.target.value, 10) || 1);
+                      const qty = form.quantity;
+                      setForm((f) =>
+                        f
+                          ? {
+                              ...f,
+                              properties: consumablePropertiesToRecord({
+                                ...props,
+                                uses,
+                                usesRemaining:
+                                  props.usesRemaining ?? uses * qty,
+                              }),
+                            }
+                          : f,
+                      );
+                    }}
+                  />
+                  <TextField
+                    label="Uses left (current unit)"
+                    type="number"
+                    size="small"
+                    helperText={`Total: ${formatStackUsesSummary(form)}`}
+                    value={
+                      parseConsumableProperties(form.properties).usesRemaining ??
+                      getStackUsesAvailable(form)
+                    }
+                    onChange={(e) => {
+                      const props = parseConsumableProperties(form.properties);
+                      const left = Math.max(0, Number.parseInt(e.target.value, 10) || 0);
+                      setForm((f) =>
+                        f
+                          ? {
+                              ...f,
+                              properties: consumablePropertiesToRecord({
+                                ...props,
+                                usesRemaining: left,
+                              }),
+                            }
+                          : f,
+                      );
+                    }}
+                  />
+                </Stack>
+              )}
             </>
           )}
           {(form.category === 'misc' || form.category === 'treasure') && (
-            <TextField
-              label="Quantity"
-              type="number"
-              value={form.quantity}
-              onChange={(e) =>
-                setForm((f) =>
-                  f ? { ...f, quantity: Math.max(1, Number.parseInt(e.target.value, 10) || 1) } : f,
-                )
-              }
-            />
+            <>
+              <TextField
+                label="Quantity"
+                type="number"
+                value={form.quantity}
+                onChange={(e) =>
+                  setForm((f) =>
+                    f ? { ...f, quantity: Math.max(1, Number.parseInt(e.target.value, 10) || 1) } : f,
+                  )
+                }
+              />
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  label="Uses (per item)"
+                  type="number"
+                  size="small"
+                  value={usesPerUnit(form.properties)}
+                  onChange={(e) => {
+                    const uses = Math.max(1, Number.parseInt(e.target.value, 10) || 1);
+                    const prev = form.properties ?? {};
+                    setForm((f) =>
+                      f
+                        ? {
+                            ...f,
+                            properties: {
+                              ...prev,
+                              uses,
+                              usesRemaining:
+                                (prev.usesRemaining as number | undefined) ??
+                                uses * f.quantity,
+                            },
+                          }
+                        : f,
+                    );
+                  }}
+                />
+                <TextField
+                  label="Uses left (current unit)"
+                  type="number"
+                  size="small"
+                  helperText={`Total: ${formatStackUsesSummary(form)}`}
+                  value={
+                    (form.properties?.usesRemaining as number | undefined) ??
+                    getStackUsesAvailable(form)
+                  }
+                  onChange={(e) => {
+                    const left = Math.max(0, Number.parseInt(e.target.value, 10) || 0);
+                    setForm((f) =>
+                      f
+                        ? {
+                            ...f,
+                            properties: {
+                              ...(f.properties ?? {}),
+                              uses: usesPerUnit(f.properties),
+                              usesRemaining: left,
+                            },
+                          }
+                        : f,
+                    );
+                  }}
+                />
+              </Stack>
+            </>
           )}
         </Stack>
       </DialogContent>

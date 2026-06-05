@@ -18,7 +18,6 @@ import { DiceTabPanel } from './DiceTabPanel';
 import type { Character, DiceResult, Game, User } from '../types/game';
 import {
   isCharacterTurn,
-  type ConsumableTrackKind,
   type DiceTrayCounts,
   type GameInitiativeState,
 } from '@dcc-web/shared';
@@ -47,8 +46,10 @@ interface GameSideMenuProps {
   diceQuickRollKind?: CharacterRollKind | null;
   onSelectCharacter: (character: Character) => void;
   onCombatRoll: (character: Character, kind: CombatRollKind) => void;
-  onAdjustConsumable: (character: Character, kind: ConsumableTrackKind, delta: number) => void;
-  onToggleLightSource: (character: Character, using: boolean) => void;
+  onOpenConsume: (character: Character, kind: 'food' | 'drink') => void;
+  onSelectActiveLight: (character: Character, lightItemId: string | null) => void;
+  onToggleLightLit: (character: Character, lit: boolean) => void;
+  onExpendActiveLight: (character: Character) => void;
   consumableAdjustingId?: string | null;
   canEditCharacter: (character: Character) => boolean;
   rollingCharacterId?: string | null;
@@ -83,8 +84,10 @@ export function GameSideMenu({
   diceQuickRollKind,
   onSelectCharacter,
   onCombatRoll,
-  onAdjustConsumable,
-  onToggleLightSource,
+  onOpenConsume,
+  onSelectActiveLight,
+  onToggleLightLit,
+  onExpendActiveLight,
   consumableAdjustingId,
   canEditCharacter,
   rollingCharacterId,
@@ -169,10 +172,12 @@ export function GameSideMenu({
                       selected={selectedCharacterId === c.id}
                       onSelect={() => onSelectCharacter(c)}
                       onCombatRoll={(kind) => onCombatRoll(c, kind)}
-                      onAdjustConsumable={(kind, delta) =>
-                        onAdjustConsumable(c, kind, delta)
+                      onOpenConsume={(kind) => onOpenConsume(c, kind)}
+                      onSelectActiveLight={(lightItemId) =>
+                        onSelectActiveLight(c, lightItemId)
                       }
-                      onToggleLightSource={(using) => onToggleLightSource(c, using)}
+                      onToggleLightLit={(lit) => onToggleLightLit(c, lit)}
+                      onExpendActiveLight={() => onExpendActiveLight(c)}
                       consumableAdjusting={consumableAdjustingId === c.id}
                       canEditConsumables={canEditCharacter(c)}
                       canToggleInPlay={canEditCharacter(c)}

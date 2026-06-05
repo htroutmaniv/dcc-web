@@ -1,4 +1,11 @@
-import { computeDccSaves } from '@dcc-web/shared';
+import {
+  computeDccSaves,
+  formatStackUsesSummary,
+  normalizeCharacterRace,
+  resolveCharacterRace,
+  usesPerUnit,
+  type CharacterRace,
+} from '@dcc-web/shared';
 import type { Character } from '../types/game';
 import {
   formatArmorSummary,
@@ -23,6 +30,11 @@ import type { SheetArmorEntry } from './armor';
 
 function formatEquipmentLine(item: CharacterItem): string {
   const qty = item.quantity > 1 ? ` (×${item.quantity})` : '';
+  const per = usesPerUnit(item.properties);
+  const useNote =
+    per > 1 || item.properties?.usesRemaining != null
+      ? ` — ${formatStackUsesSummary(item)}`
+      : '';
   if (item.category === 'armor') {
     const ac = formatArmorSummary(item.properties);
     return `${item.name}${qty} — ${ac}`;
@@ -30,7 +42,7 @@ function formatEquipmentLine(item: CharacterItem): string {
   if (item.category === 'weapon') {
     return `${item.name}${qty} — ${formatWeaponSummary(item.properties)}`;
   }
-  return `${item.name}${qty}`;
+  return `${item.name}${qty}${useNote}`;
 }
 
 export interface SheetWeaponEntry {
@@ -43,6 +55,8 @@ export interface SheetWeaponEntry {
 
 export interface Level0SheetData {
   name: string;
+  /** Funnel (0-level) race; stored in stats.custom.race */
+  race: CharacterRace;
   occupation: string;
   alignment: string;
   ac: number;
@@ -116,6 +130,20 @@ function parseWeaponLine(line: string): {
   return { name: name || trimmed, properties };
 }
 
+/** Populated from stats.custom on the sheet — must not live in character.notes */
+const DERIVED_NOTE_LINE = /^(Lucky Sign|Languages):/i;
+
+export function stripDerivedNoteLines(notes: string): string {
+  return notes
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      return trimmed.length > 0 && !DERIVED_NOTE_LINE.test(trimmed);
+    })
+    .join('\n')
+    .trim();
+}
+
 export function mapCharacterToLevel0Sheet(character: Character): Level0SheetData {
   const stats = character.stats ?? {};
   const combat = character.combat ?? {};
@@ -174,7 +202,8 @@ export function mapCharacterToLevel0Sheet(character: Character): Level0SheetData
     .map(formatEquipmentLine);
 
   const notesParts: string[] = [];
-  if (character.notes?.trim()) notesParts.push(character.notes.trim());
+  const freeformNotes = stripDerivedNoteLines(character.notes?.trim() ?? '');
+  if (freeformNotes) notesParts.push(freeformNotes);
   const lucky = custom.luckySign as string | undefined;
   if (lucky) notesParts.push(`Lucky Sign: ${lucky}`);
   const langs = custom.languages as string | undefined;
@@ -188,6 +217,7 @@ export function mapCharacterToLevel0Sheet(character: Character): Level0SheetData
 
   return {
     name: character.name,
+    race: resolveCharacterRace(custom as Record<string, unknown>),
     occupation:
       (custom.occupation as string) ||
       character.className ||
@@ -277,7 +307,7 @@ export function sheetDataToCharacterPatch(
     name: data.name.trim(),
     className: data.occupation.trim() || character.className,
     alignment: data.alignment.trim(),
-    notes: data.notes.trim(),
+    notes: stripDerivedNoteLines(data.notes.trim()),
     stats: {
       ...prevStats,
       abilities,
@@ -291,6 +321,7 @@ export function sheetDataToCharacterPatch(
       custom: {
         ...prevCustom,
         occupation: data.occupation.trim(),
+        race: normalizeCharacterRace(data.race),
         xp: data.xp.trim(),
         baseSpeed: data.baseSpeed,
         ...(startingFunds ? { startingFunds } : {}),

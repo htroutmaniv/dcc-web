@@ -14,27 +14,36 @@ import { TacticalMap } from '../components/TacticalMap';
 import { useAuth } from '../context/AuthContext';
 import {
   ACTIVE_IN_PLAY_KEY,
+  ACTIVE_LIGHT_ITEM_ID_KEY,
   buildDiceNotation,
   countConsumables,
   emptyDiceTray,
+  getActiveLightItemId,
   isCharacterTurn,
   isUsingLightSource,
+  listLightSourceOptions,
+  resolveActiveLightItemId,
   parseGameInitiative,
   parseGameSettings,
   USING_LIGHT_SOURCE_KEY,
-  type ConsumableTrackKind,
   type DiceTrayCounts,
   type GameInitiativeState,
 } from '@dcc-web/shared';
+import { ConsumeResourceDialog } from '../components/ConsumeResourceDialog';
 import { DmControlPanel } from '../components/DmControlPanel';
 import { InitiativeOrderPanel } from '../components/InitiativeOrderPanel';
 import type { Character, DiceResult, GameDetail } from '../types/game';
-import { buildItemsAfterConsumableDelta } from '../utils/consumables';
+import {
+  buildItemsAfterActivateLight,
+  buildItemsAfterConsume,
+  canExpendLightSource,
+} from '../utils/consumables';
 import {
   getCharacterRollSpec,
   type CharacterRollKind,
   type CombatRollKind,
 } from '../utils/character-rolls';
+import { useGameSocket } from '../hooks/useGameSocket';
 import { formatError } from '../utils/errors';
 
 export default function GamePage() {
@@ -60,11 +69,16 @@ export default function GamePage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [creatingCharacter, setCreatingCharacter] = useState(false);
   const [consumableAdjustingId, setConsumableAdjustingId] = useState<string | null>(null);
+  const [consumeDialog, setConsumeDialog] = useState<{
+    character: Character;
+    kind: 'food' | 'drink';
+  } | null>(null);
   const [initiative, setInitiative] = useState<GameInitiativeState | null>(null);
   const [initiativeBusy, setInitiativeBusy] = useState(false);
   const [endTurnCharacterId, setEndTurnCharacterId] = useState<string | null>(null);
 
-  const isDm = detail?.isDm ?? false;
+  /** DM = game creator only (server sets isDm from dm_user_id). */
+  const isDm = detail?.isDm === true;
 
   const applyInitiative = useCallback((next: GameInitiativeState | null) => {
     setInitiative(next);
@@ -241,54 +255,212 @@ export default function GamePage() {
     }
   };
 
-  const handleCharacterUpdated = useCallback((updated: Character) => {
+  const applyCharacterFromServer = useCallback((updated: Character) => {
     setSelectedCharacter((prev) => (prev?.id === updated.id ? updated : prev));
-    setCharacters((prev) =>
-      prev.map((c) => (c.id === updated.id ? updated : c)),
-    );
+    setCharacters((prev) => {
+      if (updated.status === 'archived') {
+        return prev.filter((c) => c.id !== updated.id);
+      }
+      const idx = prev.findIndex((c) => c.id === updated.id);
+      if (idx >= 0) {
+        return prev.map((c) => (c.id === updated.id ? updated : c));
+      }
+      return [...prev, updated];
+    });
   }, []);
+
+  const handleCharacterUpdated = applyCharacterFromServer;
+
+  useGameSocket(
+    gameId,
+    {
+      onConnected: () => {
+        void loadCharacters().catch(() => {});
+      },
+      onCharacterUpsert: (character, actorUserId) => {
+        if (actorUserId && actorUserId === user?.id) return;
+        applyCharacterFromServer(character);
+      },
+      onInitiativeUpdated: (next) => {
+        applyInitiative(next);
+      },
+      onDiceRolled: ({ result, characterId, actorUserId }) => {
+        if (actorUserId && actorUserId === user?.id) return;
+        setLastRoll(result);
+        if (characterId) {
+          setCombatRollByCharacter((prev) => ({ ...prev, [characterId]: result }));
+        }
+      },
+    },
+    Boolean(gameId && detail),
+  );
 
   const canEditCharacter = useCallback(
     (c: Character) => isDm || (user != null && c.ownerUserId === user.id),
     [isDm, user],
   );
 
-  const adjustConsumable = async (
+  const putCharacterItems = async (
     character: Character,
-    kind: ConsumableTrackKind,
-    delta: number,
+    items: {
+      id?: string;
+      category: string;
+      name: string;
+      quantity: number;
+      notes?: string;
+      properties?: Record<string, unknown>;
+    }[],
   ) => {
+    const { character: updated } = await api<{ character: Character }>(
+      `/characters/${character.id}/items`,
+      { method: 'PUT', body: JSON.stringify({ items }) },
+    );
+    return updated;
+  };
+
+  const patchLightCustom = async (
+    character: Character,
+    patch: { equippedId?: string | null; lit?: boolean },
+  ): Promise<Character> => {
+    const prevStats = character.stats ?? {};
+    const prevCustom = (prevStats.custom ?? {}) as Record<string, unknown>;
+    const res = await api<{ character: Character }>(`/characters/${character.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        stats: {
+          ...prevStats,
+          custom: {
+            ...prevCustom,
+            ...(patch.equippedId !== undefined && {
+              [ACTIVE_LIGHT_ITEM_ID_KEY]: patch.equippedId ?? '',
+            }),
+            ...(patch.lit !== undefined && {
+              [USING_LIGHT_SOURCE_KEY]: patch.lit,
+            }),
+          },
+        },
+      }),
+    });
+    return res.character;
+  };
+
+  const reconcileEquippedLight = async (
+    character: Character,
+    previousActiveId: string | undefined,
+    previousItems?: Character['items'],
+  ): Promise<Character> => {
+    if (!previousActiveId) return character;
+    const resolved = resolveActiveLightItemId(
+      character.items ?? [],
+      previousActiveId,
+      previousItems,
+    );
+    if (!resolved) {
+      return patchLightCustom(character, { equippedId: null, lit: false });
+    }
+    let updated = character;
+    if (resolved !== getActiveLightItemId(character)) {
+      updated = await patchLightCustom(updated, { equippedId: resolved });
+    }
+    if (isUsingLightSource(updated)) {
+      const canExpend = canExpendLightSource(updated.items ?? [], resolved);
+      if (!canExpend.ok) {
+        updated = await patchLightCustom(updated, { lit: false });
+      }
+    }
+    return updated;
+  };
+
+  const clearLightIfInvalid = async (character: Character): Promise<Character> => {
+    const activeId = getActiveLightItemId(character);
+    if (!activeId) {
+      if (!isUsingLightSource(character)) return character;
+      return patchLightCustom(character, { lit: false });
+    }
+    return reconcileEquippedLight(character, activeId, character.items);
+  };
+
+  const openConsumeDialog = (character: Character, kind: 'food' | 'drink') => {
+    if (!canEditCharacter(character)) return;
+    setConsumeDialog({ character, kind });
+  };
+
+  const applyConsumeItem = async (itemId: string, units = 1) => {
+    const target = consumeDialog?.character;
+    if (!target) return;
+    setConsumableAdjustingId(target.id);
+    try {
+      const built = buildItemsAfterConsume(target, itemId, units);
+      if (!built.ok) {
+        setError(built.message ?? 'Could not consume');
+        return;
+      }
+      let updated = await putCharacterItems(target, built.items);
+      updated = await clearLightIfInvalid(updated);
+      handleCharacterUpdated(updated);
+      setConsumeDialog(null);
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setConsumableAdjustingId(null);
+    }
+  };
+
+  const selectActiveLight = async (character: Character, lightItemId: string | null) => {
     if (!canEditCharacter(character)) return;
     setConsumableAdjustingId(character.id);
     try {
-      const items = buildItemsAfterConsumableDelta(character, kind, delta);
-      const { character: updated } = await api<{ character: Character }>(
-        `/characters/${character.id}/items`,
-        { method: 'PUT', body: JSON.stringify({ items }) },
-      );
-      let next = updated;
-      if (
-        kind === 'light' &&
-        countConsumables(updated.items ?? [], 'light') === 0 &&
-        isUsingLightSource(updated)
-      ) {
-        const prevStats = updated.stats ?? {};
-        const prevCustom = (prevStats.custom ?? {}) as Record<string, unknown>;
-        const res = await api<{ character: Character }>(
-          `/characters/${updated.id}`,
-          {
-            method: 'PATCH',
-            body: JSON.stringify({
-              stats: {
-                ...prevStats,
-                custom: { ...prevCustom, [USING_LIGHT_SOURCE_KEY]: false },
-              },
-            }),
-          },
-        );
-        next = res.character;
+      let updated = await patchLightCustom(character, { equippedId: lightItemId });
+      if (!lightItemId) {
+        updated = await patchLightCustom(updated, { lit: false });
       }
-      handleCharacterUpdated(next);
+      updated = await clearLightIfInvalid(updated);
+      handleCharacterUpdated(updated);
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setConsumableAdjustingId(null);
+    }
+  };
+
+  const toggleLightLit = async (character: Character, lit: boolean) => {
+    if (!canEditCharacter(character)) return;
+    if (lit && !getActiveLightItemId(character)) {
+      setError('Select a light source first');
+      return;
+    }
+    setConsumableAdjustingId(character.id);
+    try {
+      const updated = await patchLightCustom(character, { lit });
+      handleCharacterUpdated(updated);
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setConsumableAdjustingId(null);
+    }
+  };
+
+  const expendActiveLight = async (character: Character) => {
+    if (!canEditCharacter(character)) return;
+    const activeId = getActiveLightItemId(character);
+    if (!activeId) {
+      setError('Select an active light source first');
+      return;
+    }
+    setConsumableAdjustingId(character.id);
+    try {
+      const built = buildItemsAfterActivateLight(character, activeId);
+      if (!built.ok) {
+        setError(built.message ?? 'Could not expend');
+        return;
+      }
+      const itemsBefore = character.items;
+      let updated = await putCharacterItems(character, built.items);
+      updated = await reconcileEquippedLight(updated, activeId, itemsBefore);
+      handleCharacterUpdated(updated);
       setError(null);
     } catch (e) {
       setError(formatError(e));
@@ -369,33 +541,6 @@ export default function GamePage() {
     }
   };
 
-  const toggleLightSource = async (character: Character, using: boolean) => {
-    if (!canEditCharacter(character)) return;
-    if (using && countConsumables(character.items ?? [], 'light') <= 0) return;
-    setConsumableAdjustingId(character.id);
-    try {
-      const prevStats = character.stats ?? {};
-      const prevCustom = (prevStats.custom ?? {}) as Record<string, unknown>;
-      const { character: updated } = await api<{ character: Character }>(
-        `/characters/${character.id}`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({
-            stats: {
-              ...prevStats,
-              custom: { ...prevCustom, [USING_LIGHT_SOURCE_KEY]: using },
-            },
-          }),
-        },
-      );
-      handleCharacterUpdated(updated);
-      setError(null);
-    } catch (e) {
-      setError(formatError(e));
-    } finally {
-      setConsumableAdjustingId(null);
-    }
-  };
 
   const patchCharacterStatus = async (
     characterId: string,
@@ -566,8 +711,10 @@ export default function GamePage() {
             setMenuTab('characters');
           }}
           onCombatRoll={rollCharacterCombat}
-          onAdjustConsumable={adjustConsumable}
-          onToggleLightSource={toggleLightSource}
+          onOpenConsume={openConsumeDialog}
+          onSelectActiveLight={selectActiveLight}
+          onToggleLightLit={toggleLightLit}
+          onExpendActiveLight={expendActiveLight}
           consumableAdjustingId={consumableAdjustingId}
           canEditCharacter={canEditCharacter}
           rollingCharacterId={rollingCharacterId}
@@ -586,6 +733,14 @@ export default function GamePage() {
         onClose={() => setCreateDialogOpen(false)}
         onSubmit={createCharacter}
         submitting={creatingCharacter}
+      />
+      <ConsumeResourceDialog
+        open={consumeDialog != null}
+        character={consumeDialog?.character ?? null}
+        kind={consumeDialog?.kind ?? null}
+        busy={consumableAdjustingId != null}
+        onClose={() => setConsumeDialog(null)}
+        onConsume={(itemId) => void applyConsumeItem(itemId)}
       />
     </AppShell>
   );

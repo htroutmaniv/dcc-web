@@ -1,13 +1,15 @@
 import {
   classMatchesRaceFilter,
   computeDccSaves,
+  consumablePropertiesToRecord,
+  CONSUMABLE_PRESETS_BY_NAME,
   DCC_CHARACTER_CLASSES,
   DCC_CLASS_HIT_DIE,
   savesToStored,
   type DccCharacterClass,
 } from '@dcc-web/shared';
 import type { CharacterCombat, CharacterStats } from '@dcc-web/shared';
-import { augurModifier, rollBirthAugur } from '../data/birth-augur.js';
+import { luckyRollModifier, rollBirthAugur } from '../data/birth-augur.js';
 import { rollFunnelOccupation } from '../data/funnel-occupations.js';
 import { secureRandomInt } from '../lib/rng.js';
 
@@ -137,6 +139,18 @@ function occupationToItems(occupation: ReturnType<typeof rollFunnelOccupation>):
     },
   ];
   for (const g of occupation.goods) {
+    const preset =
+      CONSUMABLE_PRESETS_BY_NAME[g.name.trim().toLowerCase()];
+    if (preset) {
+      items.push({
+        category: 'disposable',
+        name: g.name,
+        quantity: 1,
+        notes: g.notes ?? '',
+        properties: consumablePropertiesToRecord({ ...preset }),
+      });
+      continue;
+    }
     items.push({
       category: 'misc',
       name: g.name,
@@ -162,10 +176,13 @@ export function generateRandomCharacterData(options: RandomCharacterOptions): {
   const abilityRecord = buildAbilityRecord();
   const staMod = abilityRecord.sta!.modifier;
   const agiMod = abilityRecord.agi!.modifier;
-  const lckScore = abilityRecord.lck!.score;
+  const lckMod = abilityRecord.lck!.modifier;
 
-  const augur = rollBirthAugur((min, max) => secureRandomInt(min, max));
-  const augurMod = augurModifier(augur.roll, lckScore);
+  const { augur } = rollBirthAugur(
+    (min, max) => secureRandomInt(min, max),
+    lckMod,
+  );
+  const augurMod = luckyRollModifier(lckMod);
 
   const alignment = ALIGNMENTS[secureRandomInt(0, ALIGNMENTS.length - 1)]!;
 
@@ -190,7 +207,7 @@ export function generateRandomCharacterData(options: RandomCharacterOptions): {
         abilityRecord,
         {
           occupation: occupation.name,
-          occupationRace: occupation.race ?? null,
+          race: occupation.race ?? 'human',
           startingFunds: `${roll3d6Copper()} cp`,
           luckySign: `${augur.name} (${augur.bonus}, ${augurMod >= 0 ? '+' : ''}${augurMod})`,
           languages: 'Common',
@@ -276,6 +293,7 @@ export function createManualCharacterData(options: ManualCharacterOptions): {
       abilityRecord,
       {
         occupation: level === 0 ? '' : undefined,
+        race: 'human',
         languages: 'Common',
       },
       level,

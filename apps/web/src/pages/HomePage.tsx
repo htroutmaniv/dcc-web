@@ -22,49 +22,44 @@ import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import { api } from '../api/client';
 import { AppShell } from '../components/AppShell';
 import { useAuth } from '../context/AuthContext';
-import type { Game } from '../types/game';
+import type { GameListEntry } from '../types/game';
 import { formatError } from '../utils/errors';
 
-function uniqueGames(asDm: Game[], asPlayer: Game[]): Game[] {
-  const seen = new Set<string>();
-  return [...asDm, ...asPlayer].filter((g) => {
-    if (seen.has(g.id)) return false;
-    seen.add(g.id);
-    return true;
-  });
-}
-
 export default function HomePage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
-  const [asDm, setAsDm] = useState<Game[]>([]);
-  const [asPlayer, setAsPlayer] = useState<Game[]>([]);
+  const [gameEntries, setGameEntries] = useState<GameListEntry[]>([]);
   const [newGameTitle, setNewGameTitle] = useState('Thursday DCC');
   const [inviteCode, setInviteCode] = useState('');
   const [loadingGames, setLoadingGames] = useState(false);
 
   const loadGames = useCallback(async () => {
+    if (!user) {
+      setGameEntries([]);
+      return;
+    }
     setLoadingGames(true);
     try {
-      const data = await api<{ asDm: Game[]; asPlayer: Game[] }>('/games');
-      setAsDm(data.asDm);
-      setAsPlayer(data.asPlayer);
+      const data = await api<{ games: GameListEntry[] }>('/games');
+      setGameEntries(data.games ?? []);
       setError(null);
     } catch (e) {
       setError(formatError(e));
+      setGameEntries([]);
     } finally {
       setLoadingGames(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (user) void loadGames();
+    else setGameEntries([]);
   }, [user, loadGames]);
 
   const createGame = async () => {
     try {
-      const { game } = await api<{ game: Game }>('/games', {
+      const { game } = await api<{ game: GameListEntry['game']; role: 'dm' }>('/games', {
         method: 'POST',
         body: JSON.stringify({ title: newGameTitle }),
       });
@@ -77,7 +72,7 @@ export default function HomePage() {
 
   const joinGame = async () => {
     try {
-      const { game } = await api<{ game: Game }>(
+      const { game } = await api<{ game: GameListEntry['game']; role: string }>(
         `/games/join/${encodeURIComponent(inviteCode.trim())}`,
         { method: 'POST' },
       );
@@ -89,8 +84,6 @@ export default function HomePage() {
     }
   };
 
-  const games = uniqueGames(asDm, asPlayer);
-
   return (
     <AppShell>
       <Container maxWidth="md" sx={{ py: 4, flex: 1 }}>
@@ -98,7 +91,7 @@ export default function HomePage() {
           Your games
         </Typography>
         <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Create a session as DM, join with an invite code, or open an active game.
+          Sign in to see sessions you run or have joined. Only the game creator has DM tools.
         </Typography>
 
         {error && (
@@ -107,13 +100,18 @@ export default function HomePage() {
           </Alert>
         )}
 
-        {!user && (
+        {authLoading && (
+          <Typography color="text.secondary">Loading account…</Typography>
+        )}
+
+        {!authLoading && !user && (
           <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
               Sign in to continue
             </Typography>
             <Typography color="text.secondary">
-              Use Dev login or Discord in the header, then return here to manage games.
+              Use <strong>Dev DM</strong> or <strong>Dev Player</strong> in the header (separate
+              test accounts), or Discord. You will only see games you created or joined.
             </Typography>
           </Paper>
         )}
@@ -139,7 +137,7 @@ export default function HomePage() {
                     startIcon={<AddIcon />}
                     onClick={createGame}
                   >
-                    Create game (DM)
+                    Create game (you are DM)
                   </Button>
                 </Stack>
                 <Divider sx={{ my: 2 }} />
@@ -172,42 +170,39 @@ export default function HomePage() {
               <Paper sx={{ p: 2, minHeight: 280 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
                   <Typography variant="subtitle1" fontWeight={600}>
-                    Active games
+                    Your active games
                   </Typography>
                   <Button size="small" onClick={loadGames} disabled={loadingGames}>
                     Refresh
                   </Button>
                 </Stack>
-                {games.length === 0 ? (
+                {gameEntries.length === 0 ? (
                   <Box sx={{ py: 4, textAlign: 'center' }}>
                     <SportsEsportsIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
                     <Typography color="text.secondary">
-                      No games yet. Create one or join with a code.
+                      No games yet. Create one or join with an invite code.
                     </Typography>
                   </Box>
                 ) : (
                   <List disablePadding>
-                    {games.map((g) => {
-                      const dm = asDm.some((d) => d.id === g.id);
-                      return (
-                        <ListItemButton
-                          key={g.id}
-                          onClick={() => navigate(`/game/${g.id}`)}
-                          sx={{ borderRadius: 1, mb: 0.5 }}
-                        >
-                          <ListItemText
-                            primary={g.title}
-                            secondary={`Invite: ${g.inviteCode}`}
-                          />
-                          <Chip
-                            size="small"
-                            label={dm ? 'DM' : 'Player'}
-                            color={dm ? 'primary' : 'default'}
-                            variant="outlined"
-                          />
-                        </ListItemButton>
-                      );
-                    })}
+                    {gameEntries.map(({ game, role }) => (
+                      <ListItemButton
+                        key={game.id}
+                        onClick={() => navigate(`/game/${game.id}`)}
+                        sx={{ borderRadius: 1, mb: 0.5 }}
+                      >
+                        <ListItemText
+                          primary={game.title}
+                          secondary={`Invite: ${game.inviteCode}`}
+                        />
+                        <Chip
+                          size="small"
+                          label={role === 'dm' ? 'DM (creator)' : 'Player'}
+                          color={role === 'dm' ? 'primary' : 'default'}
+                          variant="outlined"
+                        />
+                      </ListItemButton>
+                    ))}
                   </List>
                 )}
               </Paper>

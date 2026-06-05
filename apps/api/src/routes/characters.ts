@@ -15,6 +15,18 @@ import {
 } from '../services/character-generator.js';
 import { applyCharacterStatus } from '../services/character-status.js';
 import { characterMovementRange } from '../services/movement.js';
+import { emitToGame } from '../lib/game-socket.js';
+
+function broadcastCharacter(
+  request: { server: { io: import('socket.io').Server | null }; userId?: string },
+  gameId: string,
+  character: Awaited<ReturnType<typeof prisma.character.create>>,
+) {
+  emitToGame(request.server.io, gameId, 'character:upsert', {
+    character,
+    actorUserId: request.userId,
+  });
+}
 
 export async function characterRoutes(app: FastifyInstance) {
   app.get(
@@ -113,6 +125,7 @@ export async function characterRoutes(app: FastifyInstance) {
             noHalflings: parsed.data.noHalflings,
           });
           const character = await persistCharacter(gameId, ownerUserId, generated, 'random');
+          broadcastCharacter(request, gameId, character);
           return { character };
         }
 
@@ -122,6 +135,7 @@ export async function characterRoutes(app: FastifyInstance) {
           name: parsed.data.name,
         });
         const character = await persistCharacter(gameId, ownerUserId, generated, 'manual');
+        broadcastCharacter(request, gameId, character);
         return { character };
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Character creation failed';
@@ -155,6 +169,7 @@ export async function characterRoutes(app: FastifyInstance) {
           noHalflings: parsed.data.noHalflings,
         });
         const character = await persistCharacter(gameId, ownerUserId, generated, 'random');
+        broadcastCharacter(request, gameId, character);
         return { character };
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Character generation failed';
@@ -261,6 +276,7 @@ export async function characterRoutes(app: FastifyInstance) {
           include: { items: { orderBy: { sortOrder: 'asc' } } },
         });
       });
+      broadcastCharacter(request, existing.gameId, character);
       return { character };
     },
   );
@@ -283,25 +299,49 @@ export async function characterRoutes(app: FastifyInstance) {
       }
 
       const character = await prisma.$transaction(async (tx) => {
-        await tx.characterItem.deleteMany({ where: { characterId } });
+        const existing = await tx.characterItem.findMany({ where: { characterId } });
+        const existingIds = new Set(existing.map((row) => row.id));
+        const idsToKeep = parsed.data.items
+          .map((item) => item.id)
+          .filter((id): id is string => typeof id === 'string' && existingIds.has(id));
+
+        if (idsToKeep.length > 0) {
+          await tx.characterItem.deleteMany({
+            where: { characterId, id: { notIn: idsToKeep } },
+          });
+        } else {
+          await tx.characterItem.deleteMany({ where: { characterId } });
+        }
+
+        for (let i = 0; i < parsed.data.items.length; i++) {
+          const item = parsed.data.items[i]!;
+          const data = {
+            category: item.category,
+            name: item.name,
+            quantity: item.quantity ?? 1,
+            notes: item.notes ?? '',
+            properties: (item.properties ?? {}) as Prisma.InputJsonValue,
+            sortOrder: i,
+          };
+          if (item.id && existingIds.has(item.id)) {
+            await tx.characterItem.update({
+              where: { id: item.id, characterId },
+              data,
+            });
+          } else {
+            await tx.characterItem.create({
+              data: { characterId, ...data },
+            });
+          }
+        }
+
         return tx.character.update({
           where: { id: characterId },
-          data: {
-            items: {
-              create: parsed.data.items.map((item, i) => ({
-                category: item.category,
-                name: item.name,
-                quantity: item.quantity ?? 1,
-                notes: item.notes ?? '',
-                properties: (item.properties ?? {}) as Prisma.InputJsonValue,
-                sortOrder: i,
-              })),
-            },
-            version: { increment: 1 },
-          },
+          data: { version: { increment: 1 } },
           include: { items: { orderBy: { sortOrder: 'asc' } } },
         });
       });
+      broadcastCharacter(request, existing.gameId, character);
       return { character };
     },
   );

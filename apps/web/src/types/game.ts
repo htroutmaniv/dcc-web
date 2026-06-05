@@ -67,10 +67,19 @@ export interface DiceResult {
   total: number;
 }
 
+export type GameMembershipRole = 'dm' | 'player';
+
+export interface GameListEntry {
+  game: Game;
+  role: GameMembershipRole;
+}
+
 export interface GameDetail {
   game: Game & {
     map?: { id: string; gridFtPerCell?: number } | null;
     players?: { user: User }[];
   };
+  /** True only when the logged-in user created the game (dm_user_id). */
   isDm: boolean;
+  role: GameMembershipRole;
 }

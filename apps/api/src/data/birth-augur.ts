@@ -22,14 +22,33 @@ export const BIRTH_AUGURS = [
   { roll: 20, name: 'Rose', bonus: 'Melee & missile damage' },
 ] as const;
 
-export function rollBirthAugur(
-  rollD30: (min: number, max: number) => number,
-): (typeof BIRTH_AUGURS)[number] {
-  const roll = rollD30(1, 20);
-  return BIRTH_AUGURS.find((a) => a.roll === roll) ?? BIRTH_AUGURS[0];
+const AUGUR_ROLL_MAX = 20;
+
+export function clampAugurRoll(roll: number): number {
+  return Math.min(AUGUR_ROLL_MAX, Math.max(1, roll));
 }
 
-/** DCC: augur modifier = birth augur roll − Luck score (applied to the listed bonus). */
-export function augurModifier(augurRoll: number, luckScore: number): number {
-  return augurRoll - luckScore;
+export function augurForRoll(roll: number): (typeof BIRTH_AUGURS)[number] {
+  const clamped = clampAugurRoll(roll);
+  return BIRTH_AUGURS.find((a) => a.roll === clamped) ?? BIRTH_AUGURS[0];
+}
+
+/**
+ * Roll birth augur: 1d20 on the subset table, adjusted by Luck modifier (DCC Table 1-2).
+ */
+export function rollBirthAugur(
+  rollDie: (min: number, max: number) => number,
+  luckModifier: number,
+): { augur: (typeof BIRTH_AUGURS)[number]; dieRoll: number; adjustedRoll: number } {
+  const dieRoll = rollDie(1, AUGUR_ROLL_MAX);
+  const adjustedRoll = clampAugurRoll(dieRoll + luckModifier);
+  return { augur: augurForRoll(adjustedRoll), dieRoll, adjustedRoll };
+}
+
+/**
+ * Permanent "lucky roll" modifier for the augur's bonus (DCC core p.19):
+ * the character's Luck ability modifier at creation — not augur die − Luck score.
+ */
+export function luckyRollModifier(luckModifier: number): number {
+  return luckModifier;
 }

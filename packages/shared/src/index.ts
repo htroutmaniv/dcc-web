@@ -8,3 +8,5 @@ export * from './dice-notation.js';
 export * from './dcc-dice.js';
 export * from './movement.js';
 export * from './initiative.js';
+export * from './character-race.js';
+export * from './item-uses.js';
