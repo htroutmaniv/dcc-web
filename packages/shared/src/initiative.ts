@@ -1,3 +1,8 @@
+import {
+  getCharacterVitality,
+  type CharacterCombatLike,
+} from './combat-mortality.js';
+
 /** Stored on character.stats.custom — character is eligible for initiative / in play. */
 export const ACTIVE_IN_PLAY_KEY = 'activeInPlay';
 
@@ -56,31 +61,120 @@ export function parseGameInitiative(settings: unknown): GameInitiativeState | nu
   };
 }
 
+export type InitiativeCharacterSnapshot = {
+  id: string;
+  level: number;
+  status: string;
+  combat?: CharacterCombatLike | null;
+};
+
+export function isCharacterInitiativeInactive(
+  character: InitiativeCharacterSnapshot,
+): boolean {
+  if (character.status === 'dead') return true;
+  return getCharacterVitality(character) === 'dead';
+}
+
+export function createCharacterInitiativeSkipFn(
+  characters: InitiativeCharacterSnapshot[],
+): (entry: InitiativeEntry) => boolean {
+  const byId = new Map(characters.map((c) => [c.id, c]));
+  return (entry) => {
+    if (entry.kind !== 'character' || !entry.characterId) return false;
+    const character = byId.get(entry.characterId);
+    if (!character) return false;
+    return isCharacterInitiativeInactive(character);
+  };
+}
+
 export function getCurrentTurnEntry(
   state: GameInitiativeState | null,
+  shouldSkip?: (entry: InitiativeEntry) => boolean,
 ): InitiativeEntry | null {
   if (!state?.active || state.order.length === 0) return null;
-  const idx = state.turnIndex % state.order.length;
-  return state.order[idx] ?? null;
+  if (!shouldSkip) {
+    const idx = state.turnIndex % state.order.length;
+    return state.order[idx] ?? null;
+  }
+  const len = state.order.length;
+  for (let offset = 0; offset < len; offset += 1) {
+    const idx = (state.turnIndex + offset) % len;
+    const entry = state.order[idx];
+    if (entry && !shouldSkip(entry)) return entry;
+  }
+  return null;
 }
 
 export function isCharacterTurn(
   state: GameInitiativeState | null,
   characterId: string,
+  shouldSkip?: (entry: InitiativeEntry) => boolean,
 ): boolean {
-  const current = getCurrentTurnEntry(state);
+  const current = getCurrentTurnEntry(state, shouldSkip);
   return current?.kind === 'character' && current.characterId === characterId;
+}
+
+export function isCharacterInInitiative(
+  state: GameInitiativeState | null,
+  characterId: string,
+): boolean {
+  if (!state?.active) return false;
+  return state.order.some(
+    (entry) => entry.kind === 'character' && entry.characterId === characterId,
+  );
+}
+
+export function shouldShowInitiativeQuickRoll(
+  state: GameInitiativeState | null,
+  characterId: string,
+): boolean {
+  if (!state?.active) return true;
+  return !isCharacterInInitiative(state, characterId);
 }
 
 export function advanceInitiativeTurn(
   state: GameInitiativeState,
+  shouldSkip?: (entry: InitiativeEntry) => boolean,
 ): GameInitiativeState {
   if (state.order.length === 0) return state;
+  const len = state.order.length;
   let turnIndex = state.turnIndex + 1;
   let round = state.round;
-  if (turnIndex >= state.order.length) {
+  if (turnIndex >= len) {
     turnIndex = 0;
     round += 1;
+  }
+  if (!shouldSkip) {
+    return { ...state, turnIndex, round };
+  }
+  let steps = 0;
+  while (steps < len && shouldSkip(state.order[turnIndex]!)) {
+    turnIndex += 1;
+    if (turnIndex >= len) {
+      turnIndex = 0;
+      round += 1;
+    }
+    steps += 1;
+  }
+  return { ...state, turnIndex, round };
+}
+
+/** When the stored turn index points at a killed PC, advance to the next active entry. */
+export function normalizeInitiativeTurnIndex(
+  state: GameInitiativeState,
+  shouldSkip: (entry: InitiativeEntry) => boolean,
+): GameInitiativeState {
+  if (state.order.length === 0) return state;
+  const len = state.order.length;
+  let { turnIndex, round } = state;
+  let steps = 0;
+  while (steps < len && shouldSkip(state.order[turnIndex]!)) {
+    turnIndex += 1;
+    if (turnIndex >= len) {
+      turnIndex = 0;
+      round += 1;
+    }
+    steps += 1;
   }
   return { ...state, turnIndex, round };
 }

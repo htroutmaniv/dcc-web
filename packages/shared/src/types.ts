@@ -13,11 +13,14 @@ export interface GameSettings {
   playerTokenMovement: PlayerTokenMovement;
   initiative?: GameInitiativeState | null;
   activeMapId?: string | null;
+  /** When true, living monster tokens are visible to players outside of initiative. */
+  monstersVisibleOnMap?: boolean;
 }
 
 export const DEFAULT_GAME_SETTINGS: GameSettings = {
   gridFtPerCell: 5,
   playerTokenMovement: 'free',
+  monstersVisibleOnMap: false,
 };
 
 export interface AbilityScore {

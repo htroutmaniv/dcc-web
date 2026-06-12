@@ -188,7 +188,7 @@ export function MonsterQuickMenu({
                     <Button
                       size="small"
                       sx={{ minWidth: 24, px: 0.25, py: 0 }}
-                      disabled={busy || m.hpCurrent <= 0}
+                      disabled={busy}
                       onClick={(e) => {
                         e.stopPropagation();
                         onPatchHp(m, m.hpCurrent - 1);

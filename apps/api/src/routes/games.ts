@@ -1,4 +1,4 @@
-import { createGameSchema } from '@dcc-web/shared';
+import { createGameSchema, parseGameSettings, patchGameSettingsSchema } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
 import { assertGameMember, generateInviteCode, isGameDm } from '../lib/game-access.js';
 import { emitToGame, emitToUsers } from '../lib/game-socket.js';
@@ -121,5 +121,37 @@ export async function gameRoutes(app: FastifyInstance) {
     emitToUsers(app.io, notifyUserIds, 'game:deleted', deletedPayload);
     await prisma.game.delete({ where: { id: gameId } });
     return { ok: true };
+  });
+
+  app.patch('/games/:gameId/settings', { onRequest: [app.authenticate] }, async (request) => {
+    const { gameId } = request.params as { gameId: string };
+    const access = await assertGameMember(request.userId!, gameId);
+    if (!access.ok) {
+      throw app.httpErrors.createError(access.status, access.message);
+    }
+    if (!access.isDm) {
+      return app.httpErrors.forbidden('Only the DM can change game settings');
+    }
+
+    const parsed = patchGameSettingsSchema.safeParse(request.body);
+    if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
+    if (Object.keys(parsed.data).length === 0) {
+      return app.httpErrors.badRequest('No settings provided');
+    }
+
+    const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
+    const settings = {
+      ...parseGameSettings(game.settings),
+      ...parsed.data,
+    };
+    await prisma.game.update({
+      where: { id: gameId },
+      data: { settings: settings as object },
+    });
+    emitToGame(app.io, gameId, 'game:settings_updated', {
+      settings,
+      actorUserId: request.userId,
+    });
+    return { settings };
   });
 }

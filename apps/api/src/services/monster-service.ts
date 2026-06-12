@@ -12,6 +12,7 @@ import {
   sortInitiativeEntries,
   spawnMonstersSchema,
   isMonsterKilled,
+  resolveMonsterAfterHpChange,
   type GameInitiativeState,
   type GameMonsterInstance,
   type InitiativeEntry,
@@ -308,9 +309,16 @@ export async function patchGameMonster(
   if (hpCurrent > hpMax) hpCurrent = hpMax;
 
   const statsBefore = existing.stats as MonsterStatsJson | undefined;
-  const statsAfter = (
+  let statsAfter = (
     patch.stats !== undefined ? patch.stats : existing.stats
   ) as MonsterStatsJson | undefined;
+
+  if (patch.hpCurrent !== undefined) {
+    const resolved = resolveMonsterAfterHpChange(hpCurrent, statsAfter);
+    hpCurrent = resolved.hpCurrent;
+    statsAfter = resolved.stats;
+  }
+
   const inInitiativeBefore =
     existing.hpCurrent > 0 && !isMonsterKilled({ stats: statsBefore });
 
@@ -337,7 +345,7 @@ export async function patchGameMonster(
       hpMax,
       hpCurrent,
       sheet: sheet as object,
-      ...(patch.stats !== undefined && { stats: patch.stats as Prisma.InputJsonValue }),
+      stats: statsAfter as Prisma.InputJsonValue,
       combat: {
         ac: flat.ac,
         hpMax,

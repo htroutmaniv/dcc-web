@@ -13,6 +13,22 @@ import {
 import { emitToGame } from '../lib/game-socket.js';
 import { syncActiveMapTokens } from '../services/map-service.js';
 
+async function broadcastMortalityUpdates(
+  app: FastifyInstance,
+  gameId: string,
+  characterIds: string[],
+  actorUserId?: string,
+) {
+  if (characterIds.length === 0) return;
+  const characters = await prisma.character.findMany({
+    where: { id: { in: characterIds } },
+    include: { items: { orderBy: { sortOrder: 'asc' } } },
+  });
+  for (const character of characters) {
+    emitToGame(app.io, gameId, 'character:upsert', { character, actorUserId });
+  }
+}
+
 function emitInitiativeUpdate(
   app: FastifyInstance,
   gameId: string,
@@ -59,8 +75,9 @@ export async function initiativeRoutes(app: FastifyInstance) {
       if (!access.ok) {
         throw app.httpErrors.createError(access.status, access.message);
       }
-      const initiative = await advanceGameInitiative(gameId);
+      const { initiative, mortalityUpdates } = await advanceGameInitiative(gameId);
       emitInitiativeUpdate(app, gameId, initiative, request.userId);
+      await broadcastMortalityUpdates(app, gameId, mortalityUpdates, request.userId);
       return { initiative };
     },
   );
@@ -94,13 +111,14 @@ export async function initiativeRoutes(app: FastifyInstance) {
         return app.httpErrors.badRequest(parsed.error.message);
       }
       try {
-        const initiative = await endCharacterTurn({
+        const { initiative, mortalityUpdates } = await endCharacterTurn({
           gameId,
           userId: request.userId!,
           isDm: access.isDm,
           characterId: parsed.data.characterId,
         });
         emitInitiativeUpdate(app, gameId, initiative, request.userId);
+        await broadcastMortalityUpdates(app, gameId, mortalityUpdates, request.userId);
         return { initiative };
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Cannot end turn';

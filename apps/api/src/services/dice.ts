@@ -9,8 +9,13 @@ import {
 } from '@dcc-web/shared';
 import { rollDice } from '@dcc-web/shared';
 import type { Prisma } from '@prisma/client';
+import type { MonsterStatsJson } from '@dcc-web/shared';
+import { resolveMonsterAfterHpChange } from '@dcc-web/shared';
 import { secureRandomInt } from '../lib/rng.js';
 import { prisma } from '../lib/prisma.js';
+import { applyCharacterStatus } from './character-status.js';
+import { mergeCharacterCombatWithMortality } from './character-combat.js';
+import { syncMonsterGroupInitiative } from './monster-service.js';
 
 async function resolveRollTarget(
   gameId: string,
@@ -160,12 +165,27 @@ export async function applyDamageToTarget(params: {
       where: { id: targetId, gameId },
     });
     const hpBefore = m.hpCurrent;
-    const hpAfter = Math.max(0, hpBefore - amount);
+    const hpAfter = hpBefore - amount;
+    const resolved = resolveMonsterAfterHpChange(
+      hpAfter,
+      m.stats as MonsterStatsJson | undefined,
+    );
     await prisma.gameMonster.update({
       where: { id: targetId },
-      data: { hpCurrent: hpAfter },
+      data: {
+        hpCurrent: resolved.hpCurrent,
+        stats: resolved.stats as Prisma.InputJsonValue,
+        combat: {
+          ac: m.ac,
+          hpMax: m.hpMax,
+          hpCurrent: resolved.hpCurrent,
+        } as Prisma.InputJsonValue,
+      },
     });
-    return { hpBefore, hpAfter, targetName: m.name };
+    if (resolved.killed) {
+      await syncMonsterGroupInitiative(gameId);
+    }
+    return { hpBefore, hpAfter: resolved.hpCurrent, targetName: m.name };
   }
 
   if (targetType === 'character') {
@@ -175,19 +195,22 @@ export async function applyDamageToTarget(params: {
     const combat = (c.combat ?? {}) as Record<string, unknown>;
     const hpBefore =
       typeof combat.hpCurrent === 'number' ? combat.hpCurrent : (combat.hpMax as number) ?? 0;
-    const hpAfter = Math.max(0, hpBefore - amount);
-    const hpMax = typeof combat.hpMax === 'number' ? combat.hpMax : hpBefore;
+    const hpAfter = hpBefore - amount;
+    const { combat: nextCombat, markDead } = mergeCharacterCombatWithMortality(c, {
+      hpCurrent: hpAfter,
+    });
     await prisma.character.update({
       where: { id: targetId },
-      data: {
-        combat: {
-          ...combat,
-          hpMax,
-          hpCurrent: hpAfter,
-        } as Prisma.InputJsonValue,
-      },
+      data: { combat: nextCombat as Prisma.InputJsonValue },
     });
-    return { hpBefore, hpAfter, targetName: c.name };
+    if (markDead) {
+      await prisma.$transaction(async (tx) => {
+        await applyCharacterStatus(tx, targetId, 'dead');
+      });
+    }
+    const hpCurrent =
+      typeof nextCombat.hpCurrent === 'number' ? nextCombat.hpCurrent : hpAfter;
+    return { hpBefore, hpAfter: hpCurrent, targetName: c.name };
   }
 
   const token = await prisma.mapToken.findFirstOrThrow({

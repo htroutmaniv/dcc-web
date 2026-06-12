@@ -501,8 +501,8 @@ export function MonsterPanel({
                   size="small"
                   variant="outlined"
                   sx={{ minWidth: 28, px: 0.5 }}
-                  disabled={disabled || m.hpCurrent <= 0}
-                  onClick={() => patchHp(m, Math.max(0, m.hpCurrent - 1))}
+                  disabled={disabled}
+                  onClick={() => patchHp(m, m.hpCurrent - 1)}
                 >
                   −
                 </Button>

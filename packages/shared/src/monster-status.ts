@@ -6,7 +6,7 @@ export function isMonsterKilled(monster: { stats?: MonsterStatsJson | null }): b
   return monster.stats?.custom?.[MONSTER_KILLED_KEY] === true;
 }
 
-/** In combat (not slain); may be at 0 HP until the DM clicks Kill. */
+/** Slain or at 0 HP / below; may remain in list until removed. */
 export function isMonsterActive(monster: { hpCurrent: number; stats?: MonsterStatsJson | null }): boolean {
   return !isMonsterKilled(monster) && monster.hpCurrent > 0;
 }

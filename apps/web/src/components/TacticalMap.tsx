@@ -17,6 +17,7 @@ interface TacticalMapProps {
   activeMap: TacticalGameMap | null;
   activeMapId: string | null;
   initiativeActive?: boolean;
+  monstersVisibleOnMap?: boolean;
   mapBusy?: boolean;
   drawTool: MapDrawTool;
   drawColor: string;
@@ -40,6 +41,8 @@ interface TacticalMapProps {
   onDrawingsChange: (drawings: TacticalGameMap['dmDrawings']) => void;
   onTokenMove: (tokenId: string, x: number, y: number) => void;
   canDragToken?: (token: TacticalGameMap['tokens'][number]) => boolean;
+  onTokenClick?: (token: TacticalGameMap['tokens'][number]) => void;
+  canLootToken?: (token: TacticalGameMap['tokens'][number]) => boolean;
   rollLog?: DiceRollLogEntry[];
   onClearRollLog?: () => void;
   onApplyDamageFromRoll?: (roll: DiceRollLogEntry) => void;
@@ -52,6 +55,7 @@ export function TacticalMap({
   activeMap,
   activeMapId,
   initiativeActive,
+  monstersVisibleOnMap = false,
   mapBusy,
   drawTool,
   drawColor,
@@ -75,13 +79,21 @@ export function TacticalMap({
   onDrawingsChange,
   onTokenMove,
   canDragToken,
+  onTokenClick,
+  canLootToken,
   rollLog = [],
   onClearRollLog,
   onApplyDamageFromRoll,
 }: TacticalMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<TacticalMapCanvasHandle>(null);
-  const showMonsterTokens = Boolean(isDm || initiativeActive);
+  const tokenVisibility: MapTokenVisibilityContext = {
+    isDm: Boolean(isDm),
+    initiativeActive: Boolean(initiativeActive),
+    monstersVisibleOnMap,
+  };
+  const playerSeesLivingMonsters =
+    Boolean(isDm) || Boolean(initiativeActive) || monstersVisibleOnMap;
   const playerHidden = !isDm && activeMap && !activeMap.visible;
 
   return (
@@ -137,7 +149,7 @@ export function TacticalMap({
         <Box sx={{ px: 1.5, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
           <Typography variant="caption" color="text.secondary">
             {activeMap.name} · {activeMap.gridFtPerCell}&apos; grid
-            {!showMonsterTokens && ' · Monster positions hidden until combat'}
+            {!playerSeesLivingMonsters && ' · Living monster positions hidden until combat'}
           </Typography>
         </Box>
       )}
@@ -161,13 +173,15 @@ export function TacticalMap({
           ref={canvasRef}
           map={activeMap}
           isDm={Boolean(isDm)}
-          showMonsterTokens={showMonsterTokens}
+          tokenVisibility={tokenVisibility}
           drawTool={drawTool}
           drawColor={drawColor}
           drawStrokeWidth={drawStrokeWidth}
           onDrawingsChange={onDrawingsChange}
           onTokenMove={onTokenMove}
           canDragToken={canDragToken}
+          onTokenClick={onTokenClick}
+          canLootToken={canLootToken}
         />
       ) : (
         <Box

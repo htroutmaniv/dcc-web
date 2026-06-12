@@ -9,6 +9,10 @@ import { assertGameMember } from '../lib/game-access.js';
 import { emitToGame } from '../lib/game-socket.js';
 import { prisma } from '../lib/prisma.js';
 import { applyDamageToTarget, listGameDiceRolls, rollAndPersist } from '../services/dice.js';
+import {
+  addCharacterToInitiativeFromRoll,
+  reconcileInitiativeAfterCharacterDeath,
+} from '../services/initiative-service.js';
 
 export async function diceRoutes(app: FastifyInstance) {
   app.get(
@@ -49,13 +53,30 @@ export async function diceRoutes(app: FastifyInstance) {
       targetId: parsed.data.targetId,
     });
 
+    let initiative = null;
+    if (parsed.data.rollKind === 'initiative' && parsed.data.characterId) {
+      initiative = await addCharacterToInitiativeFromRoll({
+        gameId: parsed.data.gameId,
+        characterId: parsed.data.characterId,
+        initiative: result.total,
+        d20Roll: result.rolls[0] ?? result.total,
+        modifier: result.modifier,
+      });
+      if (initiative) {
+        emitToGame(request.server.io, parsed.data.gameId, 'initiative:updated', {
+          initiative,
+          actorUserId: request.userId,
+        });
+      }
+    }
+
     emitToGame(request.server.io, parsed.data.gameId, 'dice:rolled', {
       result,
       actorUserId: request.userId,
       characterId: parsed.data.characterId,
     });
 
-    return { result };
+    return { result, initiative };
   });
 
   app.post(
@@ -97,6 +118,15 @@ export async function diceRoutes(app: FastifyInstance) {
             character,
             actorUserId: request.userId,
           });
+          if (character.status === 'dead') {
+            const initiative = await reconcileInitiativeAfterCharacterDeath(gameId);
+            if (initiative) {
+              emitToGame(request.server.io, gameId, 'initiative:updated', {
+                initiative,
+                actorUserId: request.userId,
+              });
+            }
+          }
         }
       }
 

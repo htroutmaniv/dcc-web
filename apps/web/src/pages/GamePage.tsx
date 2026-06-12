@@ -41,6 +41,10 @@ import {
 } from '@dcc-web/shared';
 import { ApplyDamageDialog, type MapTokenTarget } from '../components/ApplyDamageDialog';
 import { ConsumeResourceDialog } from '../components/ConsumeResourceDialog';
+import {
+  CorpseLootSheet,
+  type CorpseLootTarget,
+} from '../components/inventory/CorpseLootSheet';
 import { DmControlPanel } from '../components/DmControlPanel';
 import { InitiativeOrderPanel } from '../components/InitiativeOrderPanel';
 import type {
@@ -70,7 +74,7 @@ import { MONSTER_ATTACK_TARGET_KEY, readMonsterTargetMap } from '../utils/monste
 import { buildCombatTargetOptions } from '../components/CharacterListItem';
 import type { TransferInventoryResult } from '../components/inventory/TransferItemDialog';
 import type { DiceRollLogEntry } from '../types/dice-roll-log';
-import type { TacticalGameMap } from '../types/map';
+import type { TacticalGameMap, TacticalMapToken } from '../types/map';
 import { useGameSocket } from '../hooks/useGameSocket';
 import { useGameDeleteNotifications } from '../hooks/useGameDeleteNotifications';
 import { formatError } from '../utils/errors';
@@ -127,9 +131,31 @@ export default function GamePage() {
   const [drawTool, setDrawTool] = useState<MapDrawTool>('select');
   const [drawColor, setDrawColor] = useState('#c9a227');
   const [drawStrokeWidth, setDrawStrokeWidth] = useState(2);
+  const [corpseLootRef, setCorpseLootRef] = useState<{
+    kind: 'character' | 'monster';
+    id: string;
+  } | null>(null);
+  const [corpseLootOpen, setCorpseLootOpen] = useState(false);
 
   /** DM = game creator only (server sets isDm from dm_user_id). */
   const isDm = detail?.isDm === true;
+
+  const gameSettings = useMemo(
+    () => (detail ? parseGameSettings(detail.game.settings) : parseGameSettings(null)),
+    [detail],
+  );
+  const monstersVisibleOnMap = gameSettings.monstersVisibleOnMap ?? false;
+  const initiativeActive = initiative?.active ?? false;
+
+  const corpseLootTarget = useMemo((): CorpseLootTarget | null => {
+    if (!corpseLootRef) return null;
+    if (corpseLootRef.kind === 'character') {
+      const character = characters.find((c) => c.id === corpseLootRef.id);
+      return character ? { kind: 'character', character } : null;
+    }
+    const monster = monsters.find((m) => m.id === corpseLootRef.id);
+    return monster ? { kind: 'monster', monster } : null;
+  }, [corpseLootRef, characters, monsters]);
 
   const applyInitiative = useCallback((next: GameInitiativeState | null) => {
     setInitiative(next);
@@ -145,6 +171,23 @@ export default function GamePage() {
       };
     });
   }, []);
+
+  const applyGameSettingsPatch = useCallback(
+    (patch: { monstersVisibleOnMap?: boolean }) => {
+      setDetail((prev) => {
+        if (!prev) return prev;
+        const settings = parseGameSettings(prev.game.settings);
+        return {
+          ...prev,
+          game: {
+            ...prev.game,
+            settings: { ...settings, ...patch },
+          },
+        };
+      });
+    },
+    [],
+  );
 
   const syncNpcTokensFromMap = useCallback((map: TacticalGameMap | null) => {
     setNpcTokens(
@@ -207,7 +250,10 @@ export default function GamePage() {
       targetId?: string;
     }) => {
       if (!gameId) throw new Error('No game');
-      const { result } = await api<{ result: DiceRollLogEntry }>('/dice/roll', {
+      const { result, initiative: initiativeUpdate } = await api<{
+        result: DiceRollLogEntry;
+        initiative?: GameInitiativeState | null;
+      }>('/dice/roll', {
         method: 'POST',
         body: JSON.stringify({
           gameId,
@@ -221,9 +267,10 @@ export default function GamePage() {
       });
       const entry = parseRollLogEntry(result) ?? (result as DiceRollLogEntry);
       appendRollLog(entry);
+      if (initiativeUpdate) applyInitiative(initiativeUpdate);
       return entry;
     },
-    [gameId, appendRollLog],
+    [gameId, appendRollLog, applyInitiative],
   );
 
   const loadMonsters = useCallback(async () => {
@@ -503,7 +550,8 @@ export default function GamePage() {
       typeof character.combat?.hpMax === 'number'
         ? character.combat.hpMax
         : Math.max(0, hpCurrent);
-    const nextHp = Math.max(0, Math.min(hpMax, hpCurrent));
+    const nextHp =
+      typeof hpMax === 'number' && hpCurrent > hpMax ? hpMax : hpCurrent;
     setHpAdjustingId(character.id);
     try {
       const res = await api<{ character: Character } | Character>(
@@ -551,6 +599,14 @@ export default function GamePage() {
       onInitiativeUpdated: (next) => {
         applyInitiative(next);
       },
+      onSettingsUpdated: (settings) => {
+        if (settings && typeof settings === 'object') {
+          const parsed = settings as { monstersVisibleOnMap?: boolean };
+          if (typeof parsed.monstersVisibleOnMap === 'boolean') {
+            applyGameSettingsPatch({ monstersVisibleOnMap: parsed.monstersVisibleOnMap });
+          }
+        }
+      },
       onDiceRolled: ({ result, characterId }) => {
         const entry = parseRollLogEntry(result);
         if (entry) appendRollLog(entry);
@@ -589,6 +645,13 @@ export default function GamePage() {
     Boolean(gameId && detail),
   );
 
+  useEffect(() => {
+    if (initiativeActive && corpseLootOpen) {
+      setCorpseLootOpen(false);
+      setCorpseLootRef(null);
+    }
+  }, [initiativeActive, corpseLootOpen]);
+
   useGameDeleteNotifications({ gameId });
 
   useEffect(() => {
@@ -609,6 +672,54 @@ export default function GamePage() {
     },
     [handleCharacterUpdated, handleMonsterUpdated],
   );
+
+  const canLootToken = useCallback(
+    (token: TacticalMapToken) => {
+      if (initiativeActive) return false;
+      if (!token.isDead) return false;
+      return token.kind === 'pc' || token.kind === 'monster';
+    },
+    [initiativeActive],
+  );
+
+  const handleMapTokenClick = useCallback(
+    (token: TacticalMapToken) => {
+      if (initiativeActive) {
+        setError('Looting is only available after combat ends');
+        return;
+      }
+      if (!token.isDead) return;
+      if (token.characterId) {
+        const character = characters.find((c) => c.id === token.characterId);
+        if (!character) return;
+        setCorpseLootRef({ kind: 'character', id: character.id });
+        setCorpseLootOpen(true);
+        return;
+      }
+      if (token.monsterId) {
+        const monster = monsters.find((m) => m.id === token.monsterId);
+        if (!monster) return;
+        setCorpseLootRef({ kind: 'monster', id: monster.id });
+        setCorpseLootOpen(true);
+      }
+    },
+    [initiativeActive, characters, monsters],
+  );
+
+  const toggleMonstersVisibleOnMap = async () => {
+    if (!gameId || !isDm) return;
+    const next = !monstersVisibleOnMap;
+    try {
+      await api(`/games/${gameId}/settings`, {
+        method: 'PATCH',
+        body: JSON.stringify({ monstersVisibleOnMap: next }),
+      });
+      applyGameSettingsPatch({ monstersVisibleOnMap: next });
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    }
+  };
 
   const patchMonsterHp = async (monster: GameMonsterInstance, hpCurrent: number) => {
     if (!gameId) return;
@@ -1304,11 +1415,20 @@ export default function GamePage() {
       actions={headerActions}
       showBrandLink
     >
+      <Box
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
       {error && (
         <Alert
           severity="error"
           onClose={() => setError(null)}
-          sx={{ mx: 2, mt: 1 }}
+          sx={{ mx: 2, mt: 1, flexShrink: 0 }}
         >
           {error}
         </Alert>
@@ -1317,12 +1437,12 @@ export default function GamePage() {
         sx={{
           flex: 1,
           display: 'flex',
+          flexDirection: 'row',
           minHeight: 0,
-          height: 'calc(100vh - 64px)',
           overflow: 'hidden',
         }}
       >
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
           {selectedCharacter ? (
             <CharacterSheetView
               character={selectedCharacter}
@@ -1369,6 +1489,8 @@ export default function GamePage() {
                   onStartInitiative={startInitiative}
                   onAdvanceTurn={advanceInitiative}
                   onEndInitiative={endInitiative}
+                  monstersVisibleOnMap={monstersVisibleOnMap}
+                  onToggleMonstersVisibleOnMap={() => void toggleMonstersVisibleOnMap()}
                   busy={initiativeBusy || monsterBusy}
                   monsters={monsters}
                   characters={characters}
@@ -1401,7 +1523,8 @@ export default function GamePage() {
                   maps={maps}
                   activeMap={activeMap}
                   activeMapId={activeMapId}
-                  initiativeActive={initiative?.active ?? false}
+                  initiativeActive={initiativeActive}
+                  monstersVisibleOnMap={monstersVisibleOnMap}
                   mapBusy={mapBusy}
                   drawTool={drawTool}
                   drawColor={drawColor}
@@ -1434,13 +1557,19 @@ export default function GamePage() {
                           user?.id,
                     )
                   }
+                  canLootToken={canLootToken}
+                  onTokenClick={handleMapTokenClick}
                   rollLog={rollLog}
                   onClearRollLog={() => setRollLog([])}
                   onApplyDamageFromRoll={
                     isDm ? (roll) => setApplyDamageRoll(roll) : undefined
                   }
                 />
-                <InitiativeOrderPanel initiative={initiative} />
+                <InitiativeOrderPanel
+                  initiative={initiative}
+                  characters={characters}
+                  monsters={monsters}
+                />
               </Box>
             </Box>
           )}
@@ -1493,6 +1622,21 @@ export default function GamePage() {
           presenceUsers={presenceUsers}
         />
       </Box>
+      </Box>
+      <CorpseLootSheet
+        open={corpseLootOpen && corpseLootTarget != null}
+        onClose={() => {
+          setCorpseLootOpen(false);
+          setCorpseLootRef(null);
+        }}
+        gameId={gameId}
+        target={corpseLootTarget}
+        characters={characters}
+        monsters={monsters}
+        currentUserId={user?.id}
+        isDm={isDm}
+        onTransferred={handleInventoryTransferred}
+      />
       <CreateCharacterDialog
         open={createDialogOpen}
         onClose={() => setCreateDialogOpen(false)}

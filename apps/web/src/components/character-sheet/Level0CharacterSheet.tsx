@@ -31,6 +31,9 @@ interface Level0CharacterSheetProps {
   onSelectArmor?: (armorId: string) => void;
   onSelectShield?: (shieldId: string) => void;
   onOpenEquipment?: () => void;
+  canEditHp?: boolean;
+  onPatchHp?: (hpCurrent: number) => void;
+  hpAdjusting?: boolean;
 }
 
 function FieldBox({
@@ -123,6 +126,9 @@ export function Level0CharacterSheet({
   onSelectArmor,
   onSelectShield,
   onOpenEquipment,
+  canEditHp = false,
+  onPatchHp,
+  hpAdjusting = false,
 }: Level0CharacterSheetProps) {
   const agiMod = data.abilities.find((a) => a.key === 'agi')?.mod ?? 0;
   const activeArmor = data.armorEntries.find((a) => a.id === data.selectedArmorId);
@@ -308,18 +314,50 @@ export function Level0CharacterSheet({
             <Box sx={{ textAlign: 'center', flex: 1 }}>
               <FavoriteBorderIcon sx={{ fontSize: 48, color: sheetColors.ink }} />
               <SectionLabel>HP</SectionLabel>
-              {editing ? (
-                <SheetField
-                  type="number"
-                  value={data.hp}
-                  onChange={(e) =>
-                    patch(data, onChange, { hp: Number.parseInt(e.target.value, 10) || 0 })
-                  }
-                  sx={{ maxWidth: 72, mx: 'auto' }}
-                />
-              ) : (
-                <SheetText sx={{ fontWeight: 800, fontSize: '1.25rem', display: 'block' }}>
-                  ({data.hp})
+              <Stack
+                direction="row"
+                spacing={0.5}
+                alignItems="center"
+                justifyContent="center"
+                sx={{ mt: 0.25 }}
+              >
+                {canEditHp && onPatchHp ? (
+                  <SheetField
+                    type="number"
+                    value={data.hp}
+                    disabled={hpAdjusting}
+                    onChange={(e) => {
+                      const next = Number.parseInt(e.target.value, 10);
+                      patch(data, onChange, {
+                        hp: Number.isFinite(next) ? next : data.hp,
+                      });
+                    }}
+                    onBlur={(e) => {
+                      const next = Number.parseInt(e.target.value, 10);
+                      if (Number.isFinite(next)) onPatchHp(next);
+                    }}
+                    sx={{ maxWidth: 72 }}
+                  />
+                ) : (
+                  <SheetText sx={{ fontWeight: 800, fontSize: '1.25rem' }}>
+                    ({data.hp})
+                  </SheetText>
+                )}
+                <SheetText sx={{ fontWeight: 700, fontSize: '1rem', opacity: 0.85 }}>
+                  / {data.hpMax}
+                </SheetText>
+              </Stack>
+              {data.vitalityLabel && (
+                <SheetText
+                  sx={{
+                    fontWeight: 800,
+                    fontSize: '0.75rem',
+                    color: data.isDead ? '#7a1f1f' : '#9a6b00',
+                    mt: 0.25,
+                    display: 'block',
+                  }}
+                >
+                  {data.vitalityLabel}
                 </SheetText>
               )}
             </Box>

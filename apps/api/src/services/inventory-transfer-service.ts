@@ -1,4 +1,10 @@
 import type { ItemCategory, Prisma } from '@prisma/client';
+import {
+  getCharacterVitality,
+  isMonsterKilled,
+  parseGameInitiative,
+  type MonsterStatsJson,
+} from '@dcc-web/shared';
 import { prisma } from '../lib/prisma.js';
 import { toMonsterInstance } from './monster-service.js';
 
@@ -28,6 +34,80 @@ function mergeKey(category: string, name: string): string {
 
 function itemsStackable(a: ItemLine, b: { category: string; name: string }): boolean {
   return mergeKey(a.category, a.name) === mergeKey(b.category, b.name);
+}
+
+function isSlainCharacter(character: {
+  level: number;
+  status: string;
+  combat: unknown;
+}): boolean {
+  if (character.status === 'dead') return true;
+  return (
+    getCharacterVitality({
+      level: character.level,
+      status: character.status,
+      combat: character.combat as { hpCurrent?: number; custom?: Record<string, unknown> } | null,
+    }) === 'dead'
+  );
+}
+
+function isSlainMonster(monster: {
+  hpCurrent: number;
+  stats: unknown;
+}): boolean {
+  return (
+    isMonsterKilled({ stats: monster.stats as MonsterStatsJson | undefined }) ||
+    monster.hpCurrent <= 0
+  );
+}
+
+export async function assertTransferInventoryAllowed(params: {
+  gameId: string;
+  userId: string;
+  isDm: boolean;
+  gameSettings: unknown;
+  input: TransferInventoryInput;
+}): Promise<void> {
+  if (params.isDm) return;
+
+  const initiative = parseGameInitiative(params.gameSettings);
+  if (initiative?.active) {
+    throw new Error('Looting is only available after combat ends');
+  }
+
+  if (params.input.targetType !== 'character') {
+    throw new Error('Players can only transfer loot to their characters');
+  }
+
+  const target = await prisma.character.findFirst({
+    where: { id: params.input.targetId, gameId: params.gameId },
+    select: { id: true, ownerUserId: true, status: true },
+  });
+  if (!target || target.ownerUserId !== params.userId) {
+    throw new Error('You can only loot to your own characters');
+  }
+  if (target.status !== 'alive') {
+    throw new Error('Cannot loot to a dead or archived character');
+  }
+
+  if (params.input.sourceType === 'character') {
+    const source = await prisma.character.findFirst({
+      where: { id: params.input.sourceId, gameId: params.gameId },
+      select: { id: true, level: true, status: true, combat: true },
+    });
+    if (!source || !isSlainCharacter(source)) {
+      throw new Error('That character is not available for looting');
+    }
+    return;
+  }
+
+  const source = await prisma.gameMonster.findFirst({
+    where: { id: params.input.sourceId, gameId: params.gameId },
+    select: { id: true, hpCurrent: true, stats: true },
+  });
+  if (!source || !isSlainMonster(source)) {
+    throw new Error('That creature is not available for looting');
+  }
 }
 
 export async function transferInventoryItem(

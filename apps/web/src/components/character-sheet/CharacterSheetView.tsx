@@ -38,6 +38,10 @@ import {
 } from '../../utils/armor';
 import { getActiveWeapon, weaponStatsFromItem } from '../../utils/weapons';
 import type { GameMonsterInstance } from '@dcc-web/shared';
+import {
+  formatCharacterVitalityBadge,
+  getCharacterVitality,
+} from '@dcc-web/shared';
 import type { TransferInventoryResult } from '../inventory/TransferItemDialog';
 import { EquipmentManagerDialog } from './EquipmentManagerDialog';
 import { Level0CharacterSheet } from './Level0CharacterSheet';
@@ -83,9 +87,21 @@ export function CharacterSheetView({
     mapCharacterToLevel0Sheet(characterProp),
   );
   const [saving, setSaving] = useState(false);
+  const [hpAdjusting, setHpAdjusting] = useState(false);
   const [equipmentOpen, setEquipmentOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const isDead = character.status === 'dead';
+  const isDead =
+    character.status === 'dead' ||
+    getCharacterVitality({
+      level: character.level,
+      status: character.status,
+      combat: character.combat,
+    }) === 'dead';
+  const vitalityLabel = formatCharacterVitalityBadge({
+    level: character.level,
+    status: character.status,
+    combat: character.combat,
+  });
 
   const canEdit =
     isDm || (user != null && character.ownerUserId === user.id);
@@ -141,6 +157,44 @@ export function CharacterSheetView({
       setSaving(false);
     }
   }, [draft, character, onCharacterUpdated]);
+
+  const patchHp = useCallback(
+    async (hpCurrent: number) => {
+      const hpMax = character.combat?.hpMax;
+      const nextHp =
+        typeof hpMax === 'number' && hpCurrent > hpMax ? hpMax : hpCurrent;
+      setHpAdjusting(true);
+      setError(null);
+      try {
+        const res = await api<{ character: Character } | Character>(
+          `/characters/${character.id}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({
+              combat: {
+                ...(character.combat ?? {}),
+                hpCurrent: nextHp,
+                hpMax,
+              },
+            }),
+          },
+        );
+        const updated =
+          res && typeof res === 'object' && 'character' in res
+            ? res.character
+            : (res as Character);
+        if (!updated?.id) throw new Error('HP update failed');
+        setCharacter(updated);
+        setDraft(mapCharacterToLevel0Sheet(updated));
+        onCharacterUpdated?.(updated);
+      } catch (e) {
+        setError(formatError(e));
+      } finally {
+        setHpAdjusting(false);
+      }
+    },
+    [character, onCharacterUpdated],
+  );
 
   const persistSelectedWeapon = useCallback(
     async (weaponId: string) => {
@@ -316,6 +370,9 @@ export function CharacterSheetView({
       onSelectShield={(shieldId) => {
         applyArmorSelection({ selectedShieldId: shieldId || NO_EQUIP_ID });
       }}
+      canEditHp={canEdit}
+      onPatchHp={(hp) => void patchHp(hp)}
+      hpAdjusting={hpAdjusting}
     />
   );
 
@@ -360,7 +417,21 @@ export function CharacterSheetView({
               variant="body2"
               sx={{ mt: 0.5, color: isDead ? 'error.main' : 'text.secondary' }}
             >
-              HP {character.combat?.hpCurrent ?? '—'}/{character.combat?.hpMax ?? '—'}
+              HP {character.combat?.hpCurrent ?? '—'} / max {character.combat?.hpMax ?? '—'}
+              {vitalityLabel && (
+                <>
+                  {' · '}
+                  <Box
+                    component="span"
+                    sx={{
+                      color: isDead ? 'error.main' : 'warning.main',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {vitalityLabel}
+                  </Box>
+                </>
+              )}
               {' · '}
               AC {character.combat?.ac ?? '—'}
               {(() => {

@@ -155,7 +155,7 @@ const monsterSheetSchema = z.object({
 
 export const patchGameMonsterSchema = z.object({
   name: z.string().min(1).max(120).optional(),
-  hpCurrent: z.coerce.number().int().min(0).max(9999).optional(),
+  hpCurrent: z.coerce.number().int().min(-9999).max(9999).optional(),
   hpMax: z.coerce.number().int().min(1).max(9999).optional(),
   notes: z.string().max(2000).optional(),
   ac: z.coerce.number().int().min(1).max(40).optional(),
@@ -251,6 +251,10 @@ export const layoutMapTokensSchema = z.object({
   visibleTop: layoutGridCoord.optional(),
   visibleRight: layoutGridCoord.optional(),
   visibleBottom: layoutGridCoord.optional(),
+});
+
+export const patchGameSettingsSchema = z.object({
+  monstersVisibleOnMap: z.boolean().optional(),
 });
 
 export const transferInventoryItemSchema = z.object({

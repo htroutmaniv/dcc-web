@@ -46,6 +46,9 @@ interface TransferItemDialogProps {
   item: TransferableItem;
   characters: Character[];
   monsters: GameMonsterInstance[];
+  /** When true, only the current user's living PCs can receive items. */
+  playerLootMode?: boolean;
+  currentUserId?: string;
   onTransferred: (result: TransferInventoryResult) => void;
 }
 
@@ -59,6 +62,8 @@ export function TransferItemDialog({
   item,
   characters,
   monsters,
+  playerLootMode = false,
+  currentUserId,
   onTransferred,
 }: TransferItemDialogProps) {
   const [tab, setTab] = useState(0);
@@ -66,18 +71,24 @@ export function TransferItemDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const targetCharacters = useMemo(
-    () =>
-      characters.filter(
-        (c) => !(sourceType === 'character' && c.id === sourceId),
-      ),
-    [characters, sourceType, sourceId],
-  );
+  const targetCharacters = useMemo(() => {
+    let list = characters.filter(
+      (c) => !(sourceType === 'character' && c.id === sourceId),
+    );
+    if (playerLootMode) {
+      list = list.filter(
+        (c) => c.ownerUserId === currentUserId && c.status === 'alive',
+      );
+    }
+    return list;
+  }, [characters, sourceType, sourceId, playerLootMode, currentUserId]);
 
   const targetMonsters = useMemo(
     () =>
-      monsters.filter((m) => !(sourceType === 'monster' && m.id === sourceId)),
-    [monsters, sourceType, sourceId],
+      playerLootMode
+        ? []
+        : monsters.filter((m) => !(sourceType === 'monster' && m.id === sourceId)),
+    [monsters, sourceType, sourceId, playerLootMode],
   );
 
   const transfer = async (targetType: InventoryOwnerType, targetId: string) => {
@@ -137,15 +148,22 @@ export function TransferItemDialog({
             {error}
           </Typography>
         )}
-        <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="fullWidth" sx={{ mb: 1 }}>
+        <Tabs
+          value={tab}
+          onChange={(_, v) => setTab(v)}
+          variant="fullWidth"
+          sx={{ mb: 1, display: playerLootMode ? 'none' : undefined }}
+        >
           <Tab label={`PCs (${targetCharacters.length})`} />
           <Tab label={`Monsters (${targetMonsters.length})`} />
         </Tabs>
-        {tab === 0 && (
+        {(playerLootMode || tab === 0) && (
           <List dense disablePadding>
             {targetCharacters.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
-                No other characters in this game.
+                {playerLootMode
+                  ? 'You need a living character to take this loot.'
+                  : 'No other characters in this game.'}
               </Typography>
             ) : (
               targetCharacters.map((c) => (
@@ -160,7 +178,7 @@ export function TransferItemDialog({
             )}
           </List>
         )}
-        {tab === 1 && (
+        {!playerLootMode && tab === 1 && (
           <List dense disablePadding>
             {targetMonsters.length === 0 ? (
               <Typography variant="body2" color="text.secondary">

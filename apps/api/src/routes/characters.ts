@@ -14,8 +14,10 @@ import {
   generateRandomCharacterData,
 } from '../services/character-generator.js';
 import { applyCharacterStatus } from '../services/character-status.js';
+import { mergeCharacterCombatWithMortality } from '../services/character-combat.js';
 import { characterMovementRange } from '../services/movement.js';
 import { deleteTokensForCharacter, syncActiveMapTokens } from '../services/map-service.js';
+import { reconcileInitiativeAfterCharacterDeath } from '../services/initiative-service.js';
 import { emitToGame } from '../lib/game-socket.js';
 
 function broadcastCharacter(
@@ -265,6 +267,7 @@ export async function characterRoutes(app: FastifyInstance) {
         parsed.data.combat !== undefined ||
         parsed.data.items !== undefined;
 
+      let hpMarkDead = false;
       const character = await prisma.$transaction(async (tx) => {
         if (parsed.data.items) {
           await tx.characterItem.deleteMany({ where: { characterId } });
@@ -292,6 +295,20 @@ export async function characterRoutes(app: FastifyInstance) {
           throw app.httpErrors.badRequest('No changes provided');
         }
 
+        let combatUpdate: Record<string, unknown> | undefined;
+        if (parsed.data.combat !== undefined) {
+          const merged = mergeCharacterCombatWithMortality(
+            existing,
+            parsed.data.combat as Record<string, unknown>,
+          );
+          combatUpdate = merged.combat;
+          hpMarkDead = merged.markDead;
+        }
+
+        if (hpMarkDead && existing.status !== 'dead') {
+          await applyCharacterStatus(tx, characterId, 'dead', { bumpVersion: false });
+        }
+
         if (!hasOtherFields) {
           return tx.character.findUniqueOrThrow({
             where: { id: characterId },
@@ -311,8 +328,8 @@ export async function characterRoutes(app: FastifyInstance) {
             ...(parsed.data.stats !== undefined && {
               stats: parsed.data.stats as Prisma.InputJsonValue,
             }),
-            ...(parsed.data.combat !== undefined && {
-              combat: parsed.data.combat as Prisma.InputJsonValue,
+            ...(combatUpdate !== undefined && {
+              combat: combatUpdate as Prisma.InputJsonValue,
             }),
             ...(parsed.data.items && {
               items: {
@@ -336,6 +353,15 @@ export async function characterRoutes(app: FastifyInstance) {
         emitToGame(request.server.io, existing.gameId, 'map:updated', {
           actorUserId: request.userId,
         });
+      }
+      if (statusChange === 'dead' || hpMarkDead) {
+        const initiative = await reconcileInitiativeAfterCharacterDeath(existing.gameId);
+        if (initiative) {
+          emitToGame(request.server.io, existing.gameId, 'initiative:updated', {
+            initiative,
+            actorUserId: request.userId,
+          });
+        }
       }
       broadcastCharacter(request, existing.gameId, character);
       return { character };

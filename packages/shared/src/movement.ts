@@ -3,8 +3,10 @@ import type { CharacterStats, GameSettings, MovementRange } from './types.js';
 import { DEFAULT_GAME_SETTINGS } from './types.js';
 
 export function parseGameSettings(settings: unknown): GameSettings {
-  const s = settings as Partial<GameSettings>;
-  const raw = settings as { activeMapId?: string | null };
+  const s = (
+    settings != null && typeof settings === 'object' ? settings : {}
+  ) as Partial<GameSettings>;
+  const raw = s as { activeMapId?: string | null };
   return {
     gridFtPerCell: s.gridFtPerCell ?? DEFAULT_GAME_SETTINGS.gridFtPerCell,
     playerTokenMovement:
@@ -14,6 +16,10 @@ export function parseGameSettings(settings: unknown): GameSettings {
       typeof raw.activeMapId === 'string' && raw.activeMapId.length > 0
         ? raw.activeMapId
         : null,
+    monstersVisibleOnMap:
+      typeof s.monstersVisibleOnMap === 'boolean'
+        ? s.monstersVisibleOnMap
+        : DEFAULT_GAME_SETTINGS.monstersVisibleOnMap,
   };
 }
 

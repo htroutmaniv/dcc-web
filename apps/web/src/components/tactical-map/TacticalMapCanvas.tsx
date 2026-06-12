@@ -29,6 +29,8 @@ import {
   type MapDrawing,
   type MapDrawTool,
   type MapLayoutAnchor,
+  isMapTokenVisible,
+  type MapTokenVisibilityContext,
 } from '@dcc-web/shared';
 import type { TacticalGameMap, TacticalMapToken } from '../../types/map';
 import { MapViewportControls } from './MapViewportControls';
@@ -46,13 +48,15 @@ export type TacticalMapCanvasHandle = {
 interface TacticalMapCanvasProps {
   map: TacticalGameMap;
   isDm: boolean;
-  showMonsterTokens: boolean;
+  tokenVisibility: MapTokenVisibilityContext;
   drawTool: MapDrawTool;
   drawColor: string;
   drawStrokeWidth: number;
   onDrawingsChange: (drawings: MapDrawing[]) => void;
   onTokenMove: (tokenId: string, x: number, y: number) => void;
   canDragToken?: (token: TacticalMapToken) => boolean;
+  onTokenClick?: (token: TacticalMapToken) => void;
+  canLootToken?: (token: TacticalMapToken) => boolean;
 }
 
 function useMapImage(url: string | null) {
@@ -140,13 +144,15 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
     {
       map,
       isDm,
-      showMonsterTokens,
+      tokenVisibility,
       drawTool,
       drawColor,
       drawStrokeWidth,
       onDrawingsChange,
       onTokenMove,
       canDragToken,
+      onTokenClick,
+      canLootToken,
     },
     ref,
   ) {
@@ -313,10 +319,9 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
     const visibleTokens = useMemo(() => {
       return map.tokens.filter((t) => {
         if (t.zone !== 'map') return false;
-        if (t.kind === 'monster' && !showMonsterTokens) return false;
-        return true;
+        return isMapTokenVisible(t, tokenVisibility);
       });
-    }, [map.tokens, showMonsterTokens]);
+    }, [map.tokens, tokenVisibility]);
 
     const finishStroke = (points: number[]) => {
       if (points.length < 4) return;
@@ -604,9 +609,11 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
                   token={t}
                   cell={cell}
                   draggable={!t.isDead && (canDragToken ? canDragToken(t) : isDm)}
+                  lootable={canLootToken?.(t) ?? false}
                   mapGroupRef={mapGroupRef}
                   allowMapPan={!drawing}
                   onMove={(x, y) => onTokenMove(t.id, x, y)}
+                  onClick={onTokenClick ? () => onTokenClick(t) : undefined}
                 />
               ))}
             </Group>
@@ -628,16 +635,20 @@ function MapTokenChip({
   token,
   cell,
   draggable,
+  lootable,
   mapGroupRef,
   allowMapPan,
   onMove,
+  onClick,
 }: {
   token: TacticalMapToken;
   cell: number;
   draggable: boolean;
+  lootable: boolean;
   mapGroupRef: React.RefObject<Konva.Group | null>;
   allowMapPan: boolean;
   onMove: (x: number, y: number) => void;
+  onClick?: () => void;
 }) {
   const r = cell * TOKEN_RADIUS_FACTOR;
   const groupRef = useRef<Konva.Group>(null);
@@ -654,6 +665,16 @@ function MapTokenChip({
     <Group
       ref={groupRef}
       draggable={draggable}
+      onClick={(e) => {
+        if (!lootable || !onClick) return;
+        e.cancelBubble = true;
+        onClick();
+      }}
+      onTap={(e) => {
+        if (!lootable || !onClick) return;
+        e.cancelBubble = true;
+        onClick();
+      }}
       onDragStart={(e) => {
         draggingRef.current = true;
         mapGroupRef.current?.draggable(false);
@@ -680,6 +701,7 @@ function MapTokenChip({
         stroke={isDead ? '#888' : token.kind === 'monster' ? '#3a1010' : '#1a1510'}
         strokeWidth={2}
         dash={isDead ? [4, 3] : undefined}
+        listening={lootable || draggable}
       />
       {isDead && (
         <>

@@ -11,6 +11,8 @@ import type { Character } from '../types/game';
 import {
   formatArmorSummary,
   formatWeaponSummary,
+  formatCharacterVitalityBadge,
+  getCharacterVitality,
 } from '@dcc-web/shared';
 import {
   buildBodyArmorEntries,
@@ -62,6 +64,8 @@ export interface Level0SheetData {
   alignment: string;
   ac: number;
   hp: number;
+  hpMax: number;
+  vitalityLabel?: string | null;
   abilities: { key: string; label: string; score: number; mod: number }[];
   saves: { reflex: number; fortitude: number; will: number };
   /** Editable weapon lines (up to 3 slots). */
@@ -218,6 +222,12 @@ export function mapCharacterToLevel0Sheet(character: Character): Level0SheetData
     alignment: character.alignment || '',
     ac,
     hp: combat.hpCurrent ?? combat.hpMax ?? 1,
+    hpMax: combat.hpMax ?? combat.hpCurrent ?? 1,
+    vitalityLabel: formatCharacterVitalityBadge({
+      level: character.level,
+      status: character.status,
+      combat,
+    }),
     abilities: abilityRows,
     saves: {
       reflex: saves.reflex,
@@ -239,7 +249,13 @@ export function mapCharacterToLevel0Sheet(character: Character): Level0SheetData
     xp: (custom.xp as string) || '',
     level: character.level,
     status: character.status,
-    isDead: character.status === 'dead',
+    isDead:
+      character.status === 'dead' ||
+      getCharacterVitality({
+        level: character.level,
+        status: character.status,
+        combat,
+      }) === 'dead',
   };
 }
 
@@ -330,7 +346,7 @@ export function sheetDataToCharacterPatch(
       ...(character.combat ?? {}),
       ac: computedAc,
       hpCurrent: data.hp,
-      hpMax: Math.max(data.hp, character.combat?.hpMax ?? data.hp),
+      hpMax: character.combat?.hpMax ?? data.hpMax,
     },
     items,
   };

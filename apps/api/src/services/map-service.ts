@@ -349,6 +349,9 @@ export async function syncMapTokens(gameId: string, mapId: string): Promise<Game
   const activeMonsters = monsters.filter(
     (m) => !isMonsterKilled({ stats: m.stats as MonsterStatsJson | undefined }),
   );
+  const slainMonsters = monsters.filter((m) =>
+    isMonsterKilled({ stats: m.stats as MonsterStatsJson | undefined }),
+  );
 
   const existing = await prisma.mapToken.findMany({ where: { mapId } });
   let pcIndex = 0;
@@ -404,6 +407,33 @@ export async function syncMapTokens(gameId: string, mapId: string): Promise<Game
       }
     }
     monsterIndex += 1;
+  }
+
+  for (const m of slainMonsters) {
+    let token = existing.find((t) => t.monsterId === m.id);
+    if (!token) {
+      token = await prisma.mapToken.create({
+        data: {
+          mapId,
+          kind: 'monster',
+          monsterId: m.id,
+          label: m.name,
+          x: 8 + monsterIndex,
+          y: 2,
+          zone: 'map',
+          color: '#4a4a4a',
+        },
+      });
+      existing.push(token);
+      monsterIndex += 1;
+    } else {
+      const updates: Prisma.MapTokenUpdateInput = {};
+      if (token.label !== m.name) updates.label = m.name;
+      if (token.zone !== 'map') updates.zone = 'map';
+      if (Object.keys(updates).length > 0) {
+        await prisma.mapToken.update({ where: { id: token.id }, data: updates });
+      }
+    }
   }
 
   await pruneOrphanMapTokens(mapId, gameId, allCharacters, monsters);

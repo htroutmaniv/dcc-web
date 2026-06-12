@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Box,
   Button,
@@ -22,11 +22,13 @@ import { DiceTabPanel } from './DiceTabPanel';
 import type { Character, Game, GamePresenceUser, User } from '../types/game';
 import type { DiceRollLogEntry } from '../types/dice-roll-log';
 import {
+  createCharacterInitiativeSkipFn,
   isCharacterTurn,
   type DiceTrayCounts,
   type GameInitiativeState,
 } from '@dcc-web/shared';
 import type { CharacterRollKind, CombatRollKind } from '../utils/character-rolls';
+import { subtleScrollbarSx } from '../utils/scrollbars';
 
 export type GameMenuTab = 'characters' | 'dice' | 'presence';
 
@@ -121,6 +123,10 @@ export function GameSideMenu({
 }: GameSideMenuProps) {
   const [copied, setCopied] = useState(false);
   const initiativeActive = initiative?.active ?? false;
+  const shouldSkipInitiative = useMemo(
+    () => createCharacterInitiativeSkipFn(characters),
+    [characters],
+  );
 
   const copyInviteCode = useCallback(async () => {
     try {
@@ -136,14 +142,17 @@ export function GameSideMenu({
       sx={{
         width: { xs: 320, sm: 420 },
         flexShrink: 0,
+        alignSelf: 'stretch',
         display: 'flex',
         flexDirection: 'column',
+        minHeight: 0,
+        overflow: 'hidden',
         borderLeft: 1,
         borderColor: 'divider',
         bgcolor: 'background.paper',
       }}
     >
-      <Box sx={{ px: 2, pt: 2, pb: 1 }}>
+      <Box sx={{ px: 2, pt: 2, pb: 1, flexShrink: 0 }}>
         <Typography variant="subtitle2" color="text.secondary">
           Session menu
         </Typography>
@@ -171,30 +180,60 @@ export function GameSideMenu({
         value={tab}
         onChange={(_, v) => onTabChange(v as GameMenuTab)}
         variant="fullWidth"
-        sx={{ borderBottom: 1, borderColor: 'divider' }}
+        sx={{ borderBottom: 1, borderColor: 'divider', flexShrink: 0 }}
       >
         <Tab icon={<GroupsIcon />} iconPosition="start" label="PCs" value="characters" />
         <Tab icon={<CasinoIcon />} iconPosition="start" label="Dice" value="dice" />
         <Tab icon={<PeopleIcon />} iconPosition="start" label="In game" value="presence" />
       </Tabs>
 
-      <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+      <Box
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
         {tab === 'characters' && (
-          <>
-            <Button
-              fullWidth
-              variant="outlined"
-              startIcon={<PersonAddIcon />}
-              onClick={onAddCharacter}
-              sx={{ mb: 2 }}
+          <Box
+            sx={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            <Box sx={{ flexShrink: 0, px: 2, pt: 2 }}>
+              <Button
+                fullWidth
+                variant="outlined"
+                startIcon={<PersonAddIcon />}
+                onClick={onAddCharacter}
+                sx={{ mb: isDm ? 1 : 2 }}
+              >
+                Add character
+              </Button>
+              {isDm && (
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Kill, revive, and archive from the character sheet.
+                </Typography>
+              )}
+            </Box>
+            <Box
+              sx={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                px: 2,
+                pb: 2,
+                pt: isDm ? 1 : 0,
+                ...subtleScrollbarSx,
+              }}
             >
-              Add character
-            </Button>
-            {isDm && (
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                Kill, revive, and archive from the character sheet.
-              </Typography>
-            )}
             {characters.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
                 No characters in this game yet.
@@ -206,7 +245,11 @@ export function GameSideMenu({
                 dmUserId={game.dmUserId}
                 presenceUsers={presenceUsers}
                 renderItem={(c) => {
-                  const isTurn = isCharacterTurn(initiative ?? null, c.id);
+                  const isTurn = isCharacterTurn(
+                    initiative ?? null,
+                    c.id,
+                    shouldSkipInitiative,
+                  );
                   const canEndTurn =
                     initiativeActive &&
                     isTurn &&
@@ -241,6 +284,7 @@ export function GameSideMenu({
                       canEditConsumables={canEditCharacter(c)}
                       canToggleInPlay={canEditCharacter(c)}
                       onToggleInPlay={(active) => onToggleInPlay(c, active)}
+                      initiative={initiative}
                       initiativeActive={initiativeActive}
                       isInitiativeTurn={isTurn}
                       canEndTurn={canEndTurn}
@@ -257,7 +301,11 @@ export function GameSideMenu({
             ) : (
               <List disablePadding>
                 {characters.map((c) => {
-                  const isTurn = isCharacterTurn(initiative ?? null, c.id);
+                  const isTurn = isCharacterTurn(
+                    initiative ?? null,
+                    c.id,
+                    shouldSkipInitiative,
+                  );
                   const canEndTurn =
                     initiativeActive &&
                     isTurn &&
@@ -292,6 +340,7 @@ export function GameSideMenu({
                       canEditConsumables={canEditCharacter(c)}
                       canToggleInPlay={canEditCharacter(c)}
                       onToggleInPlay={(active) => onToggleInPlay(c, active)}
+                      initiative={initiative}
                       initiativeActive={initiativeActive}
                       isInitiativeTurn={isTurn}
                       canEndTurn={canEndTurn}
@@ -306,10 +355,12 @@ export function GameSideMenu({
                 })}
               </List>
             )}
-          </>
+            </Box>
+          </Box>
         )}
 
         {tab === 'dice' && (
+          <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2, ...subtleScrollbarSx }}>
           <DiceTabPanel
             characters={characters}
             diceCharacterId={diceCharacterId}
@@ -323,9 +374,11 @@ export function GameSideMenu({
             rolling={diceRolling}
             quickRollKind={diceQuickRollKind}
           />
+          </Box>
         )}
 
         {tab === 'presence' && (
+          <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2, ...subtleScrollbarSx }}>
           <GamePresencePanel
             dmUserId={game.dmUserId}
             dmDisplayName={game.dm?.displayName ?? 'Dungeon Master'}
@@ -333,6 +386,7 @@ export function GameSideMenu({
             presenceUsers={presenceUsers}
             currentUserId={currentUserId}
           />
+          </Box>
         )}
       </Box>
     </Box>

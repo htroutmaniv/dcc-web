@@ -13,12 +13,15 @@ import {
 } from '@mui/material';
 import {
   getActiveLightItemId,
+  getCharacterVitality,
+  formatCharacterVitalityBadge,
   isActiveInPlay,
   isMonsterActive,
   isMonsterKilled,
   listLightSourceOptions,
   parseAttackOutcome,
   stripRollTargetTag,
+  type GameInitiativeState,
   type GameMonsterInstance,
 } from '@dcc-web/shared';
 import { canExpendLightSource } from '../utils/consumables';
@@ -59,6 +62,7 @@ interface CharacterListItemProps {
   canEditConsumables?: boolean;
   canToggleInPlay?: boolean;
   onToggleInPlay?: (active: boolean) => void;
+  initiative?: GameInitiativeState | null;
   initiativeActive?: boolean;
   isInitiativeTurn?: boolean;
   canEndTurn?: boolean;
@@ -73,6 +77,16 @@ const ROLL_BUTTONS: { kind: CombatRollKind; label: string }[] = [
   { kind: 'toHit', label: 'Hit' },
   { kind: 'damage', label: 'Dmg' },
 ];
+
+function shouldShowInitiativeQuickRoll(
+  state: GameInitiativeState | null,
+  characterId: string,
+): boolean {
+  if (!state?.active) return true;
+  return !state.order.some(
+    (entry) => entry.kind === 'character' && entry.characterId === characterId,
+  );
+}
 
 export function buildCombatTargetOptions(
   monsters: GameMonsterInstance[],
@@ -114,6 +128,7 @@ export function CharacterListItem({
   canEditConsumables,
   canToggleInPlay,
   onToggleInPlay,
+  initiative,
   initiativeActive,
   isInitiativeTurn,
   canEndTurn,
@@ -130,7 +145,19 @@ export function CharacterListItem({
   const hpMax = hpMaxNum ?? '—';
   const canAdjustHp = Boolean(canEditHp && onPatchHp && hpNum !== null && hpMaxNum !== null);
   const ac = character.combat?.ac ?? '—';
-  const isDead = character.status === 'dead';
+  const vitality = getCharacterVitality({
+    level: character.level,
+    status: character.status,
+    combat: character.combat,
+  });
+  const vitalityLabel = formatCharacterVitalityBadge({
+    level: character.level,
+    status: character.status,
+    combat: character.combat,
+  });
+  const isDead = vitality === 'dead' || character.status === 'dead';
+  const isDying = vitality === 'dying';
+  const hpColor = isDead ? 'error.main' : isDying ? 'warning.main' : 'text.secondary';
   const deadColor = 'error.main';
   const isRolling = rollingKind != null;
   const counts = getConsumableCounts(character);
@@ -146,6 +173,11 @@ export function CharacterListItem({
   const selectedWeaponId = resolveSelectedWeaponId(character) ?? '';
   const showCombatTargets = initiativeActive && combatTargets.length > 0;
   const lastOutcome = lastRoll ? parseAttackOutcome(lastRoll.reason) : null;
+  const visibleRollButtons = ROLL_BUTTONS.filter(
+    ({ kind }) =>
+      kind !== 'initiative' ||
+      shouldShowInitiativeQuickRoll(initiative ?? null, character.id),
+  );
 
   return (
     <Box
@@ -190,9 +222,25 @@ export function CharacterListItem({
         </Typography>
         <Typography
           variant="body2"
-          sx={{ mt: 0.5, color: isDead ? deadColor : 'text.secondary' }}
+          sx={{ mt: 0.5, color: hpColor }}
         >
           HP {hpCurrent}/{hpMax}
+          {vitalityLabel && (
+            <>
+              <Box component="span" sx={{ mx: 1, opacity: 0.5 }}>
+                ·
+              </Box>
+              <Box
+                component="span"
+                sx={{
+                  color: isDead ? 'error.main' : 'warning.main',
+                  fontWeight: 700,
+                }}
+              >
+                {vitalityLabel}
+              </Box>
+            </>
+          )}
           <Box component="span" sx={{ mx: 1, opacity: 0.5 }}>
             ·
           </Box>
@@ -221,7 +269,7 @@ export function CharacterListItem({
           <Button
             size="small"
             sx={{ minWidth: 24, px: 0.25, py: 0 }}
-            disabled={hpAdjusting || hpNum! <= 0}
+            disabled={hpAdjusting}
             onClick={() => onPatchHp!(hpNum! - 1)}
           >
             −
@@ -430,7 +478,7 @@ export function CharacterListItem({
         flexWrap="wrap"
         onClick={(e) => e.stopPropagation()}
       >
-        {ROLL_BUTTONS.map(({ kind, label }) => {
+        {visibleRollButtons.map(({ kind, label }) => {
           const needsTarget =
             initiativeActive && (kind === 'toHit' || kind === 'damage') && combatTargets.length > 0;
           const disabled =

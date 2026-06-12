@@ -1,41 +1,42 @@
-{
-  "name": "dcc-web",
-  "private": true,
-  "version": "0.0.0",
-  "description": "DCC session character sheets and tactical maps",
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
-  "scripts": {
-    "build": "bun run --filter @dcc-web/shared build && bun run --filter @dcc-web/api build && bun run --filter @dcc-web/web build",
-    "build:shared": "bun run --filter @dcc-web/shared build",
-    "setup": "bun scripts/ensure-env.ts && bun install && bun run db:generate && bun run stack && bun run db:migrate && bun run db:seed",
-    "stack": "bun scripts/with-env.ts development -- docker compose up -d --force-recreate nginx",
-    "stack:prod": "bun scripts/with-env.ts production -- docker compose up -d --force-recreate nginx",
-    "stack:down": "docker compose down",
-    "server": "bun scripts/ensure-env.ts && bun run build:shared && bun scripts/with-env.ts development -- bun run --filter @dcc-web/api server",
-    "bundler": "bun scripts/with-env.ts development -- bun run --filter @dcc-web/web bundler",
-    "stop:bundler": "bun scripts/with-env.ts development -- bun scripts/stop-bundler.ts",
-    "shared": "bun run --filter @dcc-web/shared dev",
-    "start:server": "bun run --filter @dcc-web/api start",
-    "start:bundler": "bun run --filter @dcc-web/web preview",
-    "stop:prod": "bun scripts/with-env.ts production -- bun scripts/stop-prod.ts",
-    "prod": "bun scripts/ensure-env.ts && bun scripts/with-env.ts production -- bun scripts/prod-run.ts",
-    "start": "bun run prod",
-    "db:generate": "bun run --filter @dcc-web/api db:generate",
-    "db:migrate": "bun run --filter @dcc-web/api db:migrate",
-    "db:migrate:prod": "bun scripts/with-env.ts production -- bun run db:migrate",
-    "db:migrate:dev": "bun run --filter @dcc-web/api db:migrate:dev",
-    "db:seed": "bun run --filter @dcc-web/api db:seed",
-    "docker:logs": "docker compose logs -f",
-    "postinstall": "bun run db:generate"
-  },
-  "engines": {
-    "node": ">=20"
-  },
-  "devDependencies": {
-    "concurrently": "^9.1.2"
-  }
-}
+{
+  "name": "dcc-web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "DCC session character sheets and tactical maps",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun run --filter @dcc-web/shared build && bun run --filter @dcc-web/api build && bun run --filter @dcc-web/web build",
+    "build:shared": "bun run --filter @dcc-web/shared build",
+    "setup": "bun scripts/ensure-env.ts && bun install && bun run db:generate && bun run stack && bun run db:migrate && bun run db:seed",
+    "stack": "bun scripts/with-env.ts development -- docker compose up -d --force-recreate nginx",
+    "stack:prod": "bun scripts/with-env.ts production -- docker compose up -d --force-recreate nginx",
+    "stack:down": "docker compose down",
+    "server": "bun scripts/ensure-env.ts && bun run build:shared && bun scripts/stop-server.ts && bun scripts/with-env.ts development -- bun run --filter @dcc-web/api server",
+    "bundler": "bun scripts/with-env.ts development -- bun run --filter @dcc-web/web bundler",
+    "stop:server": "bun scripts/with-env.ts development -- bun scripts/stop-server.ts",
+    "stop:bundler": "bun scripts/with-env.ts development -- bun scripts/stop-bundler.ts",
+    "shared": "bun run --filter @dcc-web/shared dev",
+    "start:server": "bun run --filter @dcc-web/api start",
+    "start:bundler": "bun run --filter @dcc-web/web preview",
+    "stop:prod": "bun scripts/with-env.ts production -- bun scripts/stop-prod.ts",
+    "prod": "bun scripts/ensure-env.ts && bun scripts/with-env.ts production -- bun scripts/prod-run.ts",
+    "start": "bun run prod",
+    "db:generate": "bun run --filter @dcc-web/api db:generate",
+    "db:migrate": "bun run --filter @dcc-web/api db:migrate",
+    "db:migrate:prod": "bun scripts/with-env.ts production -- bun run db:migrate",
+    "db:migrate:dev": "bun run --filter @dcc-web/api db:migrate:dev",
+    "db:seed": "bun run --filter @dcc-web/api db:seed",
+    "docker:logs": "docker compose logs -f",
+    "postinstall": "bun run db:generate"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
 

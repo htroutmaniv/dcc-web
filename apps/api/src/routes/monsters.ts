@@ -24,7 +24,7 @@ import {
   syncMonsterGroupInitiative,
 } from '../services/monster-service.js';
 import { getInitiativeFromGame } from '../services/initiative-service.js';
-import { transferInventoryItem } from '../services/inventory-transfer-service.js';
+import { transferInventoryItem, assertTransferInventoryAllowed } from '../services/inventory-transfer-service.js';
 
 function emitMonstersChanged(
   app: FastifyInstance,
@@ -326,7 +326,7 @@ export async function monsterRoutes(app: FastifyInstance) {
     { onRequest: [app.authenticate] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameDm(request.userId!, gameId);
+      const access = await assertGameMember(request.userId!, gameId);
       if (!access.ok) {
         throw app.httpErrors.createError(access.status, access.message);
       }
@@ -334,6 +334,13 @@ export async function monsterRoutes(app: FastifyInstance) {
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
       try {
+        await assertTransferInventoryAllowed({
+          gameId,
+          userId: request.userId!,
+          isDm: access.isDm,
+          gameSettings: access.game.settings,
+          input: parsed.data,
+        });
         const result = await transferInventoryItem(gameId, parsed.data);
         if (result.sourceCharacter) {
           emitToGame(app.io, gameId, 'character:upsert', {

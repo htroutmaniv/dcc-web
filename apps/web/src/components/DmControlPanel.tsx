@@ -4,6 +4,8 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import SkipNextIcon from '@mui/icons-material/SkipNext';
 import StopIcon from '@mui/icons-material/Stop';
 import PestControlIcon from '@mui/icons-material/PestControl';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import GavelIcon from '@mui/icons-material/Gavel';
 import type { GameInitiativeState, GameMonsterInstance } from '@dcc-web/shared';
 import { MonsterQuickMenu } from './MonsterQuickMenu';
@@ -20,6 +22,8 @@ interface DmControlPanelProps {
   onStartInitiative: () => void;
   onAdvanceTurn: () => void;
   onEndInitiative: () => void;
+  monstersVisibleOnMap?: boolean;
+  onToggleMonstersVisibleOnMap?: () => void;
   busy?: boolean;
   monsters: GameMonsterInstance[];
   characters: Character[];
@@ -43,6 +47,8 @@ export function DmControlPanel({
   onStartInitiative,
   onAdvanceTurn,
   onEndInitiative,
+  monstersVisibleOnMap = false,
+  onToggleMonstersVisibleOnMap,
   busy = false,
   monsters,
   characters,
@@ -146,6 +152,20 @@ export function DmControlPanel({
                   </Button>
                 </>
               )}
+              <Button
+                fullWidth
+                variant={monstersVisibleOnMap ? 'contained' : 'outlined'}
+                size="small"
+                startIcon={
+                  monstersVisibleOnMap ? <VisibilityIcon /> : <VisibilityOffIcon />
+                }
+                onClick={onToggleMonstersVisibleOnMap}
+                disabled={busy || !onToggleMonstersVisibleOnMap}
+              >
+                {monstersVisibleOnMap
+                  ? 'Monsters visible on map'
+                  : 'Show monsters on map'}
+              </Button>
             </Stack>
           </Box>
 
