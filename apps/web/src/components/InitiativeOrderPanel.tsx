@@ -33,8 +33,14 @@ function entryStatusLabel(
       combat: character.combat,
     });
   }
+  if (entry.kind === 'monster' && entry.monsterId) {
+    const monster = monsters.find((m) => m.id === entry.monsterId);
+    if (!monster) return null;
+    if (isMonsterDown(monster)) return 'Killed';
+    if (monster.hpCurrent < monster.hpMax) return `${monster.hpCurrent} HP`;
+    return null;
+  }
   if (
-    entry.kind === 'monster' ||
     entry.kind === 'monster_group' ||
     isMonsterGroupEntry(entry)
   ) {
@@ -90,7 +96,7 @@ export function InitiativeOrderPanel({
       >
         Initiative · Round {initiative.round}
       </Typography>
-      <Box component="ol" sx={{ m: 0, pl: 2.25 }}>
+      <Box component="ul" sx={{ m: 0, p: 0, listStyle: 'none' }}>
         {initiative.order.map((entry, index) => {
           const isCurrent = current?.entryId === entry.entryId;
           const statusLabel = entryStatusLabel(entry, characters, monsters);
@@ -125,9 +131,7 @@ export function InitiativeOrderPanel({
                 }}
               >
                 {index + 1}. {entry.name}
-                {(entry.kind === 'monster' ||
-                  entry.kind === 'monster_group' ||
-                  isMonsterGroupEntry(entry)) && (
+                {(entry.kind === 'monster_group' || isMonsterGroupEntry(entry)) && (
                   <Box
                     component="span"
                     sx={{ ml: 0.35, opacity: 0.65, fontSize: '0.7rem', color: 'secondary.main' }}

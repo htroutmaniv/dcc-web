@@ -15,12 +15,18 @@ export interface GameSettings {
   activeMapId?: string | null;
   /** When true, living monster tokens are visible to players outside of initiative. */
   monstersVisibleOnMap?: boolean;
+  /** When true, in-play monsters share one initiative slot during combat. */
+  sharedMonsterInitiative?: boolean;
+  /** When true, players do not see monster AC in the roll log (DM still sees it). */
+  hideMonsterAcInRollLog?: boolean;
 }
 
 export const DEFAULT_GAME_SETTINGS: GameSettings = {
   gridFtPerCell: 5,
   playerTokenMovement: 'free',
   monstersVisibleOnMap: false,
+  sharedMonsterInitiative: false,
+  hideMonsterAcInRollLog: false,
 };
 
 export interface AbilityScore {

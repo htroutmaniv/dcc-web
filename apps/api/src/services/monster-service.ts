@@ -12,6 +12,8 @@ import {
   sortInitiativeEntries,
   spawnMonstersSchema,
   isMonsterKilled,
+  isMonsterEligibleForInitiative,
+  MONSTER_IN_PLAY_KEY,
   resolveMonsterAfterHpChange,
   type GameInitiativeState,
   type GameMonsterInstance,
@@ -254,7 +256,11 @@ export async function spawnGameMonsters(
         hpMax: rolled.hpMax,
         hpCurrent: rolled.hpMax,
         sheet: sheet as object,
-        stats: { speed: rolled.speed, initiative: rolled.initMod } as Prisma.InputJsonValue,
+        stats: {
+          speed: rolled.speed,
+          initiative: rolled.initMod,
+          custom: { [MONSTER_IN_PLAY_KEY]: false },
+        } as Prisma.InputJsonValue,
         combat: { ac: rolled.ac, hpMax: rolled.hpMax, hpCurrent: rolled.hpMax } as Prisma.InputJsonValue,
         sortOrder: existingCount + i,
         items: {
@@ -276,7 +282,8 @@ export async function spawnGameMonsters(
   }
 
   let initiative: GameInitiativeState | null = null;
-  if (input.addToInitiative) {
+  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
+  if (parseGameInitiative(game.settings)?.active) {
     initiative = await syncMonsterGroupInitiative(gameId);
   }
 
@@ -319,8 +326,10 @@ export async function patchGameMonster(
     statsAfter = resolved.stats;
   }
 
-  const inInitiativeBefore =
-    existing.hpCurrent > 0 && !isMonsterKilled({ stats: statsBefore });
+  const inInitiativeBefore = isMonsterEligibleForInitiative({
+    hpCurrent: existing.hpCurrent,
+    stats: statsBefore,
+  });
 
   let sheet = parseMonsterSheet(existing.sheet);
   if (patch.sheet) sheet = patch.sheet;
@@ -356,8 +365,10 @@ export async function patchGameMonster(
     include: { items: { orderBy: { sortOrder: 'asc' } } },
   });
 
-  const inInitiativeAfter =
-    row.hpCurrent > 0 && !isMonsterKilled({ stats: row.stats as MonsterStatsJson | undefined });
+  const inInitiativeAfter = isMonsterEligibleForInitiative({
+    hpCurrent: row.hpCurrent,
+    stats: row.stats as MonsterStatsJson | undefined,
+  });
   let initiative: GameInitiativeState | null = null;
   if (inInitiativeBefore !== inInitiativeAfter) {
     initiative = await syncMonsterGroupInitiative(gameId);
@@ -369,8 +380,11 @@ export async function patchGameMonster(
 function filterInitiativeMonsters<T extends { hpCurrent: number; stats: unknown }>(
   rows: T[],
 ): T[] {
-  return rows.filter(
-    (m) => m.hpCurrent > 0 && !isMonsterKilled({ stats: m.stats as MonsterStatsJson | undefined }),
+  return rows.filter((m) =>
+    isMonsterEligibleForInitiative({
+      hpCurrent: m.hpCurrent,
+      stats: m.stats as MonsterStatsJson | undefined,
+    }),
   );
 }
 
@@ -411,12 +425,24 @@ export async function deleteGameMonster(
   return { initiative };
 }
 
-/** Ensure a single shared monster initiative entry exists and is labeled correctly. */
+/** Ensure monster initiative entries match current game settings and in-play monsters. */
 export async function syncMonsterGroupInitiative(
   gameId: string,
 ): Promise<GameInitiativeState | null> {
   const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
+  const gameSettings = parseGameSettings(game.settings);
   const state = parseGameInitiative(game.settings);
+
+  if (gameSettings.sharedMonsterInitiative) {
+    return syncSharedMonsterGroupInitiative(gameId, state);
+  }
+  return syncIndividualMonsterInitiative(gameId, state);
+}
+
+async function syncSharedMonsterGroupInitiative(
+  gameId: string,
+  state: GameInitiativeState | null,
+): Promise<GameInitiativeState | null> {
   const livingRows = await prisma.gameMonster.findMany({
     where: { gameId, hpCurrent: { gt: 0 } },
     select: { initMod: true, stats: true, hpCurrent: true },
@@ -426,7 +452,12 @@ export async function syncMonsterGroupInitiative(
 
   if (living === 0) {
     if (!state?.active) return null;
-    const order = state.order.filter((e) => e.entryId !== monsterGroupEntryId(gameId));
+    const order = state.order.filter(
+      (e) =>
+        e.entryId !== monsterGroupEntryId(gameId) &&
+        e.kind !== 'monster' &&
+        e.kind !== 'monster_group',
+    );
     const next: GameInitiativeState = {
       ...state,
       order,
@@ -450,7 +481,7 @@ export async function syncMonsterGroupInitiative(
     order = order.map((e, i) =>
       i === existingIdx ? { ...e, name: label, modifier: bestMod } : e,
     );
-  } else {
+  } else if (state?.active) {
     const rolled = rollInitiativeForMod(bestMod);
     const entry: InitiativeEntry = {
       entryId,
@@ -461,6 +492,8 @@ export async function syncMonsterGroupInitiative(
       modifier: rolled.modifier,
     };
     order = sortInitiativeEntries([...order, entry]);
+  } else {
+    return null;
   }
 
   const next: GameInitiativeState = {
@@ -473,9 +506,100 @@ export async function syncMonsterGroupInitiative(
   return next;
 }
 
+async function syncIndividualMonsterInitiative(
+  gameId: string,
+  state: GameInitiativeState | null,
+): Promise<GameInitiativeState | null> {
+  if (!state?.active) return null;
+
+  const livingRows = await prisma.gameMonster.findMany({
+    where: { gameId, hpCurrent: { gt: 0 } },
+    select: { id: true, name: true, initMod: true, stats: true, hpCurrent: true },
+  });
+  const eligible = filterInitiativeMonsters(livingRows);
+  const eligibleIds = new Set(eligible.map((m) => m.id));
+
+  let order = state.order.filter((e) => {
+    if (e.entryId === monsterGroupEntryId(gameId) || e.kind === 'monster_group') {
+      return false;
+    }
+    if (e.kind === 'monster' && e.monsterId) {
+      return eligibleIds.has(e.monsterId);
+    }
+    return true;
+  });
+
+  const existingMonsterIds = new Set(
+    order
+      .filter((e) => e.kind === 'monster' && e.monsterId)
+      .map((e) => e.monsterId!),
+  );
+
+  const newEntries: InitiativeEntry[] = [];
+  for (const m of eligible) {
+    if (existingMonsterIds.has(m.id)) continue;
+    const rolled = rollInitiativeForMod(m.initMod);
+    newEntries.push({
+      entryId: m.id,
+      kind: 'monster',
+      monsterId: m.id,
+      name: m.name,
+      initiative: rolled.initiative,
+      d20Roll: rolled.d20Roll,
+      modifier: rolled.modifier,
+    });
+  }
+
+  if (newEntries.length > 0) {
+    order = sortInitiativeEntries([...order, ...newEntries]);
+  }
+
+  order = order.map((e) => {
+    if (e.kind === 'monster' && e.monsterId) {
+      const m = eligible.find((row) => row.id === e.monsterId);
+      if (m) return { ...e, name: m.name, modifier: m.initMod };
+    }
+    return e;
+  });
+
+  const next: GameInitiativeState = {
+    ...state,
+    order,
+    active: order.length > 0,
+    turnIndex: Math.min(state.turnIndex, Math.max(0, order.length - 1)),
+  };
+  await saveInitiative(gameId, next.active ? next : null);
+  return next.active ? next : null;
+}
+
+async function buildIndividualMonsterInitiativeEntries(
+  gameId: string,
+): Promise<InitiativeEntry[]> {
+  const rows = await prisma.gameMonster.findMany({
+    where: { gameId, hpCurrent: { gt: 0 } },
+    select: { id: true, name: true, initMod: true, stats: true, hpCurrent: true },
+  });
+  const eligible = filterInitiativeMonsters(rows);
+  return eligible.map((m) => {
+    const rolled = rollInitiativeForMod(m.initMod);
+    return {
+      entryId: m.id,
+      kind: 'monster' as const,
+      monsterId: m.id,
+      name: m.name,
+      initiative: rolled.initiative,
+      d20Roll: rolled.d20Roll,
+      modifier: rolled.modifier,
+    };
+  });
+}
+
 export async function buildMonsterGroupInitiativeEntry(
   gameId: string,
 ): Promise<InitiativeEntry | null> {
+  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
+  if (!parseGameSettings(game.settings).sharedMonsterInitiative) return null;
+
   const livingRows = await prisma.gameMonster.findMany({
     where: { gameId, hpCurrent: { gt: 0 } },
     select: { initMod: true, stats: true, hpCurrent: true },
@@ -496,6 +620,17 @@ export async function buildMonsterGroupInitiativeEntry(
   };
 }
 
+export async function buildMonsterInitiativeEntriesForStart(
+  gameId: string,
+): Promise<InitiativeEntry[]> {
+  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
+  if (parseGameSettings(game.settings).sharedMonsterInitiative) {
+    const entry = await buildMonsterGroupInitiativeEntry(gameId);
+    return entry ? [entry] : [];
+  }
+  return buildIndividualMonsterInitiativeEntries(gameId);
+}
+
 /** @deprecated Use syncMonsterGroupInitiative */
 export async function addMonstersToInitiative(
   gameId: string,
@@ -504,10 +639,9 @@ export async function addMonstersToInitiative(
   return syncMonsterGroupInitiative(gameId);
 }
 
-/** @deprecated */
+/** @deprecated Use buildMonsterInitiativeEntriesForStart */
 export async function buildMonsterInitiativeEntries(
   gameId: string,
 ): Promise<InitiativeEntry[]> {
-  const entry = await buildMonsterGroupInitiativeEntry(gameId);
-  return entry ? [entry] : [];
+  return buildMonsterInitiativeEntriesForStart(gameId);
 }

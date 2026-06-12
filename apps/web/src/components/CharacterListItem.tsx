@@ -17,6 +17,7 @@ import {
   formatCharacterVitalityBadge,
   isActiveInPlay,
   isMonsterActive,
+  isMonsterInPlay,
   isMonsterKilled,
   listLightSourceOptions,
   parseAttackOutcome,
@@ -62,6 +63,10 @@ interface CharacterListItemProps {
   canEditConsumables?: boolean;
   canToggleInPlay?: boolean;
   onToggleInPlay?: (active: boolean) => void;
+  mapTokenVisible?: boolean;
+  canToggleMapToken?: boolean;
+  mapTokenBusy?: boolean;
+  onToggleMapToken?: (visible: boolean) => void;
   initiative?: GameInitiativeState | null;
   initiativeActive?: boolean;
   isInitiativeTurn?: boolean;
@@ -94,7 +99,7 @@ export function buildCombatTargetOptions(
 ): CombatTargetOption[] {
   const out: CombatTargetOption[] = [];
   for (const m of monsters) {
-    if (isMonsterKilled(m) || !isMonsterActive(m)) continue;
+    if (isMonsterKilled(m) || !isMonsterActive(m) || !isMonsterInPlay(m)) continue;
     out.push({
       type: 'monster',
       id: m.id,
@@ -128,6 +133,10 @@ export function CharacterListItem({
   canEditConsumables,
   canToggleInPlay,
   onToggleInPlay,
+  mapTokenVisible = false,
+  canToggleMapToken = false,
+  mapTokenBusy = false,
+  onToggleMapToken,
   initiative,
   initiativeActive,
   isInitiativeTurn,
@@ -305,6 +314,24 @@ export function CharacterListItem({
             </Typography>
           }
         />
+        {canToggleMapToken && (
+          <FormControlLabel
+            sx={{ ml: 0, alignItems: 'center', display: 'flex' }}
+            control={
+              <Checkbox
+                size="small"
+                checked={mapTokenVisible}
+                disabled={mapTokenBusy || consumableAdjusting || hpAdjusting}
+                onChange={(e) => onToggleMapToken?.(e.target.checked)}
+              />
+            }
+            label={
+              <Typography variant="caption" color="text.secondary">
+                Show on map
+              </Typography>
+            }
+          />
+        )}
         {showTurnHighlight && (
           <Typography
             variant="caption"

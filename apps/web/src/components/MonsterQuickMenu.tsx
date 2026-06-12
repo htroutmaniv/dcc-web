@@ -2,7 +2,10 @@ import { useMemo } from 'react';
 import {
   Box,
   Button,
+  Checkbox,
+  CircularProgress,
   FormControl,
+  FormControlLabel,
   IconButton,
   InputLabel,
   Link,
@@ -17,27 +20,34 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import {
   formatMonsterSummary,
   getTargetAc,
-  isActiveInPlay,
   isMonsterActive,
+  isMonsterInPlay,
   isMonsterKilled,
   type GameInitiativeState,
   type GameMonsterInstance,
 } from '@dcc-web/shared';
 import type { Character } from '../types/game';
 
+export type MonsterCombatRollKind = 'toHit' | 'damage';
+
 interface MonsterQuickMenuProps {
   monsters: GameMonsterInstance[];
   characters: Character[];
   initiative: GameInitiativeState | null;
+  sharedMonsterInitiative?: boolean;
   monsterTargetById: Record<string, string>;
   sheetMonsterId?: string | null;
   onMonsterTargetChange: (monsterId: string, characterId: string | null) => void;
   onPatchHp: (monster: GameMonsterInstance, hpCurrent: number) => void;
   onKillMonster: (monster: GameMonsterInstance) => void;
   onDeleteMonster: (monsterId: string) => void;
+  onToggleInPlay: (monster: GameMonsterInstance, active: boolean) => void;
+  onCombatRoll: (monster: GameMonsterInstance, kind: MonsterCombatRollKind) => void;
   onRollAttack: (monster: GameMonsterInstance, target: Character) => void;
   onOpenSheet: (monsterId: string) => void;
   busy?: boolean;
+  rollingMonsterId?: string | null;
+  rollingMonsterKind?: MonsterCombatRollKind | null;
   lastAttackSummary?: string | null;
 }
 
@@ -45,29 +55,33 @@ export function MonsterQuickMenu({
   monsters,
   characters,
   initiative,
+  sharedMonsterInitiative = false,
   monsterTargetById,
   sheetMonsterId,
   onMonsterTargetChange,
   onPatchHp,
   onKillMonster,
   onDeleteMonster,
+  onToggleInPlay,
+  onCombatRoll,
   onRollAttack,
   onOpenSheet,
   busy,
+  rollingMonsterId,
+  rollingMonsterKind,
   lastAttackSummary,
 }: MonsterQuickMenuProps) {
-  const activeMonsters = useMemo(() => monsters.filter((m) => !isMonsterKilled(m)), [monsters]);
+  const livingMonsters = useMemo(
+    () => monsters.filter((m) => !isMonsterKilled(m)),
+    [monsters],
+  );
+  const inPlayMonsters = useMemo(
+    () => livingMonsters.filter((m) => isMonsterInPlay(m)),
+    [livingMonsters],
+  );
   const slainMonsters = useMemo(() => monsters.filter((m) => isMonsterKilled(m)), [monsters]);
   const targets = useMemo(
-    () =>
-      characters.filter(
-        (c) =>
-          c.status === 'alive' &&
-          isActiveInPlay({
-            status: c.status,
-            stats: { custom: c.stats?.custom as Record<string, unknown> | undefined },
-          }),
-      ),
+    () => characters.filter((c) => c.status === 'alive'),
     [characters],
   );
 
@@ -85,13 +99,16 @@ export function MonsterQuickMenu({
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0, flex: 1 }}>
       <Typography variant="caption" color="text.secondary" fontWeight={700}>
-        Monsters ({activeMonsters.length} active
+        Monsters ({inPlayMonsters.length} in play
+        {livingMonsters.length > inPlayMonsters.length
+          ? `, ${livingMonsters.length - inPlayMonsters.length} queued`
+          : ''}
         {slainMonsters.length > 0 ? `, ${slainMonsters.length} slain` : ''})
       </Typography>
 
-      {initiative?.active && (
+      {initiative?.active && sharedMonsterInitiative && inPlayMonsters.length > 0 && (
         <Typography variant="caption" color="warning.main">
-          Shared monster initiative
+          Shared monster initiative active
         </Typography>
       )}
 
@@ -111,18 +128,20 @@ export function MonsterQuickMenu({
           borderRadius: 1,
         }}
       >
-        {activeMonsters.length === 0 && slainMonsters.length === 0 ? (
+        {livingMonsters.length === 0 && slainMonsters.length === 0 ? (
           <Typography variant="caption" color="text.secondary" sx={{ p: 1, display: 'block' }}>
-            No monsters in play
+            No monsters spawned yet
           </Typography>
         ) : (
           <>
-            {activeMonsters.map((m) => {
+            {livingMonsters.map((m) => {
               const targetId = monsterTargetById[m.id] ?? '';
               const target = targets.find((c) => c.id === targetId);
               const primaryAttack = m.sheet?.attacks[0];
               const sheetOpen = sheetMonsterId === m.id;
               const canFight = isMonsterActive(m);
+              const inPlay = isMonsterInPlay(m);
+              const isRolling = rollingMonsterId === m.id;
 
               return (
                 <Box
@@ -130,6 +149,7 @@ export function MonsterQuickMenu({
                   sx={{
                     px: 1,
                     py: 0.75,
+                    opacity: inPlay ? 1 : 0.72,
                     bgcolor: sheetOpen ? 'action.selected' : 'transparent',
                     borderBottom: 1,
                     borderColor: 'divider',
@@ -184,7 +204,24 @@ export function MonsterQuickMenu({
                     </Stack>
                   </Stack>
 
-                  <Stack direction="row" spacing={0.25} alignItems="center" sx={{ mt: 0.5 }}>
+                  <FormControlLabel
+                    sx={{ mt: 0.25, ml: 0 }}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={inPlay}
+                        onChange={(e) => onToggleInPlay(m, e.target.checked)}
+                        disabled={busy}
+                      />
+                    }
+                    label={
+                      <Typography variant="caption" color="text.secondary">
+                        In play
+                      </Typography>
+                    }
+                  />
+
+                  <Stack direction="row" spacing={0.25} alignItems="center" sx={{ mt: 0.25 }}>
                     <Button
                       size="small"
                       sx={{ minWidth: 24, px: 0.25, py: 0 }}
@@ -212,11 +249,29 @@ export function MonsterQuickMenu({
                     </Button>
                   </Stack>
 
-                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }}>
+                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }} flexWrap="wrap">
+                    {(['toHit', 'damage'] as const).map((kind) => (
+                      <Button
+                        key={kind}
+                        size="small"
+                        variant="outlined"
+                        disabled={busy || !canFight || !inPlay || isRolling}
+                        onClick={() => onCombatRoll(m, kind)}
+                        sx={{ minWidth: 0, px: 0.75, fontSize: '0.7rem' }}
+                      >
+                        {isRolling && rollingMonsterKind === kind ? (
+                          <CircularProgress size={14} color="inherit" />
+                        ) : kind === 'toHit' ? (
+                          'Hit'
+                        ) : (
+                          'Dmg'
+                        )}
+                      </Button>
+                    ))}
                     <FormControl
                       size="small"
-                      sx={{ flex: 1, minWidth: 0 }}
-                      disabled={targets.length === 0 || !canFight}
+                      sx={{ flex: 1, minWidth: 100 }}
+                      disabled={targets.length === 0 || !canFight || !inPlay}
                     >
                       <InputLabel id={`tgt-${m.id}`} sx={{ fontSize: '0.75rem' }}>
                         Target
@@ -242,7 +297,7 @@ export function MonsterQuickMenu({
                     <IconButton
                       size="small"
                       onClick={() => pickRandomTarget(m.id)}
-                      disabled={busy || targets.length === 0 || !canFight}
+                      disabled={busy || targets.length === 0 || !canFight || !inPlay}
                       title="Random target"
                     >
                       <ShuffleIcon fontSize="small" />
@@ -251,7 +306,7 @@ export function MonsterQuickMenu({
                       size="small"
                       variant="contained"
                       color="secondary"
-                      disabled={busy || !target || !canFight}
+                      disabled={busy || !target || !canFight || !inPlay || isRolling}
                       onClick={() => target && onRollAttack(m, target)}
                       sx={{ minWidth: 0, px: 0.75, fontSize: '0.7rem' }}
                       startIcon={<CasinoIcon sx={{ fontSize: 14 }} />}
@@ -260,7 +315,7 @@ export function MonsterQuickMenu({
                     </Button>
                   </Stack>
 
-                  {primaryAttack && target && canFight && (
+                  {primaryAttack && target && canFight && inPlay && (
                     <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.25 }}>
                       +{primaryAttack.attackBonus} vs AC {getTargetAc(target.combat)} · {primaryAttack.damage}
                     </Typography>

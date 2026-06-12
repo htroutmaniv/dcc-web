@@ -255,6 +255,8 @@ export const layoutMapTokensSchema = z.object({
 
 export const patchGameSettingsSchema = z.object({
   monstersVisibleOnMap: z.boolean().optional(),
+  sharedMonsterInitiative: z.boolean().optional(),
+  hideMonsterAcInRollLog: z.boolean().optional(),
 });
 
 export const transferInventoryItemSchema = z.object({

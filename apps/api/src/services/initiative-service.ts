@@ -15,7 +15,7 @@ import {
 } from '@dcc-web/shared';
 import { secureRandomInt } from '../lib/rng.js';
 import { prisma } from '../lib/prisma.js';
-import { buildMonsterGroupInitiativeEntry } from './monster-service.js';
+import { buildMonsterInitiativeEntriesForStart } from './monster-service.js';
 import { tickDyingCharactersForNewRound } from './character-combat.js';
 
 function mergeSettings(
@@ -124,11 +124,8 @@ export async function startGameInitiative(gameId: string): Promise<GameInitiativ
     });
   }
 
-  const monsterGroup = await buildMonsterGroupInitiativeEntry(gameId);
-  const order = sortInitiativeEntries([
-    ...entries,
-    ...(monsterGroup ? [monsterGroup] : []),
-  ]);
+  const monsterEntries = await buildMonsterInitiativeEntriesForStart(gameId);
+  const order = sortInitiativeEntries([...entries, ...monsterEntries]);
   const state: GameInitiativeState = {
     active: order.length > 0,
     round: 1,

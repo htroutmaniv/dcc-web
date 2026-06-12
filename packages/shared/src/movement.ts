@@ -20,6 +20,14 @@ export function parseGameSettings(settings: unknown): GameSettings {
       typeof s.monstersVisibleOnMap === 'boolean'
         ? s.monstersVisibleOnMap
         : DEFAULT_GAME_SETTINGS.monstersVisibleOnMap,
+    sharedMonsterInitiative:
+      typeof s.sharedMonsterInitiative === 'boolean'
+        ? s.sharedMonsterInitiative
+        : DEFAULT_GAME_SETTINGS.sharedMonsterInitiative,
+    hideMonsterAcInRollLog:
+      typeof s.hideMonsterAcInRollLog === 'boolean'
+        ? s.hideMonsterAcInRollLog
+        : DEFAULT_GAME_SETTINGS.hideMonsterAcInRollLog,
   };
 }
 

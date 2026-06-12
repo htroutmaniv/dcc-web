@@ -1,5 +1,10 @@
-import { createGameSchema, parseGameSettings, patchGameSettingsSchema } from '@dcc-web/shared';
+import {
+  createGameSchema,
+  parseGameSettings,
+  patchGameSettingsSchema,
+} from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
+import { syncMonsterGroupInitiative } from '../services/monster-service.js';
 import { assertGameMember, generateInviteCode, isGameDm } from '../lib/game-access.js';
 import { emitToGame, emitToUsers } from '../lib/game-socket.js';
 import { prisma } from '../lib/prisma.js';
@@ -148,6 +153,13 @@ export async function gameRoutes(app: FastifyInstance) {
       where: { id: gameId },
       data: { settings: settings as object },
     });
+    if (parsed.data.sharedMonsterInitiative !== undefined) {
+      const initiative = await syncMonsterGroupInitiative(gameId);
+      emitToGame(app.io, gameId, 'initiative:updated', {
+        initiative,
+        actorUserId: request.userId,
+      });
+    }
     emitToGame(app.io, gameId, 'game:settings_updated', {
       settings,
       actorUserId: request.userId,

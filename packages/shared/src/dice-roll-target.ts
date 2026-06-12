@@ -33,3 +33,8 @@ export function parseAttackOutcome(reason?: string | null): 'hit' | 'miss' | nul
 export function formatAttackOutcomeLabel(outcome: 'hit' | 'miss'): string {
   return outcome === 'hit' ? 'HIT' : 'MISS';
 }
+
+/** Remove `(AC N)` from roll log display text (monster targets only). */
+export function stripMonsterAcFromDisplay(text: string): string {
+  return text.replace(/\s*\(AC\s+\d+\)/i, '');
+}

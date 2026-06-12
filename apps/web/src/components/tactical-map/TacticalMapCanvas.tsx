@@ -38,6 +38,7 @@ import { MapViewportControls } from './MapViewportControls';
 const TOKEN_RADIUS_FACTOR = 0.285;
 /** Keep chips clear of the zoom/fit controls in the canvas upper-right. */
 const LAYOUT_INSET_RIGHT_PX = 130;
+const LAYOUT_INSET_LEFT_PX = 12;
 const LAYOUT_INSET_TOP_PX = 52;
 
 export type TacticalMapCanvasHandle = {
@@ -57,6 +58,7 @@ interface TacticalMapCanvasProps {
   canDragToken?: (token: TacticalMapToken) => boolean;
   onTokenClick?: (token: TacticalMapToken) => void;
   canLootToken?: (token: TacticalMapToken) => boolean;
+  isTokenInitiativeActive?: (token: TacticalMapToken) => boolean;
 }
 
 function useMapImage(url: string | null) {
@@ -153,6 +155,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
       canDragToken,
       onTokenClick,
       canLootToken,
+      isTokenInitiativeActive,
     },
     ref,
   ) {
@@ -301,6 +304,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
             scale: sc,
             cellPx: cell,
             insetRightPx: LAYOUT_INSET_RIGHT_PX,
+            insetLeftPx: LAYOUT_INSET_LEFT_PX,
             insetTopPx: LAYOUT_INSET_TOP_PX,
           });
         },
@@ -603,19 +607,25 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
                 listening={!drawing}
               />
 
-              {visibleTokens.map((t) => (
-                <MapTokenChip
-                  key={t.id}
-                  token={t}
-                  cell={cell}
-                  draggable={!t.isDead && (canDragToken ? canDragToken(t) : isDm)}
-                  lootable={canLootToken?.(t) ?? false}
-                  mapGroupRef={mapGroupRef}
-                  allowMapPan={!drawing}
-                  onMove={(x, y) => onTokenMove(t.id, x, y)}
-                  onClick={onTokenClick ? () => onTokenClick(t) : undefined}
-                />
-              ))}
+              {visibleTokens.map((t) => {
+                const clickable = canLootToken?.(t) ?? false;
+                const draggable =
+                  (canDragToken ? canDragToken(t) : isDm) && (!t.isDead || isDm);
+                return (
+                  <MapTokenChip
+                    key={t.id}
+                    token={t}
+                    cell={cell}
+                    draggable={draggable}
+                    clickable={clickable}
+                    isActiveTurn={isTokenInitiativeActive?.(t) ?? false}
+                    mapGroupRef={mapGroupRef}
+                    allowMapPan={!drawing}
+                    onMove={(x, y) => onTokenMove(t.id, x, y)}
+                    onClick={clickable && onTokenClick ? () => onTokenClick(t) : undefined}
+                  />
+                );
+              })}
             </Group>
           </Layer>
         </Stage>
@@ -635,7 +645,8 @@ function MapTokenChip({
   token,
   cell,
   draggable,
-  lootable,
+  clickable,
+  isActiveTurn,
   mapGroupRef,
   allowMapPan,
   onMove,
@@ -644,7 +655,8 @@ function MapTokenChip({
   token: TacticalMapToken;
   cell: number;
   draggable: boolean;
-  lootable: boolean;
+  clickable: boolean;
+  isActiveTurn: boolean;
   mapGroupRef: React.RefObject<Konva.Group | null>;
   allowMapPan: boolean;
   onMove: (x: number, y: number) => void;
@@ -655,6 +667,7 @@ function MapTokenChip({
   const draggingRef = useRef(false);
   const isDead = Boolean(token.isDead);
   const displayLabel = isDead ? `${token.label} (dead)` : token.label;
+  const activeStroke = '#c9a227';
 
   useEffect(() => {
     if (draggingRef.current) return;
@@ -666,12 +679,12 @@ function MapTokenChip({
       ref={groupRef}
       draggable={draggable}
       onClick={(e) => {
-        if (!lootable || !onClick) return;
+        if (!clickable || !onClick) return;
         e.cancelBubble = true;
         onClick();
       }}
       onTap={(e) => {
-        if (!lootable || !onClick) return;
+        if (!clickable || !onClick) return;
         e.cancelBubble = true;
         onClick();
       }}
@@ -692,16 +705,44 @@ function MapTokenChip({
         onMove(nx, ny);
       }}
     >
+      {isActiveTurn && (
+        <>
+          <Circle
+            x={0}
+            y={0}
+            radius={r + 7}
+            stroke="rgba(201, 162, 39, 0.4)"
+            strokeWidth={3}
+            listening={false}
+          />
+          <Circle
+            x={0}
+            y={0}
+            radius={r + 3}
+            stroke={activeStroke}
+            strokeWidth={3}
+            listening={false}
+          />
+        </>
+      )}
       <Circle
         x={0}
         y={0}
         radius={r}
         fill={isDead ? '#4a4a4a' : token.color}
         opacity={isDead ? 0.65 : 1}
-        stroke={isDead ? '#888' : token.kind === 'monster' ? '#3a1010' : '#1a1510'}
-        strokeWidth={2}
+        stroke={
+          isActiveTurn
+            ? activeStroke
+            : isDead
+              ? '#888'
+              : token.kind === 'monster'
+                ? '#3a1010'
+                : '#1a1510'
+        }
+        strokeWidth={isActiveTurn ? 3 : 2}
         dash={isDead ? [4, 3] : undefined}
-        listening={lootable || draggable}
+        listening={clickable || draggable}
       />
       {isDead && (
         <>

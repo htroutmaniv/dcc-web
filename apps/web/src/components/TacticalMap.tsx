@@ -36,14 +36,17 @@ interface TacticalMapProps {
   onUploadImage: (file: File, gridW?: number, gridH?: number) => void;
   onRemoveImage: () => void;
   onRenameMap: (name: string) => void;
-  onLayoutTokens: (anchor?: MapLayoutAnchor) => void;
+  onResetPlayerTokens: (anchor?: MapLayoutAnchor) => void;
+  onResetMonsterTokens: (anchor?: MapLayoutAnchor) => void;
   onClearDrawings: () => void;
   onDrawingsChange: (drawings: TacticalGameMap['dmDrawings']) => void;
   onTokenMove: (tokenId: string, x: number, y: number) => void;
   canDragToken?: (token: TacticalGameMap['tokens'][number]) => boolean;
   onTokenClick?: (token: TacticalGameMap['tokens'][number]) => void;
   canLootToken?: (token: TacticalGameMap['tokens'][number]) => boolean;
+  isTokenInitiativeActive?: (token: TacticalGameMap['tokens'][number]) => boolean;
   rollLog?: DiceRollLogEntry[];
+  hideMonsterAcInRollLog?: boolean;
   onClearRollLog?: () => void;
   onApplyDamageFromRoll?: (roll: DiceRollLogEntry) => void;
 }
@@ -74,14 +77,17 @@ export function TacticalMap({
   onUploadImage,
   onRemoveImage,
   onRenameMap,
-  onLayoutTokens,
+  onResetPlayerTokens,
+  onResetMonsterTokens,
   onClearDrawings,
   onDrawingsChange,
   onTokenMove,
   canDragToken,
   onTokenClick,
   canLootToken,
+  isTokenInitiativeActive,
   rollLog = [],
+  hideMonsterAcInRollLog = false,
   onClearRollLog,
   onApplyDamageFromRoll,
 }: TacticalMapProps) {
@@ -137,9 +143,13 @@ export function TacticalMap({
           }}
           onRemoveImage={onRemoveImage}
           onRenameMap={onRenameMap}
-          onLayoutTokens={() => {
+          onResetPlayerTokens={() => {
             const anchor = canvasRef.current?.getLayoutAnchor();
-            if (anchor) onLayoutTokens(anchor);
+            onResetPlayerTokens(anchor);
+          }}
+          onResetMonsterTokens={() => {
+            const anchor = canvasRef.current?.getLayoutAnchor();
+            onResetMonsterTokens(anchor);
           }}
           onClearDrawings={onClearDrawings}
         />
@@ -182,6 +192,7 @@ export function TacticalMap({
           canDragToken={canDragToken}
           onTokenClick={onTokenClick}
           canLootToken={canLootToken}
+          isTokenInitiativeActive={isTokenInitiativeActive}
         />
       ) : (
         <Box
@@ -203,6 +214,7 @@ export function TacticalMap({
         containerRef={mapRef}
         rolls={rollLog}
         isDm={isDm}
+        hideMonsterAcInRollLog={hideMonsterAcInRollLog}
         onClear={onClearRollLog}
         onApplyDamage={isDm ? onApplyDamageFromRoll : undefined}
       />

@@ -353,6 +353,15 @@ export async function characterRoutes(app: FastifyInstance) {
         emitToGame(request.server.io, existing.gameId, 'map:updated', {
           actorUserId: request.userId,
         });
+      } else if (
+        statusChange === 'dead' ||
+        statusChange === 'alive' ||
+        hpMarkDead
+      ) {
+        await syncActiveMapTokens(existing.gameId);
+        emitToGame(request.server.io, existing.gameId, 'map:updated', {
+          actorUserId: request.userId,
+        });
       }
       if (statusChange === 'dead' || hpMarkDead) {
         const initiative = await reconcileInitiativeAfterCharacterDeath(existing.gameId);

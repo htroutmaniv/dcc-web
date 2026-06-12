@@ -62,11 +62,14 @@ export interface MapViewLayoutInput {
   cellPx: number;
   /** Screen pixels to keep clear at the top-right (e.g. zoom controls). */
   insetRightPx?: number;
+  /** Screen pixels to keep clear at the top-left. */
+  insetLeftPx?: number;
   insetTopPx?: number;
 }
 
 export interface MapLayoutAnchor {
   anchorRightCol: number;
+  anchorLeftCol: number;
   anchorTopRow: number;
   visibleLeft: number;
   visibleTop: number;
@@ -91,6 +94,8 @@ export function computeLayoutAnchorFromView(view: MapViewLayoutInput): MapLayout
   const rect = computeVisibleGridRect(view);
   const insetRight =
     (view.insetRightPx ?? 0) / Math.max(view.scale, Number.EPSILON) / view.cellPx;
+  const insetLeft =
+    (view.insetLeftPx ?? 0) / Math.max(view.scale, Number.EPSILON) / view.cellPx;
   const insetTop =
     (view.insetTopPx ?? 0) / Math.max(view.scale, Number.EPSILON) / view.cellPx;
 
@@ -100,12 +105,14 @@ export function computeLayoutAnchorFromView(view: MapViewLayoutInput): MapLayout
     visibleRight: rect.right,
     visibleBottom: rect.bottom,
     anchorRightCol: rect.right - insetRight - LAYOUT_MARGIN_CELLS,
+    anchorLeftCol: rect.left + insetLeft + LAYOUT_MARGIN_CELLS,
     anchorTopRow: rect.top + insetTop + LAYOUT_MARGIN_CELLS,
   };
 }
 
 export interface TokenGridLayoutOptions {
   anchorRightCol?: number;
+  anchorLeftCol?: number;
   anchorTopRow?: number;
   visibleLeft?: number;
   visibleTop?: number;
@@ -140,6 +147,35 @@ function fitClusterToVisibleBounds(
   }
 
   return { rightCol, topRow };
+}
+
+function fitClusterToVisibleBoundsLeft(
+  count: number,
+  anchorLeftCol: number,
+  anchorTopRow: number,
+  bounds: VisibleGridRect,
+): { leftCol: number; topRow: number } {
+  const margin = LAYOUT_MARGIN_CELLS;
+  const colsInFirstRow = Math.min(count, LAYOUT_COLS_PER_ROW);
+  const rows = Math.ceil(count / LAYOUT_COLS_PER_ROW);
+  const clusterWidth =
+    colsInFirstRow > 1 ? (colsInFirstRow - 1) * LAYOUT_CELL_SPACING : 0;
+  const clusterHeight = rows > 1 ? (rows - 1) * LAYOUT_CELL_SPACING : 0;
+
+  let leftCol = Math.max(anchorLeftCol, bounds.left + margin);
+  let topRow = Math.max(anchorTopRow, bounds.top + margin);
+
+  const maxLeftCol = bounds.right - clusterWidth - margin;
+  if (leftCol > maxLeftCol) {
+    leftCol = Math.max(bounds.left + margin, maxLeftCol);
+  }
+
+  const maxTopRow = bounds.bottom - clusterHeight - margin;
+  if (topRow > maxTopRow) {
+    topRow = Math.max(bounds.top + margin, maxTopRow);
+  }
+
+  return { leftCol, topRow };
 }
 
 /** Place token centers in a grid anchored to the upper-right of the visible canvas. */
@@ -177,6 +213,47 @@ export function computeUpperRightTokenGrid(
     const row = Math.floor(i / LAYOUT_COLS_PER_ROW);
     positions.push({
       x: rightCol - col * LAYOUT_CELL_SPACING,
+      y: topRow + row * LAYOUT_CELL_SPACING,
+    });
+  }
+  return positions;
+}
+
+/** Place token centers in a grid anchored to the upper-left of the visible canvas. */
+export function computeUpperLeftTokenGrid(
+  count: number,
+  options?: TokenGridLayoutOptions,
+): { x: number; y: number }[] {
+  const fallbackLeftCol = LAYOUT_MARGIN_CELLS + 1;
+  const fallbackTopRow = LAYOUT_MARGIN_CELLS + 1;
+
+  let leftCol =
+    options?.anchorLeftCol != null ? options.anchorLeftCol : fallbackLeftCol;
+  let topRow = options?.anchorTopRow != null ? options.anchorTopRow : fallbackTopRow;
+
+  const hasBounds =
+    options?.visibleLeft != null &&
+    options?.visibleTop != null &&
+    options?.visibleRight != null &&
+    options?.visibleBottom != null;
+
+  if (hasBounds) {
+    const fitted = fitClusterToVisibleBoundsLeft(count, leftCol, topRow, {
+      left: options.visibleLeft!,
+      top: options.visibleTop!,
+      right: options.visibleRight!,
+      bottom: options.visibleBottom!,
+    });
+    leftCol = fitted.leftCol;
+    topRow = fitted.topRow;
+  }
+
+  const positions: { x: number; y: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    const col = i % LAYOUT_COLS_PER_ROW;
+    const row = Math.floor(i / LAYOUT_COLS_PER_ROW);
+    positions.push({
+      x: leftCol + col * LAYOUT_CELL_SPACING,
       y: topRow + row * LAYOUT_CELL_SPACING,
     });
   }

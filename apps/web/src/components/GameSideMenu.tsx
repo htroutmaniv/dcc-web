@@ -71,6 +71,9 @@ interface GameSideMenuProps {
   selectedCharacterId?: string | null;
   initiative?: GameInitiativeState | null;
   onToggleInPlay: (character: Character, active: boolean) => void;
+  hasCharacterMapToken?: (characterId: string) => boolean;
+  onToggleCharacterMapToken?: (character: Character, visible: boolean) => void;
+  mapTokenBusyId?: string | null;
   onEndTurn: (character: Character) => void;
   endTurnCharacterId?: string | null;
   currentUserId?: string;
@@ -116,6 +119,9 @@ export function GameSideMenu({
   selectedCharacterId,
   initiative,
   onToggleInPlay,
+  hasCharacterMapToken,
+  onToggleCharacterMapToken,
+  mapTokenBusyId,
   onEndTurn,
   endTurnCharacterId,
   currentUserId,
@@ -284,6 +290,12 @@ export function GameSideMenu({
                       canEditConsumables={canEditCharacter(c)}
                       canToggleInPlay={canEditCharacter(c)}
                       onToggleInPlay={(active) => onToggleInPlay(c, active)}
+                      mapTokenVisible={hasCharacterMapToken?.(c.id) ?? false}
+                      canToggleMapToken={isDm}
+                      mapTokenBusy={mapTokenBusyId === c.id}
+                      onToggleMapToken={(visible) =>
+                        onToggleCharacterMapToken?.(c, visible)
+                      }
                       initiative={initiative}
                       initiativeActive={initiativeActive}
                       isInitiativeTurn={isTurn}
@@ -340,6 +352,12 @@ export function GameSideMenu({
                       canEditConsumables={canEditCharacter(c)}
                       canToggleInPlay={canEditCharacter(c)}
                       onToggleInPlay={(active) => onToggleInPlay(c, active)}
+                      mapTokenVisible={hasCharacterMapToken?.(c.id) ?? false}
+                      canToggleMapToken={isDm}
+                      mapTokenBusy={mapTokenBusyId === c.id}
+                      onToggleMapToken={(visible) =>
+                        onToggleCharacterMapToken?.(c, visible)
+                      }
                       initiative={initiative}
                       initiativeActive={initiativeActive}
                       isInitiativeTurn={isTurn}

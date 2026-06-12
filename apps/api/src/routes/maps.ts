@@ -14,6 +14,8 @@ import { prisma } from '../lib/prisma.js';
 import {
   createGameMap,
   deleteGameMap,
+  deleteMapToken,
+  ensureCharacterMapToken,
   layoutMapTokens,
   listGameMaps,
   patchGameMap,
@@ -213,6 +215,24 @@ export async function mapRoutes(app: FastifyInstance) {
     },
   );
 
+  app.post(
+    '/games/:gameId/maps/:mapId/characters/:characterId/token',
+    { onRequest: [app.authenticate] },
+    async (request) => {
+      const { gameId, mapId, characterId } = request.params as {
+        gameId: string;
+        mapId: string;
+        characterId: string;
+      };
+      const access = await assertGameMember(request.userId!, gameId);
+      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
+      if (!access.isDm) throw app.httpErrors.forbidden('DM only');
+      const token = await ensureCharacterMapToken(gameId, mapId, characterId);
+      emitMapState(app, gameId, request.userId);
+      return { token };
+    },
+  );
+
   app.patch(
     '/tokens/:tokenId/move',
     { onRequest: [app.authenticate] },
@@ -261,6 +281,26 @@ export async function mapRoutes(app: FastifyInstance) {
       });
       emitToGame(app.io, gameId, 'map:token_moved', { token: updated });
       return { token: updated };
+    },
+  );
+
+  app.delete(
+    '/tokens/:tokenId',
+    { onRequest: [app.authenticate] },
+    async (request) => {
+      const { tokenId } = request.params as { tokenId: string };
+      const token = await prisma.mapToken.findUniqueOrThrow({
+        where: { id: tokenId },
+        include: { map: true },
+      });
+      const gameId = token.map.gameId;
+      const access = await assertGameMember(request.userId!, gameId);
+      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
+      if (!access.isDm) throw app.httpErrors.forbidden('DM only');
+
+      await deleteMapToken(tokenId, gameId);
+      emitMapState(app, gameId, request.userId);
+      return { ok: true, tokenId };
     },
   );
 

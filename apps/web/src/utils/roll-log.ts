@@ -1,6 +1,8 @@
 import {
   inferRollKind,
   parseAttackOutcome,
+  parseRollTargetFromReason,
+  stripMonsterAcFromDisplay,
   stripRollTargetTag,
   type DiceRollKind,
 } from '@dcc-web/shared';
@@ -17,7 +19,22 @@ export function characterRollKindToDiceKind(
   return 'unspecified';
 }
 
-export function formatRollLine(entry: DiceRollLogEntry): string {
+export type RollLineDisplay = {
+  prefix: string;
+  outcome: { text: string; kind: 'hit' | 'miss' } | null;
+  suffix: string;
+};
+
+export function formatRollLineDisplay(
+  entry: DiceRollLogEntry,
+  options?: { hideMonsterAc?: boolean; isDm?: boolean },
+): RollLineDisplay {
+  let label = stripRollTargetTag(entry.reason) || entry.notation;
+  const target = parseRollTargetFromReason(entry.reason);
+  if (options?.hideMonsterAc && !options.isDm && target?.type === 'monster') {
+    label = stripMonsterAcFromDisplay(label);
+  }
+
   const dice =
     entry.rolls.length > 0
       ? `[${entry.rolls.join(', ')}]`
@@ -26,11 +43,40 @@ export function formatRollLine(entry: DiceRollLogEntry): string {
     entry.modifier !== 0
       ? ` ${entry.modifier >= 0 ? '+' : ''}${entry.modifier}`
       : '';
-  const label = stripRollTargetTag(entry.reason) || entry.notation;
-  const outcome = entry.rollKind === 'attack' ? parseAttackOutcome(entry.reason) : null;
-  const outcomeLabel =
-    outcome === 'hit' ? ' · Success' : outcome === 'miss' ? ' · Failure' : '';
-  return `${label}${outcomeLabel} → ${entry.total} ${dice}${mod}`.trim();
+  const suffix = `→ ${entry.total} ${dice}${mod}`.trim();
+
+  const attackOutcome = entry.rollKind === 'attack' ? parseAttackOutcome(entry.reason) : null;
+  if (attackOutcome == null) {
+    return { prefix: label, outcome: null, suffix };
+  }
+
+  const outcomeSuffix = attackOutcome === 'hit' ? ' · Success' : ' · Failure';
+  const hitMissMatch = label.match(/^(.*?)(—\s*(HIT|MISS))\s*$/i);
+  if (hitMissMatch) {
+    return {
+      prefix: hitMissMatch[1]!.trim(),
+      outcome: {
+        text: `${hitMissMatch[2]!.trim()}${outcomeSuffix}`,
+        kind: attackOutcome,
+      },
+      suffix,
+    };
+  }
+
+  return {
+    prefix: label,
+    outcome: {
+      text: outcomeSuffix.trim(),
+      kind: attackOutcome,
+    },
+    suffix,
+  };
+}
+
+export function formatRollLine(entry: DiceRollLogEntry): string {
+  const { prefix, outcome, suffix } = formatRollLineDisplay(entry);
+  const outcomeText = outcome ? ` ${outcome.text}` : '';
+  return `${prefix}${outcomeText} ${suffix}`.replace(/\s+/g, ' ').trim();
 }
 
 export function parseRollLogEntry(raw: unknown): DiceRollLogEntry | null {

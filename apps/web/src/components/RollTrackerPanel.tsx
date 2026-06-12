@@ -17,7 +17,7 @@ import {
   type DiceRollKind,
 } from '@dcc-web/shared';
 import type { DiceRollLogEntry } from '../types/dice-roll-log';
-import { formatRollLine } from '../utils/roll-log';
+import { formatRollLineDisplay } from '../utils/roll-log';
 import {
   clampRollLogLayout,
   defaultRollLogLayout,
@@ -30,6 +30,7 @@ import {
 interface RollTrackerPanelProps {
   rolls: DiceRollLogEntry[];
   isDm?: boolean;
+  hideMonsterAcInRollLog?: boolean;
   gameId?: string;
   containerRef: RefObject<HTMLElement | null>;
   onClear?: () => void;
@@ -39,6 +40,7 @@ interface RollTrackerPanelProps {
 export function RollTrackerPanel({
   rolls,
   isDm,
+  hideMonsterAcInRollLog = false,
   gameId,
   containerRef,
   onClear,
@@ -247,6 +249,10 @@ export function RollTrackerPanel({
         ) : (
           rolls.map((entry) => {
             const color = rollKindTextColor(entry.rollKind);
+            const line = formatRollLineDisplay(entry, {
+              hideMonsterAc: hideMonsterAcInRollLog,
+              isDm,
+            });
             const clickable =
               isDm && entry.rollKind === 'damage' && onApplyDamage != null;
             const Row = clickable ? ListItemButton : ListItem;
@@ -300,7 +306,22 @@ export function RollTrackerPanel({
                       wordBreak: 'break-word',
                     }}
                   >
-                    {formatRollLine(entry)}
+                    {line.prefix}
+                    {line.outcome && (
+                      <>
+                        {' '}
+                        <Box
+                          component="span"
+                          sx={{
+                            fontWeight: 800,
+                            color: line.outcome.kind === 'hit' ? 'success.main' : color,
+                          }}
+                        >
+                          {line.outcome.text}
+                        </Box>
+                      </>
+                    )}{' '}
+                    {line.suffix}
                   </Typography>
                   {clickable && (
                     <Typography variant="caption" color="error.light" sx={{ opacity: 0.8 }}>

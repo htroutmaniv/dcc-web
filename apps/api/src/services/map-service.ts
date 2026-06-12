@@ -1,5 +1,8 @@
 import {
+  computeUpperLeftTokenGrid,
   computeUpperRightTokenGrid,
+  isCharacterMapTokenVisible,
+  isMonsterInPlay,
   isMonsterKilled,
   parseGameSettings,
   parseMapDrawings,
@@ -107,6 +110,13 @@ export async function deleteTokensForCharacter(characterId: string): Promise<voi
 
 export async function deleteTokensForMonster(monsterId: string): Promise<void> {
   await prisma.mapToken.deleteMany({ where: { monsterId } });
+}
+
+export async function deleteMapToken(tokenId: string, gameId: string): Promise<void> {
+  const token = await prisma.mapToken.findFirstOrThrow({
+    where: { id: tokenId, map: { gameId } },
+  });
+  await prisma.mapToken.delete({ where: { id: token.id } });
 }
 
 function toMapDto(
@@ -334,11 +344,48 @@ async function pruneOrphanMapTokens(
   }
 }
 
+export async function ensureCharacterMapToken(
+  gameId: string,
+  mapId: string,
+  characterId: string,
+): Promise<MapTokenDto> {
+  await prisma.gameMap.findFirstOrThrow({ where: { id: mapId, gameId } });
+  const character = await prisma.character.findFirstOrThrow({
+    where: { id: characterId, gameId },
+    select: { id: true, name: true, status: true },
+  });
+  if (character.status === 'archived') {
+    throw new Error('Cannot place archived character on the map');
+  }
+
+  const existing = await prisma.mapToken.findFirst({
+    where: { mapId, characterId },
+    include: mapTokenInclude,
+  });
+  if (existing) return toTokenDto(existing);
+
+  const pcCount = await prisma.mapToken.count({ where: { mapId, kind: 'pc' } });
+  const row = await prisma.mapToken.create({
+    data: {
+      mapId,
+      kind: 'pc',
+      characterId: character.id,
+      label: character.name,
+      x: 2 + pcCount,
+      y: 2,
+      zone: 'map',
+      color: PC_COLORS[pcCount % PC_COLORS.length]!,
+    },
+    include: mapTokenInclude,
+  });
+  return toTokenDto(row);
+}
+
 export async function syncMapTokens(gameId: string, mapId: string): Promise<GameMapDto> {
   await prisma.gameMap.findFirstOrThrow({ where: { id: mapId, gameId } });
   const allCharacters = await prisma.character.findMany({
     where: { gameId },
-    select: { id: true, status: true, name: true },
+    select: { id: true, status: true, name: true, stats: true },
     orderBy: { name: 'asc' },
   });
   const characters = allCharacters.filter((c) => c.status === 'alive');
@@ -346,20 +393,18 @@ export async function syncMapTokens(gameId: string, mapId: string): Promise<Game
     where: { gameId },
     orderBy: { sortOrder: 'asc' },
   });
-  const activeMonsters = monsters.filter(
-    (m) => !isMonsterKilled({ stats: m.stats as MonsterStatsJson | undefined }),
-  );
-  const slainMonsters = monsters.filter((m) =>
-    isMonsterKilled({ stats: m.stats as MonsterStatsJson | undefined }),
-  );
 
   const existing = await prisma.mapToken.findMany({ where: { mapId } });
   let pcIndex = 0;
 
   for (const c of characters) {
-    let token = existing.find((t) => t.characterId === c.id);
+    const token = existing.find((t) => t.characterId === c.id);
+    if (!isCharacterMapTokenVisible({ stats: c.stats as { custom?: Record<string, unknown> } })) {
+      if (token) await prisma.mapToken.delete({ where: { id: token.id } });
+      continue;
+    }
     if (!token) {
-      token = await prisma.mapToken.create({
+      const created = await prisma.mapToken.create({
         data: {
           mapId,
           kind: 'pc',
@@ -371,7 +416,7 @@ export async function syncMapTokens(gameId: string, mapId: string): Promise<Game
           color: PC_COLORS[pcIndex % PC_COLORS.length]!,
         },
       });
-      existing.push(token);
+      existing.push(created);
     } else if (token.label !== c.name) {
       await prisma.mapToken.update({
         where: { id: token.id },
@@ -381,38 +426,54 @@ export async function syncMapTokens(gameId: string, mapId: string): Promise<Game
     pcIndex += 1;
   }
 
-  let monsterIndex = 0;
-  for (const m of activeMonsters) {
-    let token = existing.find((t) => t.monsterId === m.id);
-    if (!token) {
-      token = await prisma.mapToken.create({
-        data: {
-          mapId,
-          kind: 'monster',
-          monsterId: m.id,
-          label: m.name,
-          x: 8 + monsterIndex,
-          y: 2,
-          zone: 'map',
-          color: '#8b2635',
-        },
-      });
-      existing.push(token);
-    } else {
-      const updates: Prisma.MapTokenUpdateInput = {};
-      if (token.label !== m.name) updates.label = m.name;
-      if (token.zone !== 'map') updates.zone = 'map';
-      if (Object.keys(updates).length > 0) {
-        await prisma.mapToken.update({ where: { id: token.id }, data: updates });
-      }
+  for (const c of allCharacters.filter((ch) => ch.status === 'dead')) {
+    const token = existing.find((t) => t.characterId === c.id);
+    const visible = isCharacterMapTokenVisible({
+      stats: c.stats as { custom?: Record<string, unknown> },
+    });
+    if (!visible) {
+      if (token) await prisma.mapToken.delete({ where: { id: token.id } });
+      continue;
     }
-    monsterIndex += 1;
+    if (token) {
+      if (token.label !== c.name) {
+        await prisma.mapToken.update({
+          where: { id: token.id },
+          data: { label: c.name },
+        });
+      }
+      continue;
+    }
+    const created = await prisma.mapToken.create({
+      data: {
+        mapId,
+        kind: 'pc',
+        characterId: c.id,
+        label: c.name,
+        x: 2 + pcIndex,
+        y: 2,
+        zone: 'map',
+        color: '#4a4a4a',
+      },
+    });
+    existing.push(created);
+    pcIndex += 1;
   }
 
-  for (const m of slainMonsters) {
-    let token = existing.find((t) => t.monsterId === m.id);
+  let monsterIndex = 0;
+  for (const m of monsters) {
+    const stats = m.stats as MonsterStatsJson | undefined;
+    const killed = isMonsterKilled({ stats });
+    const inPlay = isMonsterInPlay({ stats });
+    const token = existing.find((t) => t.monsterId === m.id);
+
+    if (!killed && !inPlay) {
+      if (token) await prisma.mapToken.delete({ where: { id: token.id } });
+      continue;
+    }
+
     if (!token) {
-      token = await prisma.mapToken.create({
+      const created = await prisma.mapToken.create({
         data: {
           mapId,
           kind: 'monster',
@@ -421,19 +482,21 @@ export async function syncMapTokens(gameId: string, mapId: string): Promise<Game
           x: 8 + monsterIndex,
           y: 2,
           zone: 'map',
-          color: '#4a4a4a',
+          color: killed ? '#4a4a4a' : '#8b2635',
         },
       });
-      existing.push(token);
+      existing.push(created);
       monsterIndex += 1;
-    } else {
-      const updates: Prisma.MapTokenUpdateInput = {};
-      if (token.label !== m.name) updates.label = m.name;
-      if (token.zone !== 'map') updates.zone = 'map';
-      if (Object.keys(updates).length > 0) {
-        await prisma.mapToken.update({ where: { id: token.id }, data: updates });
-      }
+      continue;
     }
+
+    const updates: Prisma.MapTokenUpdateInput = {};
+    if (token.label !== m.name) updates.label = m.name;
+    if (token.zone !== 'map') updates.zone = 'map';
+    if (Object.keys(updates).length > 0) {
+      await prisma.mapToken.update({ where: { id: token.id }, data: updates });
+    }
+    monsterIndex += 1;
   }
 
   await pruneOrphanMapTokens(mapId, gameId, allCharacters, monsters);
@@ -450,7 +513,9 @@ export async function layoutMapTokens(
   gameId: string,
   mapId: string,
   options?: {
+    kinds?: ('pc' | 'monster')[];
     anchorRightCol?: number;
+    anchorLeftCol?: number;
     anchorTopRow?: number;
     visibleLeft?: number;
     visibleTop?: number;
@@ -460,20 +525,41 @@ export async function layoutMapTokens(
 ): Promise<GameMapDto> {
   await prisma.gameMap.findFirstOrThrow({ where: { id: mapId, gameId } });
   await syncMapTokens(gameId, mapId);
-  const tokens = await prisma.mapToken.findMany({
-    where: { mapId, kind: { in: ['pc', 'monster'] }, zone: 'map' },
-    include: mapTokenInclude,
-    orderBy: [{ kind: 'asc' }, { sortOrder: 'asc' }, { label: 'asc' }],
-  });
-  const living = tokens.filter((t) => !isMapTokenDead(t));
-  const positions = computeUpperRightTokenGrid(living.length, options);
-  for (let i = 0; i < living.length; i++) {
-    const pos = positions[i]!;
-    await prisma.mapToken.update({
-      where: { id: living[i]!.id },
-      data: { x: pos.x, y: pos.y, zone: 'map' },
+  const kinds = options?.kinds ?? ['pc', 'monster'];
+
+  const layoutKind = async (kind: 'pc' | 'monster') => {
+    const tokens = await prisma.mapToken.findMany({
+      where: { mapId, kind, zone: 'map' },
+      include: mapTokenInclude,
+      orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
     });
+    const living = tokens.filter((t) => !isMapTokenDead(t));
+    const gridOptions = {
+      anchorRightCol: options?.anchorRightCol,
+      anchorLeftCol: options?.anchorLeftCol,
+      anchorTopRow: options?.anchorTopRow,
+      visibleLeft: options?.visibleLeft,
+      visibleTop: options?.visibleTop,
+      visibleRight: options?.visibleRight,
+      visibleBottom: options?.visibleBottom,
+    };
+    const positions =
+      kind === 'monster'
+        ? computeUpperLeftTokenGrid(living.length, gridOptions)
+        : computeUpperRightTokenGrid(living.length, gridOptions);
+    for (let i = 0; i < living.length; i++) {
+      const pos = positions[i]!;
+      await prisma.mapToken.update({
+        where: { id: living[i]!.id },
+        data: { x: pos.x, y: pos.y, zone: 'map' },
+      });
+    }
+  };
+
+  for (const kind of kinds) {
+    await layoutKind(kind);
   }
+
   return loadMapDto(mapId);
 }
 

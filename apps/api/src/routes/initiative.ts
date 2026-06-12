@@ -27,6 +27,8 @@ async function broadcastMortalityUpdates(
   for (const character of characters) {
     emitToGame(app.io, gameId, 'character:upsert', { character, actorUserId });
   }
+  await syncActiveMapTokens(gameId);
+  emitToGame(app.io, gameId, 'map:updated', { actorUserId });
 }
 
 function emitInitiativeUpdate(

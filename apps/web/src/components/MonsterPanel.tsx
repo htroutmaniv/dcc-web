@@ -19,7 +19,9 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import {
   buildMonsterKilledStats,
   formatMonsterSummary,
+  isMonsterInPlay,
   isMonsterKilled,
+  MONSTER_IN_PLAY_KEY,
   scaleMonsterStats,
   type GameInitiativeState,
   type GameMonsterInstance,
@@ -31,7 +33,6 @@ import { formatError } from '../utils/errors';
 interface MonsterPanelProps {
   gameId: string;
   monsters: GameMonsterInstance[];
-  initiative: GameInitiativeState | null;
   busy?: boolean;
   onMonstersChange: (monsters: GameMonsterInstance[]) => void;
   onInitiativeChange?: (initiative: GameInitiativeState | null) => void;
@@ -54,7 +55,6 @@ const DEFAULT_CUSTOM = {
 export function MonsterPanel({
   gameId,
   monsters,
-  initiative,
   busy,
   onMonstersChange,
   onInitiativeChange,
@@ -66,7 +66,6 @@ export function MonsterPanel({
   const [selectedCatalog, setSelectedCatalog] = useState<MonsterCatalogEntry | null>(null);
   const [scaleLevel, setScaleLevel] = useState(1);
   const [spawnCount, setSpawnCount] = useState(1);
-  const [addToInitiative, setAddToInitiative] = useState(true);
   const [custom, setCustom] = useState(DEFAULT_CUSTOM);
   const [spawning, setSpawning] = useState(false);
   const [localBusy, setLocalBusy] = useState(false);
@@ -125,13 +124,11 @@ export function MonsterPanel({
               catalogId: selectedCatalog.id,
               count: spawnCount,
               scaleLevel,
-              addToInitiative: Boolean(initiative?.active && addToInitiative),
             }
           : {
               custom,
               count: spawnCount,
               scaleLevel: 0,
-              addToInitiative: Boolean(initiative?.active && addToInitiative),
             };
 
       if (mode === 'catalog' && !selectedCatalog) {
@@ -219,15 +216,25 @@ export function MonsterPanel({
     }
   };
 
-  const addAllToInitiative = async () => {
+  const toggleInPlay = async (monster: GameMonsterInstance, active: boolean) => {
     setLocalBusy(true);
     onError?.(null);
     try {
-      const data = await api<{ initiative: GameInitiativeState | null }>(
-        `/games/${gameId}/monsters/add-to-initiative`,
-        { method: 'POST', body: JSON.stringify({}) },
-      );
-      onInitiativeChange?.(data.initiative);
+      const prevCustom = (monster.stats?.custom ?? {}) as Record<string, unknown>;
+      const data = await api<{
+        monster: GameMonsterInstance;
+        initiative?: GameInitiativeState | null;
+      }>(`/games/${gameId}/monsters/${monster.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          stats: {
+            ...monster.stats,
+            custom: { ...prevCustom, [MONSTER_IN_PLAY_KEY]: active },
+          },
+        }),
+      });
+      onMonstersChange(monsters.map((m) => (m.id === monster.id ? data.monster : m)));
+      if (data.initiative) onInitiativeChange?.(data.initiative);
     } catch (e) {
       onError?.(formatError(e));
     } finally {
@@ -411,37 +418,9 @@ export function MonsterPanel({
         </Button>
       </Stack>
 
-      <FormControlLabel
-        control={
-          <Checkbox
-            size="small"
-            checked={addToInitiative}
-            onChange={(e) => setAddToInitiative(e.target.checked)}
-            disabled={disabled}
-          />
-        }
-        label={
-          <Typography variant="caption" color="text.secondary">
-            Sync shared monster initiative when combat is active
-          </Typography>
-        }
-      />
-
       <Divider />
 
-      <Stack direction="row" alignItems="center" justifyContent="space-between">
-        <Typography variant="subtitle2">In play ({monsters.length})</Typography>
-        {monsters.length > 0 && (
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={addAllToInitiative}
-            disabled={disabled}
-          >
-            Sync init
-          </Button>
-        )}
-      </Stack>
+      <Typography variant="subtitle2">Spawned ({monsters.length})</Typography>
 
       {monsters.length === 0 ? (
         <Typography variant="body2" color="text.secondary">
@@ -481,6 +460,24 @@ export function MonsterPanel({
                 </IconButton>
               </Stack>
               <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.75 }} flexWrap="wrap">
+                {!isMonsterKilled(m) && (
+                  <FormControlLabel
+                    sx={{ mr: 0.5 }}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={isMonsterInPlay(m)}
+                        onChange={(e) => void toggleInPlay(m, e.target.checked)}
+                        disabled={disabled}
+                      />
+                    }
+                    label={
+                      <Typography variant="caption" color="text.secondary">
+                        In play
+                      </Typography>
+                    }
+                  />
+                )}
                 {!isMonsterKilled(m) ? (
                   <Button
                     size="small"

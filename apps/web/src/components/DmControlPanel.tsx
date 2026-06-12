@@ -1,14 +1,22 @@
 import { useState } from 'react';
-import { Box, Button, Divider, Stack, Tab, Tabs, Typography } from '@mui/material';
+import {
+  Box,
+  Button,
+  Checkbox,
+  Divider,
+  FormControlLabel,
+  Stack,
+  Tab,
+  Tabs,
+  Typography,
+} from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import SkipNextIcon from '@mui/icons-material/SkipNext';
 import StopIcon from '@mui/icons-material/Stop';
 import PestControlIcon from '@mui/icons-material/PestControl';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import GavelIcon from '@mui/icons-material/Gavel';
 import type { GameInitiativeState, GameMonsterInstance } from '@dcc-web/shared';
-import { MonsterQuickMenu } from './MonsterQuickMenu';
+import { MonsterQuickMenu, type MonsterCombatRollKind } from './MonsterQuickMenu';
 import { MonsterPanel } from './MonsterPanel';
 import type { Character } from '../types/game';
 
@@ -24,6 +32,10 @@ interface DmControlPanelProps {
   onEndInitiative: () => void;
   monstersVisibleOnMap?: boolean;
   onToggleMonstersVisibleOnMap?: () => void;
+  sharedMonsterInitiative?: boolean;
+  onToggleSharedMonsterInitiative?: () => void;
+  hideMonsterAcInRollLog?: boolean;
+  onToggleHideMonsterAcInRollLog?: () => void;
   busy?: boolean;
   monsters: GameMonsterInstance[];
   characters: Character[];
@@ -34,6 +46,10 @@ interface DmControlPanelProps {
   onKillMonster: (monster: GameMonsterInstance) => void;
   onDeleteMonster: (monsterId: string) => void;
   onRollMonsterAttack: (monster: GameMonsterInstance, target: Character) => void;
+  onMonsterCombatRoll: (monster: GameMonsterInstance, kind: MonsterCombatRollKind) => void;
+  onToggleMonsterInPlay: (monster: GameMonsterInstance, active: boolean) => void;
+  rollingMonsterId?: string | null;
+  rollingMonsterKind?: MonsterCombatRollKind | null;
   onOpenMonsterSheet: (monsterId: string) => void;
   lastAttackSummary?: string | null;
   onMonstersChange: (monsters: GameMonsterInstance[]) => void;
@@ -49,6 +65,10 @@ export function DmControlPanel({
   onEndInitiative,
   monstersVisibleOnMap = false,
   onToggleMonstersVisibleOnMap,
+  sharedMonsterInitiative = false,
+  onToggleSharedMonsterInitiative,
+  hideMonsterAcInRollLog = false,
+  onToggleHideMonsterAcInRollLog,
   busy = false,
   monsters,
   characters,
@@ -59,6 +79,10 @@ export function DmControlPanel({
   onKillMonster,
   onDeleteMonster,
   onRollMonsterAttack,
+  onMonsterCombatRoll,
+  onToggleMonsterInPlay,
+  rollingMonsterId,
+  rollingMonsterKind,
   onOpenMonsterSheet,
   lastAttackSummary,
   onMonstersChange,
@@ -152,20 +176,54 @@ export function DmControlPanel({
                   </Button>
                 </>
               )}
-              <Button
-                fullWidth
-                variant={monstersVisibleOnMap ? 'contained' : 'outlined'}
-                size="small"
-                startIcon={
-                  monstersVisibleOnMap ? <VisibilityIcon /> : <VisibilityOffIcon />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={monstersVisibleOnMap}
+                    onChange={() => onToggleMonstersVisibleOnMap?.()}
+                    disabled={busy || !onToggleMonstersVisibleOnMap}
+                  />
                 }
-                onClick={onToggleMonstersVisibleOnMap}
-                disabled={busy || !onToggleMonstersVisibleOnMap}
-              >
-                {monstersVisibleOnMap
-                  ? 'Monsters visible on map'
-                  : 'Show monsters on map'}
-              </Button>
+                label={
+                  <Typography variant="body2" fontSize="0.8rem">
+                    Monsters visible on map
+                  </Typography>
+                }
+                sx={{ ml: 0, alignItems: 'flex-start' }}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={sharedMonsterInitiative}
+                    onChange={() => onToggleSharedMonsterInitiative?.()}
+                    disabled={busy || !onToggleSharedMonsterInitiative}
+                  />
+                }
+                label={
+                  <Typography variant="body2" fontSize="0.8rem">
+                    Shared monster initiative
+                  </Typography>
+                }
+                sx={{ ml: 0, alignItems: 'flex-start' }}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={hideMonsterAcInRollLog}
+                    onChange={() => onToggleHideMonsterAcInRollLog?.()}
+                    disabled={busy || !onToggleHideMonsterAcInRollLog}
+                  />
+                }
+                label={
+                  <Typography variant="body2" fontSize="0.8rem">
+                    Hide monster AC in roll log
+                  </Typography>
+                }
+                sx={{ ml: 0, alignItems: 'flex-start' }}
+              />
             </Stack>
           </Box>
 
@@ -176,15 +234,20 @@ export function DmControlPanel({
               monsters={monsters}
               characters={characters}
               initiative={initiative}
+              sharedMonsterInitiative={sharedMonsterInitiative}
               monsterTargetById={monsterTargetById}
               sheetMonsterId={sheetMonsterId}
               onMonsterTargetChange={onMonsterTargetChange}
               onPatchHp={onPatchMonsterHp}
               onKillMonster={onKillMonster}
               onDeleteMonster={onDeleteMonster}
+              onToggleInPlay={onToggleMonsterInPlay}
+              onCombatRoll={onMonsterCombatRoll}
               onRollAttack={onRollMonsterAttack}
               onOpenSheet={onOpenMonsterSheet}
               busy={busy}
+              rollingMonsterId={rollingMonsterId}
+              rollingMonsterKind={rollingMonsterKind}
               lastAttackSummary={lastAttackSummary}
             />
           </Box>
@@ -196,7 +259,6 @@ export function DmControlPanel({
           <MonsterPanel
             gameId={gameId}
             monsters={monsters}
-            initiative={initiative}
             busy={busy}
             onMonstersChange={onMonstersChange}
             onInitiativeChange={onMonsterInitiativeChange}

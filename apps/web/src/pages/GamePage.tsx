@@ -17,6 +17,8 @@ import {
   ACTIVE_IN_PLAY_KEY,
   ACTIVE_LIGHT_ITEM_ID_KEY,
   buildDiceNotation,
+  createCharacterInitiativeSkipFn,
+  MONSTER_IN_PLAY_KEY,
   parseMonsterSheet,
   countConsumables,
   emptyDiceTray,
@@ -38,6 +40,7 @@ import {
   type MapGridPreset,
   type MapLayoutAnchor,
   buildMonsterKilledStats,
+  MAP_TOKEN_VISIBLE_KEY,
 } from '@dcc-web/shared';
 import { ApplyDamageDialog, type MapTokenTarget } from '../components/ApplyDamageDialog';
 import { ConsumeResourceDialog } from '../components/ConsumeResourceDialog';
@@ -46,6 +49,7 @@ import {
   type CorpseLootTarget,
 } from '../components/inventory/CorpseLootSheet';
 import { DmControlPanel } from '../components/DmControlPanel';
+import type { MonsterCombatRollKind } from '../components/MonsterQuickMenu';
 import { InitiativeOrderPanel } from '../components/InitiativeOrderPanel';
 import type {
   Character,
@@ -121,6 +125,10 @@ export default function GamePage() {
   const [monsterTargetById, setMonsterTargetById] = useState<Record<string, string>>({});
   const [lastMonsterAttackSummary, setLastMonsterAttackSummary] = useState<string | null>(null);
   const [monsterBusy, setMonsterBusy] = useState(false);
+  const [monsterRollingId, setMonsterRollingId] = useState<string | null>(null);
+  const [monsterRollingKind, setMonsterRollingKind] = useState<MonsterCombatRollKind | null>(
+    null,
+  );
   const [rollLog, setRollLog] = useState<DiceRollLogEntry[]>([]);
   const [applyDamageRoll, setApplyDamageRoll] = useState<DiceRollLogEntry | null>(null);
   const [applyingDamage, setApplyingDamage] = useState(false);
@@ -136,6 +144,7 @@ export default function GamePage() {
     id: string;
   } | null>(null);
   const [corpseLootOpen, setCorpseLootOpen] = useState(false);
+  const [mapTokenBusyId, setMapTokenBusyId] = useState<string | null>(null);
 
   /** DM = game creator only (server sets isDm from dm_user_id). */
   const isDm = detail?.isDm === true;
@@ -145,7 +154,22 @@ export default function GamePage() {
     [detail],
   );
   const monstersVisibleOnMap = gameSettings.monstersVisibleOnMap ?? false;
+  const sharedMonsterInitiative = gameSettings.sharedMonsterInitiative ?? false;
+  const hideMonsterAcInRollLog = gameSettings.hideMonsterAcInRollLog ?? false;
   const initiativeActive = initiative?.active ?? false;
+
+  const shouldSkipInitiative = useMemo(
+    () => createCharacterInitiativeSkipFn(characters),
+    [characters],
+  );
+
+  const isTokenInitiativeActive = useCallback(
+    (token: TacticalMapToken) => {
+      if (!initiativeActive || !initiative || !token.characterId) return false;
+      return isCharacterTurn(initiative, token.characterId, shouldSkipInitiative);
+    },
+    [initiativeActive, initiative, shouldSkipInitiative],
+  );
 
   const corpseLootTarget = useMemo((): CorpseLootTarget | null => {
     if (!corpseLootRef) return null;
@@ -173,7 +197,11 @@ export default function GamePage() {
   }, []);
 
   const applyGameSettingsPatch = useCallback(
-    (patch: { monstersVisibleOnMap?: boolean }) => {
+    (patch: {
+      monstersVisibleOnMap?: boolean;
+      sharedMonsterInitiative?: boolean;
+      hideMonsterAcInRollLog?: boolean;
+    }) => {
       setDetail((prev) => {
         if (!prev) return prev;
         const settings = parseGameSettings(prev.game.settings);
@@ -601,9 +629,23 @@ export default function GamePage() {
       },
       onSettingsUpdated: (settings) => {
         if (settings && typeof settings === 'object') {
-          const parsed = settings as { monstersVisibleOnMap?: boolean };
+          const parsed = settings as {
+            monstersVisibleOnMap?: boolean;
+            sharedMonsterInitiative?: boolean;
+            hideMonsterAcInRollLog?: boolean;
+          };
           if (typeof parsed.monstersVisibleOnMap === 'boolean') {
             applyGameSettingsPatch({ monstersVisibleOnMap: parsed.monstersVisibleOnMap });
+          }
+          if (typeof parsed.sharedMonsterInitiative === 'boolean') {
+            applyGameSettingsPatch({
+              sharedMonsterInitiative: parsed.sharedMonsterInitiative,
+            });
+          }
+          if (typeof parsed.hideMonsterAcInRollLog === 'boolean') {
+            applyGameSettingsPatch({
+              hideMonsterAcInRollLog: parsed.hideMonsterAcInRollLog,
+            });
           }
         }
       },
@@ -682,13 +724,8 @@ export default function GamePage() {
     [initiativeActive],
   );
 
-  const handleMapTokenClick = useCallback(
+  const openCorpseLoot = useCallback(
     (token: TacticalMapToken) => {
-      if (initiativeActive) {
-        setError('Looting is only available after combat ends');
-        return;
-      }
-      if (!token.isDead) return;
       if (token.characterId) {
         const character = characters.find((c) => c.id === token.characterId);
         if (!character) return;
@@ -703,7 +740,19 @@ export default function GamePage() {
         setCorpseLootOpen(true);
       }
     },
-    [initiativeActive, characters, monsters],
+    [characters, monsters],
+  );
+
+  const handleMapTokenClick = useCallback(
+    (token: TacticalMapToken) => {
+      if (!token.isDead) return;
+      if (initiativeActive) {
+        setError('Looting is only available after combat ends');
+        return;
+      }
+      openCorpseLoot(token);
+    },
+    [initiativeActive, openCorpseLoot],
   );
 
   const toggleMonstersVisibleOnMap = async () => {
@@ -718,6 +767,106 @@ export default function GamePage() {
       setError(null);
     } catch (e) {
       setError(formatError(e));
+    }
+  };
+
+  const toggleSharedMonsterInitiative = async () => {
+    if (!gameId || !isDm) return;
+    const next = !sharedMonsterInitiative;
+    try {
+      const res = await api<{ settings: Record<string, unknown> }>(
+        `/games/${gameId}/settings`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ sharedMonsterInitiative: next }),
+        },
+      );
+      applyGameSettingsPatch({
+        sharedMonsterInitiative:
+          typeof res.settings?.sharedMonsterInitiative === 'boolean'
+            ? res.settings.sharedMonsterInitiative
+            : next,
+      });
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    }
+  };
+
+  const toggleHideMonsterAcInRollLog = async () => {
+    if (!gameId || !isDm) return;
+    const next = !hideMonsterAcInRollLog;
+    try {
+      await api(`/games/${gameId}/settings`, {
+        method: 'PATCH',
+        body: JSON.stringify({ hideMonsterAcInRollLog: next }),
+      });
+      applyGameSettingsPatch({ hideMonsterAcInRollLog: next });
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    }
+  };
+
+  const toggleMonsterInPlay = async (monster: GameMonsterInstance, active: boolean) => {
+    if (!gameId) return;
+    setMonsterBusy(true);
+    try {
+      const prevCustom = (monster.stats?.custom ?? {}) as Record<string, unknown>;
+      const data = await api<{
+        monster: GameMonsterInstance;
+        initiative?: GameInitiativeState | null;
+      }>(`/games/${gameId}/monsters/${monster.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          stats: {
+            ...monster.stats,
+            custom: { ...prevCustom, [MONSTER_IN_PLAY_KEY]: active },
+          },
+        }),
+      });
+      handleMonsterUpdated(data.monster);
+      if (data.initiative) applyInitiative(data.initiative);
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setMonsterBusy(false);
+    }
+  };
+
+  const rollMonsterCombat = async (
+    monster: GameMonsterInstance,
+    kind: MonsterCombatRollKind,
+  ) => {
+    if (!gameId) return;
+    const atk = parseMonsterSheet(monster.sheet).attacks[0];
+    const mod = Number(atk?.attackBonus ?? monster.attackBonus) || 0;
+    const damageNotation = atk?.damage ?? monster.damage;
+    const atkLabel = atk?.name ?? 'attack';
+    const notation =
+      kind === 'toHit'
+        ? `1d20${mod >= 0 ? `+${mod}` : mod}`
+        : damageNotation;
+    const reason =
+      kind === 'toHit' ? `${monster.name} ${atkLabel}` : `${monster.name} damage`;
+
+    setMonsterRollingId(monster.id);
+    setMonsterRollingKind(kind);
+    setMonsterBusy(true);
+    try {
+      await postDiceRoll({
+        notation,
+        reason,
+        rollKind: kind === 'toHit' ? 'attack' : 'damage',
+      });
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setMonsterRollingId(null);
+      setMonsterRollingKind(null);
+      setMonsterBusy(false);
     }
   };
 
@@ -1173,9 +1322,7 @@ export default function GamePage() {
         setSelectedCharacter(null);
       }
       await loadCharacters();
-      if (status === 'archived' || status === 'dead') {
-        await loadMaps();
-      }
+      await loadMaps();
       setError(null);
     } catch (e) {
       setError(formatError(e));
@@ -1192,6 +1339,45 @@ export default function GamePage() {
     () => maps.find((m) => m.id === activeMapId) ?? maps[0] ?? null,
     [maps, activeMapId],
   );
+
+  const hasCharacterMapToken = useCallback(
+    (characterId: string) =>
+      activeMap?.tokens.some((t) => t.characterId === characterId) ?? false,
+    [activeMap],
+  );
+
+  const toggleCharacterMapToken = async (character: Character, visible: boolean) => {
+    if (!gameId || !activeMapId || !isDm) return;
+    setMapTokenBusyId(character.id);
+    try {
+      const prevStats = character.stats ?? {};
+      const prevCustom = (prevStats.custom ?? {}) as Record<string, unknown>;
+      await api(`/characters/${character.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          stats: {
+            ...prevStats,
+            custom: { ...prevCustom, [MAP_TOKEN_VISIBLE_KEY]: visible },
+          },
+        }),
+      });
+      const existing = activeMap?.tokens.find((t) => t.characterId === character.id);
+      if (visible) {
+        await api(`/games/${gameId}/maps/${activeMapId}/characters/${character.id}/token`, {
+          method: 'POST',
+        });
+      } else if (existing) {
+        await api(`/tokens/${existing.id}`, { method: 'DELETE' });
+      }
+      await loadMaps();
+      await loadCharacters();
+      setError(null);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setMapTokenBusyId(null);
+    }
+  };
 
   const gridFt = activeMap?.gridFtPerCell ?? 5;
 
@@ -1319,7 +1505,10 @@ export default function GamePage() {
     void autoSyncMapTokens();
   }, [gameId, detail, isDm, activeMapId, autoSyncMapTokens]);
 
-  const layoutMapTokens = async (anchor?: MapLayoutAnchor) => {
+  const layoutMapTokens = async (
+    anchor?: MapLayoutAnchor,
+    kinds?: ('pc' | 'monster')[],
+  ) => {
     if (!gameId || !activeMapId) return;
     setMapBusy(true);
     try {
@@ -1327,7 +1516,7 @@ export default function GamePage() {
         `/games/${gameId}/maps/${activeMapId}/layout-tokens`,
         {
           method: 'POST',
-          body: JSON.stringify(anchor ?? {}),
+          body: JSON.stringify({ ...(anchor ?? {}), kinds }),
         },
       );
       setMaps((prev) => prev.map((m) => (m.id === map.id ? map : m)));
@@ -1338,6 +1527,11 @@ export default function GamePage() {
       setMapBusy(false);
     }
   };
+
+  const resetPlayerMapTokens = (anchor?: MapLayoutAnchor) =>
+    void layoutMapTokens(anchor, ['pc']);
+  const resetMonsterMapTokens = (anchor?: MapLayoutAnchor) =>
+    void layoutMapTokens(anchor, ['monster']);
 
   const moveMapToken = async (tokenId: string, x: number, y: number) => {
     setMaps((prev) =>
@@ -1491,6 +1685,10 @@ export default function GamePage() {
                   onEndInitiative={endInitiative}
                   monstersVisibleOnMap={monstersVisibleOnMap}
                   onToggleMonstersVisibleOnMap={() => void toggleMonstersVisibleOnMap()}
+                  sharedMonsterInitiative={sharedMonsterInitiative}
+                  onToggleSharedMonsterInitiative={() => void toggleSharedMonsterInitiative()}
+                  hideMonsterAcInRollLog={hideMonsterAcInRollLog}
+                  onToggleHideMonsterAcInRollLog={() => void toggleHideMonsterAcInRollLog()}
                   busy={initiativeBusy || monsterBusy}
                   monsters={monsters}
                   characters={characters}
@@ -1501,6 +1699,10 @@ export default function GamePage() {
                   onKillMonster={killMonster}
                   onDeleteMonster={deleteMonsterQuick}
                   onRollMonsterAttack={rollMonsterAttack}
+                  onMonsterCombatRoll={rollMonsterCombat}
+                  onToggleMonsterInPlay={toggleMonsterInPlay}
+                  rollingMonsterId={monsterRollingId}
+                  rollingMonsterKind={monsterRollingKind}
                   onOpenMonsterSheet={openMonsterSheet}
                   lastAttackSummary={lastMonsterAttackSummary}
                   onMonstersChange={setMonsters}
@@ -1545,7 +1747,8 @@ export default function GamePage() {
                   onUploadImage={uploadMapImage}
                   onRemoveImage={() => void patchActiveMap({ clearImage: true })}
                   onRenameMap={(name) => void patchActiveMap({ name })}
-                  onLayoutTokens={(anchor) => void layoutMapTokens(anchor)}
+                  onResetPlayerTokens={resetPlayerMapTokens}
+                  onResetMonsterTokens={resetMonsterMapTokens}
                   onClearDrawings={() => void patchActiveMap({ dmDrawings: [] })}
                   onDrawingsChange={(drawings) => void patchActiveMap({ dmDrawings: drawings })}
                   onTokenMove={(tokenId, x, y) => void moveMapToken(tokenId, x, y)}
@@ -1558,8 +1761,10 @@ export default function GamePage() {
                     )
                   }
                   canLootToken={canLootToken}
+                  isTokenInitiativeActive={isTokenInitiativeActive}
                   onTokenClick={handleMapTokenClick}
                   rollLog={rollLog}
+                  hideMonsterAcInRollLog={hideMonsterAcInRollLog}
                   onClearRollLog={() => setRollLog([])}
                   onApplyDamageFromRoll={
                     isDm ? (roll) => setApplyDamageRoll(roll) : undefined
@@ -1616,6 +1821,9 @@ export default function GamePage() {
           selectedCharacterId={selectedCharacter?.id}
           initiative={initiative}
           onToggleInPlay={toggleInPlay}
+          hasCharacterMapToken={hasCharacterMapToken}
+          onToggleCharacterMapToken={(c, visible) => void toggleCharacterMapToken(c, visible)}
+          mapTokenBusyId={mapTokenBusyId}
           onEndTurn={endTurn}
           endTurnCharacterId={endTurnCharacterId}
           currentUserId={user?.id}

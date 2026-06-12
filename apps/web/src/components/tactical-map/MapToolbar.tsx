@@ -60,7 +60,8 @@ interface MapToolbarProps {
   onUploadImage: (file: File) => void;
   onRemoveImage: () => void;
   onRenameMap: (name: string) => void;
-  onLayoutTokens: () => void;
+  onResetPlayerTokens: () => void;
+  onResetMonsterTokens: () => void;
   onClearDrawings: () => void;
 }
 
@@ -87,7 +88,8 @@ export function MapToolbar({
   onUploadImage,
   onRemoveImage,
   onRenameMap,
-  onLayoutTokens,
+  onResetPlayerTokens,
+  onResetMonsterTokens,
   onClearDrawings,
 }: MapToolbarProps) {
   const active = maps.find((m) => m.id === activeMapId) ?? null;
@@ -312,16 +314,29 @@ export function MapToolbar({
             </Tooltip>
           </>
         )}
-        <Tooltip title="Arrange chips in a grid at the upper-right of the visible map area">
+        <Tooltip title="Arrange player tokens in a grid at the upper-right of the visible map">
           <span>
             <Button
               size="small"
               variant="outlined"
               startIcon={<GridOnIcon />}
-              onClick={onLayoutTokens}
+              onClick={onResetPlayerTokens}
               disabled={busy || !active}
             >
-              Reset layout
+              Reset players
+            </Button>
+          </span>
+        </Tooltip>
+        <Tooltip title="Arrange monster tokens in a grid at the upper-left of the visible map">
+          <span>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<GridOnIcon />}
+              onClick={onResetMonsterTokens}
+              disabled={busy || !active}
+            >
+              Reset monsters
             </Button>
           </span>
         </Tooltip>
