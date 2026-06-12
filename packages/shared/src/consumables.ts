@@ -31,6 +31,8 @@ export interface ConsumableProperties extends ConsumableFlags {
   requiresFuel?: boolean;
   /** Remove when depleted (torch) */
   consumedWhenEmpty?: boolean;
+  /** Illumination radius in feet while lit (default 30 for torches/lanterns). */
+  lightRadiusFt?: number;
   /** @deprecated Legacy — treated as drink vessel */
   drink?: boolean;
   /** @deprecated Legacy — treated as fuel */
@@ -68,7 +70,7 @@ export const CONSUMABLE_DEFAULTS: Record<
     name: 'Waterskin',
     properties: { vessel: true, capacity: 3, usesRemaining: 3, unitLabel: 'day' },
   },
-  light: { name: 'Torch', properties: { light: true, consumedWhenEmpty: true } },
+  light: { name: 'Torch', properties: { light: true, consumedWhenEmpty: true, lightRadiusFt: 30 } },
 };
 
 function normalizeItemName(name: string): string {
@@ -76,10 +78,10 @@ function normalizeItemName(name: string): string {
 }
 
 export const CONSUMABLE_PRESETS_BY_NAME: Record<string, ConsumableProperties> = {
-  lantern: { light: true, requiresFuel: true },
+  lantern: { light: true, requiresFuel: true, lightRadiusFt: 30 },
   'oil flask': { fuel: true, uses: 2 },
   waterskin: { vessel: true, capacity: 3, usesRemaining: 3, unitLabel: 'day' },
-  torch: { light: true, consumedWhenEmpty: true },
+  torch: { light: true, consumedWhenEmpty: true, lightRadiusFt: 30 },
   'rations (1 day)': { food: true },
   'holy water': { vessel: true, capacity: 1, usesRemaining: 1, unitLabel: 'use' },
 };
@@ -95,6 +97,8 @@ export function parseConsumableFlags(
   };
 }
 
+export const DEFAULT_LIGHT_RADIUS_FT = 30;
+
 export function parseConsumableProperties(
   properties?: Record<string, unknown>,
 ): ConsumableProperties {
@@ -104,6 +108,9 @@ export function parseConsumableProperties(
   const usesRem = properties?.usesRemaining;
   const legacyDrink = Boolean(properties?.drink);
   const legacyFuel = Boolean(properties?.lightFuel);
+  const radiusRaw = properties?.lightRadiusFt ?? properties?.lightRangeFt ?? properties?.radiusFt;
+  const lightRadiusFt =
+    typeof radiusRaw === 'number' && radiusRaw > 0 ? Math.floor(radiusRaw) : undefined;
   return {
     ...flags,
     uses: typeof usesMax === 'number' && usesMax > 0 ? Math.floor(usesMax) : undefined,
@@ -114,6 +121,7 @@ export function parseConsumableProperties(
     fuel: Boolean(properties?.fuel) || legacyFuel,
     requiresFuel: Boolean(properties?.requiresFuel),
     consumedWhenEmpty: Boolean(properties?.consumedWhenEmpty),
+    lightRadiusFt,
     drink: legacyDrink,
     lightFuel: legacyFuel,
   };
@@ -139,6 +147,7 @@ export function getEffectiveConsumableProperties(
     light: parsed.light || preset.light || false,
     requiresFuel: parsed.requiresFuel || preset.requiresFuel || false,
     food: parsed.food || preset.food || false,
+    lightRadiusFt: parsed.lightRadiusFt ?? preset.lightRadiusFt,
   };
 }
 
@@ -158,6 +167,7 @@ export function consumablePropertiesToRecord(
   if (props.fuel) out.fuel = true;
   if (props.requiresFuel) out.requiresFuel = true;
   if (props.consumedWhenEmpty) out.consumedWhenEmpty = true;
+  if (props.lightRadiusFt != null) out.lightRadiusFt = props.lightRadiusFt;
   return out;
 }
 
@@ -389,6 +399,27 @@ export function isUsingLightSource(character: {
   stats?: { custom?: Record<string, unknown> };
 }): boolean {
   return Boolean(character.stats?.custom?.[USING_LIGHT_SOURCE_KEY]);
+}
+
+/** Radius in feet for an item that emits light (torches, lanterns, etc.). */
+export function getLightSourceRadiusFeet(item: CatalogItemLike): number {
+  const props = getEffectiveConsumableProperties(item);
+  if (props.lightRadiusFt != null && props.lightRadiusFt > 0) return props.lightRadiusFt;
+  if (isLightSourceItem(item)) return DEFAULT_LIGHT_RADIUS_FT;
+  return DEFAULT_LIGHT_RADIUS_FT;
+}
+
+/** When the character has a lit light source, returns its radius in feet. */
+export function getCharacterLightRadiusFeet(character: {
+  stats?: { custom?: Record<string, unknown> };
+  items?: CatalogItemLike[];
+}): number | null {
+  if (!isUsingLightSource(character)) return null;
+  const itemId = getActiveLightItemId(character);
+  if (!itemId) return null;
+  const item = (character.items ?? []).find((i) => i.id === itemId);
+  if (!item || !isLightSourceItem(item)) return null;
+  return getLightSourceRadiusFeet(item);
 }
 
 export function getActiveLightItemId(character: {

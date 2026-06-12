@@ -8,6 +8,7 @@ import {
   type TacticalMapCanvasHandle,
 } from './tactical-map/TacticalMapCanvas';
 import type { DiceRollLogEntry } from '../types/dice-roll-log';
+import type { TokenMapOverlay } from '../types/token-overlay';
 import type { TacticalGameMap } from '../types/map';
 
 interface TacticalMapProps {
@@ -45,6 +46,7 @@ interface TacticalMapProps {
   onTokenClick?: (token: TacticalGameMap['tokens'][number]) => void;
   canLootToken?: (token: TacticalGameMap['tokens'][number]) => boolean;
   isTokenInitiativeActive?: (token: TacticalGameMap['tokens'][number]) => boolean;
+  getTokenOverlay?: (token: TacticalGameMap['tokens'][number]) => TokenMapOverlay | undefined;
   rollLog?: DiceRollLogEntry[];
   hideMonsterAcInRollLog?: boolean;
   onClearRollLog?: () => void;
@@ -86,6 +88,7 @@ export function TacticalMap({
   onTokenClick,
   canLootToken,
   isTokenInitiativeActive,
+  getTokenOverlay,
   rollLog = [],
   hideMonsterAcInRollLog = false,
   onClearRollLog,
@@ -193,6 +196,7 @@ export function TacticalMap({
           onTokenClick={onTokenClick}
           canLootToken={canLootToken}
           isTokenInitiativeActive={isTokenInitiativeActive}
+          getTokenOverlay={getTokenOverlay}
         />
       ) : (
         <Box

@@ -32,6 +32,7 @@ import {
   isMapTokenVisible,
   type MapTokenVisibilityContext,
 } from '@dcc-web/shared';
+import type { TokenMapOverlay } from '../../types/token-overlay';
 import type { TacticalGameMap, TacticalMapToken } from '../../types/map';
 import { MapViewportControls } from './MapViewportControls';
 
@@ -59,6 +60,7 @@ interface TacticalMapCanvasProps {
   onTokenClick?: (token: TacticalMapToken) => void;
   canLootToken?: (token: TacticalMapToken) => boolean;
   isTokenInitiativeActive?: (token: TacticalMapToken) => boolean;
+  getTokenOverlay?: (token: TacticalMapToken) => TokenMapOverlay | undefined;
 }
 
 function useMapImage(url: string | null) {
@@ -156,6 +158,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
       onTokenClick,
       canLootToken,
       isTokenInitiativeActive,
+      getTokenOverlay,
     },
     ref,
   ) {
@@ -608,6 +611,26 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
               />
 
               {visibleTokens.map((t) => {
+                const overlay = getTokenOverlay?.(t);
+                if (
+                  !overlay?.lightRadiusCells &&
+                  !overlay?.movementRadiusCells
+                ) {
+                  return null;
+                }
+                return (
+                  <TokenRangeOverlay
+                    key={`${t.id}-overlay`}
+                    x={t.x * cell}
+                    y={t.y * cell}
+                    cell={cell}
+                    lightRadiusCells={overlay.lightRadiusCells}
+                    movementRadiusCells={overlay.movementRadiusCells}
+                  />
+                );
+              })}
+
+              {visibleTokens.map((t) => {
                 const clickable = canLootToken?.(t) ?? false;
                 const draggable =
                   (canDragToken ? canDragToken(t) : isDm) && (!t.isDead || isDm);
@@ -640,6 +663,46 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
     );
   },
 );
+
+function TokenRangeOverlay({
+  x,
+  y,
+  cell,
+  lightRadiusCells,
+  movementRadiusCells,
+}: {
+  x: number;
+  y: number;
+  cell: number;
+  lightRadiusCells?: number;
+  movementRadiusCells?: number;
+}) {
+  return (
+    <Group x={x} y={y} listening={false}>
+      {movementRadiusCells != null && movementRadiusCells > 0 && (
+        <Circle
+          x={0}
+          y={0}
+          radius={movementRadiusCells * cell}
+          fill="rgba(96, 165, 250, 0.07)"
+          stroke="rgba(96, 165, 250, 0.55)"
+          strokeWidth={2}
+          dash={[8, 5]}
+        />
+      )}
+      {lightRadiusCells != null && lightRadiusCells > 0 && (
+        <Circle
+          x={0}
+          y={0}
+          radius={lightRadiusCells * cell}
+          fill="rgba(255, 193, 90, 0.1)"
+          stroke="rgba(255, 193, 90, 0.4)"
+          strokeWidth={1.5}
+        />
+      )}
+    </Group>
+  );
+}
 
 function MapTokenChip({
   token,

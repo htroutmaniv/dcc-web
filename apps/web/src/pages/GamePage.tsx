@@ -18,7 +18,10 @@ import {
   ACTIVE_LIGHT_ITEM_ID_KEY,
   buildDiceNotation,
   createCharacterInitiativeSkipFn,
+  getCharacterLightRadiusFeet,
+  getCurrentTurnEntry,
   MONSTER_IN_PLAY_KEY,
+  movementRangeFromStats,
   parseMonsterSheet,
   countConsumables,
   emptyDiceTray,
@@ -78,7 +81,9 @@ import { MONSTER_ATTACK_TARGET_KEY, readMonsterTargetMap } from '../utils/monste
 import { buildCombatTargetOptions } from '../components/CharacterListItem';
 import type { TransferInventoryResult } from '../components/inventory/TransferItemDialog';
 import type { DiceRollLogEntry } from '../types/dice-roll-log';
+import type { TokenMapOverlay } from '../types/token-overlay';
 import type { TacticalGameMap, TacticalMapToken } from '../types/map';
+import type { CharacterStats as SharedCharacterStats } from '@dcc-web/shared';
 import { useGameSocket } from '../hooks/useGameSocket';
 import { useGameDeleteNotifications } from '../hooks/useGameDeleteNotifications';
 import { formatError } from '../utils/errors';
@@ -1381,6 +1386,54 @@ export default function GamePage() {
 
   const gridFt = activeMap?.gridFtPerCell ?? 5;
 
+  const getTokenOverlay = useCallback(
+    (token: TacticalMapToken): TokenMapOverlay | undefined => {
+      if (token.kind !== 'pc' || !token.characterId || token.isDead) return undefined;
+      const character = characters.find((c) => c.id === token.characterId);
+      if (!character || character.status === 'dead') return undefined;
+
+      const overlay: TokenMapOverlay = {};
+      const feetPerCell = gridFt > 0 ? gridFt : 5;
+
+      const lightFt = getCharacterLightRadiusFeet(character);
+      if (lightFt != null && lightFt > 0) {
+        overlay.lightRadiusCells = lightFt / feetPerCell;
+      }
+
+      if (initiativeActive && initiative) {
+        const current = getCurrentTurnEntry(initiative, shouldSkipInitiative);
+        if (
+          current?.kind === 'character' &&
+          current.characterId === character.id &&
+          (isDm || character.ownerUserId === user?.id)
+        ) {
+          const stats: SharedCharacterStats = {
+            abilities: (character.stats?.abilities ?? {}) as SharedCharacterStats['abilities'],
+            speed: character.stats?.speed ?? 30,
+            armorSpeedPenalty: character.stats?.armorSpeedPenalty,
+            movementModifiers: character.stats?.movementModifiers,
+            initiative: character.stats?.initiative,
+            custom: character.stats?.custom,
+          };
+          const range = movementRangeFromStats(stats, feetPerCell);
+          if (range.cells > 0) overlay.movementRadiusCells = range.cells;
+        }
+      }
+
+      if (!overlay.lightRadiusCells && !overlay.movementRadiusCells) return undefined;
+      return overlay;
+    },
+    [
+      characters,
+      gridFt,
+      initiativeActive,
+      initiative,
+      shouldSkipInitiative,
+      isDm,
+      user?.id,
+    ],
+  );
+
   const setActiveMap = async (mapId: string) => {
     if (!gameId) return;
     setMapBusy(true);
@@ -1762,6 +1815,7 @@ export default function GamePage() {
                   }
                   canLootToken={canLootToken}
                   isTokenInitiativeActive={isTokenInitiativeActive}
+                  getTokenOverlay={getTokenOverlay}
                   onTokenClick={handleMapTokenClick}
                   rollLog={rollLog}
                   hideMonsterAcInRollLog={hideMonsterAcInRollLog}
