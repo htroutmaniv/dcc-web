@@ -34,6 +34,7 @@ export interface GameSocketHandlers {
   onMapUpdated?: (actorUserId?: string) => void;
   onPresenceUpdated?: (users: GamePresenceUser[]) => void;
   onRosterChanged?: (actorUserId?: string) => void;
+  onGameDeleted?: (payload: { gameId?: string; actorUserId?: string }) => void;
 }
 
 /**
@@ -124,6 +125,10 @@ export function useGameSocket(
       handlersRef.current.onRosterChanged?.(payload?.actorUserId);
     });
 
+    socket.on('game:deleted', (payload: { gameId?: string; actorUserId?: string }) => {
+      handlersRef.current.onGameDeleted?.(payload);
+    });
+
     socket.on('game:error', (payload: { message?: string }) => {
       console.warn('[game socket]', payload?.message ?? 'error');
     });
@@ -152,6 +157,7 @@ export function useGameSocket(
       socket.off('dice:rolled');
       socket.off('game:presence');
       socket.off('game:roster_changed');
+      socket.off('game:deleted');
       socket.off('game:error');
       socket.off('connect_error');
       socket.off('disconnect');

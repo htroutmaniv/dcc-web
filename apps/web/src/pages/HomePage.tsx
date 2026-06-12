@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link as RouterLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -9,21 +9,26 @@ import {
   Divider,
   Grid,
   List,
+  ListItem,
   ListItemButton,
   ListItemText,
+  IconButton,
   Paper,
   Stack,
   TextField,
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
 import LoginIcon from '@mui/icons-material/Login';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import { api } from '../api/client';
 import { AppShell } from '../components/AppShell';
 import { AuthForm } from '../components/AuthForm';
+import { DeleteGameDialog } from '../components/DeleteGameDialog';
 import { useAuth } from '../context/AuthContext';
+import { useGameDeleteNotifications } from '../hooks/useGameDeleteNotifications';
 import type { GameListEntry } from '../types/game';
 import { authErrorMessage } from '../utils/auth-errors';
 import { formatError } from '../utils/errors';
@@ -31,6 +36,7 @@ import { formatError } from '../utils/errors';
 export default function HomePage() {
   const { user, loading: authLoading, authConfig, refresh } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [gameEntries, setGameEntries] = useState<GameListEntry[]>([]);
@@ -39,6 +45,26 @@ export default function HomePage() {
   const [loadingGames, setLoadingGames] = useState(false);
   const [authBanner, setAuthBanner] = useState<string | null>(null);
   const [infoBanner, setInfoBanner] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [deletingGame, setDeletingGame] = useState(false);
+
+  const handleGameRemoved = useCallback(
+    (payload: { gameId?: string; actorUserId?: string }) => {
+      if (!payload.gameId) return;
+      setGameEntries((prev) => {
+        if (!prev.some((entry) => entry.game.id === payload.gameId)) return prev;
+        return prev.filter((entry) => entry.game.id !== payload.gameId);
+      });
+      if (payload.actorUserId === user?.id) {
+        setInfoBanner('Game deleted.');
+      } else {
+        setInfoBanner('A game you were in was deleted.');
+      }
+    },
+    [user?.id],
+  );
+
+  useGameDeleteNotifications({ onGameRemoved: handleGameRemoved });
 
   const loadGames = useCallback(async () => {
     if (!user) {
@@ -91,6 +117,16 @@ export default function HomePage() {
     }
   }, [searchParams, refresh, setSearchParams]);
 
+  useEffect(() => {
+    const state = location.state as { info?: string; removedGameId?: string } | null;
+    if (!state?.info && !state?.removedGameId) return;
+    if (state.info) setInfoBanner(state.info);
+    if (state.removedGameId) {
+      setGameEntries((prev) => prev.filter((entry) => entry.game.id !== state.removedGameId));
+    }
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate]);
+
   const createGame = async () => {
     try {
       const { game } = await api<{ game: GameListEntry['game']; role: 'dm' }>('/games', {
@@ -115,6 +151,20 @@ export default function HomePage() {
       navigate(`/game/${game.id}`);
     } catch (e) {
       setError(formatError(e));
+    }
+  };
+
+  const confirmDeleteGame = async () => {
+    if (!deleteTarget) return;
+    setDeletingGame(true);
+    try {
+      await api(`/games/${deleteTarget.id}`, { method: 'DELETE' });
+      setDeleteTarget(null);
+      await loadGames();
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setDeletingGame(false);
     }
   };
 
@@ -252,22 +302,40 @@ export default function HomePage() {
                 ) : (
                   <List disablePadding>
                     {gameEntries.map(({ game, role }) => (
-                      <ListItemButton
+                      <ListItem
                         key={game.id}
-                        onClick={() => navigate(`/game/${game.id}`)}
-                        sx={{ borderRadius: 1, mb: 0.5 }}
+                        disablePadding
+                        secondaryAction={
+                          role === 'dm' ? (
+                            <IconButton
+                              edge="end"
+                              aria-label={`Delete ${game.title}`}
+                              onClick={() =>
+                                setDeleteTarget({ id: game.id, title: game.title })
+                              }
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          ) : undefined
+                        }
+                        sx={{ mb: 0.5 }}
                       >
-                        <ListItemText
-                          primary={game.title}
-                          secondary={`Invite: ${game.inviteCode}`}
-                        />
-                        <Chip
-                          size="small"
-                          label={role === 'dm' ? 'DM (creator)' : 'Player'}
-                          color={role === 'dm' ? 'primary' : 'default'}
-                          variant="outlined"
-                        />
-                      </ListItemButton>
+                        <ListItemButton
+                          onClick={() => navigate(`/game/${game.id}`)}
+                          sx={{ borderRadius: 1 }}
+                        >
+                          <ListItemText
+                            primary={game.title}
+                            secondary={`Invite: ${game.inviteCode}`}
+                          />
+                          <Chip
+                            size="small"
+                            label={role === 'dm' ? 'DM (creator)' : 'Player'}
+                            color={role === 'dm' ? 'primary' : 'default'}
+                            variant="outlined"
+                          />
+                        </ListItemButton>
+                      </ListItem>
                     ))}
                   </List>
                 )}
@@ -276,6 +344,15 @@ export default function HomePage() {
           </Grid>
         )}
       </Container>
+      <DeleteGameDialog
+        open={deleteTarget != null}
+        gameTitle={deleteTarget?.title ?? ''}
+        deleting={deletingGame}
+        onClose={() => {
+          if (!deletingGame) setDeleteTarget(null);
+        }}
+        onConfirm={() => void confirmDeleteGame()}
+      />
     </AppShell>
   );
 }

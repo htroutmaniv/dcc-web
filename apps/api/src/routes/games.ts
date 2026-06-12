@@ -1,7 +1,7 @@
 import { createGameSchema } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
 import { assertGameMember, generateInviteCode, isGameDm } from '../lib/game-access.js';
-import { emitToGame } from '../lib/game-socket.js';
+import { emitToGame, emitToUsers } from '../lib/game-socket.js';
 import { prisma } from '../lib/prisma.js';
 
 const gameListSelect = {
@@ -102,5 +102,24 @@ export async function gameRoutes(app: FastifyInstance) {
       isDm: isGameDm(game, userId),
       role: isGameDm(game, userId) ? ('dm' as const) : ('player' as const),
     };
+  });
+
+  app.delete('/games/:gameId', { onRequest: [app.authenticate] }, async (request) => {
+    const { gameId } = request.params as { gameId: string };
+    const userId = request.userId!;
+    const game = await prisma.game.findUnique({ where: { id: gameId } });
+    if (!game) return app.httpErrors.notFound('Game not found');
+    if (!isGameDm(game, userId)) {
+      return app.httpErrors.forbidden('Only the game creator can delete this game');
+    }
+    const members = await prisma.gamePlayer.findMany({
+      where: { gameId },
+      select: { userId: true },
+    });
+    const notifyUserIds = new Set([game.dmUserId, ...members.map((m) => m.userId)]);
+    const deletedPayload = { gameId, actorUserId: userId };
+    emitToUsers(app.io, notifyUserIds, 'game:deleted', deletedPayload);
+    await prisma.game.delete({ where: { id: gameId } });
+    return { ok: true };
   });
 }

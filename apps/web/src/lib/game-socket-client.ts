@@ -3,8 +3,20 @@ import { io, type Socket } from 'socket.io-client';
 let socket: Socket | null = null;
 let activeGameId: string | null = null;
 
+export type GameDeletedPayload = {
+  gameId?: string;
+  actorUserId?: string;
+};
+
+const gameDeletedListeners = new Set<(payload: GameDeletedPayload) => void>();
+
+function notifyGameDeleted(payload: GameDeletedPayload): void {
+  for (const listener of gameDeletedListeners) {
+    listener(payload);
+  }
+}
+
 function createSocket(): Socket {
-  // Production uses HTTP/2 on 443 — polling works; WebSocket upgrade does not.
   const transports: ('polling' | 'websocket')[] = import.meta.env.PROD
     ? ['polling']
     : ['polling', 'websocket'];
@@ -17,6 +29,10 @@ function createSocket(): Socket {
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 10000,
+  });
+
+  s.on('game:deleted', (payload: GameDeletedPayload) => {
+    notifyGameDeleted(payload);
   });
 
   s.on('connect', () => {
@@ -34,8 +50,8 @@ function createSocket(): Socket {
   return s;
 }
 
-/** Shared Socket.IO connection — one per browser tab, reused across game pages. */
-export function getGameSocket(): Socket {
+/** Connect the shared Socket.IO client (joins user room on the server). */
+export function ensureAccountSocket(): Socket {
   if (!socket) {
     socket = createSocket();
   }
@@ -45,29 +61,46 @@ export function getGameSocket(): Socket {
   return socket;
 }
 
-/** Track active game and return the shared socket (does not emit join — call joinGameRoom after handlers are attached). */
+/** @deprecated Use ensureAccountSocket */
+export function getGameSocket(): Socket {
+  return ensureAccountSocket();
+}
+
+export function subscribeGameDeleted(
+  listener: (payload: GameDeletedPayload) => void,
+): () => void {
+  ensureAccountSocket();
+  gameDeletedListeners.add(listener);
+  return () => {
+    gameDeletedListeners.delete(listener);
+  };
+}
+
 export function registerGameSocket(gameId: string): Socket {
   activeGameId = gameId;
-  return getGameSocket();
+  return ensureAccountSocket();
 }
 
 export function joinGameRoom(gameId: string): void {
   activeGameId = gameId;
-  getGameSocket().emit('game:join', { gameId });
+  ensureAccountSocket().emit('game:join', { gameId });
 }
 
-export function unregisterGameSocket(gameId: string): void {
+export function leaveGameRoom(gameId: string): void {
   if (activeGameId === gameId) {
     activeGameId = null;
   }
-  const s = socket;
-  if (s?.connected) {
-    s.emit('game:leave', { gameId });
+  if (socket?.connected) {
+    socket.emit('game:leave', { gameId });
   }
 }
 
-/** Leave the active game room and disconnect (navigation, logout, etc.). */
-export function leaveActiveGameSocket(): void {
+export function unregisterGameSocket(gameId: string): void {
+  leaveGameRoom(gameId);
+}
+
+/** Disconnect socket entirely (logout). */
+export function disconnectAccountSocket(): void {
   const s = socket;
   const gameId = activeGameId;
   activeGameId = null;
@@ -78,4 +111,9 @@ export function leaveActiveGameSocket(): void {
   }
   s.removeAllListeners();
   s.disconnect();
+}
+
+/** @deprecated Use disconnectAccountSocket */
+export function leaveActiveGameSocket(): void {
+  disconnectAccountSocket();
 }

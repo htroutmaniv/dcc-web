@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { api } from '../api/client';
-import { leaveActiveGameSocket } from '../lib/game-socket-client';
+import { disconnectAccountSocket, ensureAccountSocket } from '../lib/game-socket-client';
 import type { User } from '../types/game';
 
 export interface AuthConfig {
@@ -70,6 +70,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh().finally(() => setLoading(false));
   }, [refresh, loadAuthConfig]);
 
+  useEffect(() => {
+    if (user) {
+      ensureAccountSocket();
+    }
+  }, [user]);
+
   const devLogin = useCallback(
     async (account: 'dm' | 'player') => {
       await api('/auth/dev-login', {
@@ -112,7 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    leaveActiveGameSocket();
+    disconnectAccountSocket();
     await api('/auth/logout', { method: 'POST' });
     setUser(null);
   }, []);

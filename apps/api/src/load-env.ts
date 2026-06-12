@@ -6,11 +6,20 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../../..');
 
-for (const file of ['.env', '.env.example']) {
+function loadEnvFile(file: string, override: boolean): void {
   const envPath = resolve(root, file);
-  if (existsSync(envPath)) {
-    config({ path: envPath, override: false });
-  }
+  if (existsSync(envPath)) config({ path: envPath, override });
+}
+
+const profile =
+  process.env.DCC_ENV === 'production' ? 'production' : 'development';
+
+loadEnvFile('.env', false);
+loadEnvFile(`.env.${profile}`, true);
+loadEnvFile(`.env.${profile}.local`, true);
+
+if (!process.env.DCC_ENV) {
+  process.env.DCC_ENV = profile;
 }
 
 if (!process.env.DATABASE_URL) {

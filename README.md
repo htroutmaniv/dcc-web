@@ -9,11 +9,11 @@ Dungeon Crawl Classics session manager: character sheets, server dice, tactical 
 Same layout for daily dev and production-like runs — see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ```bash
-cp .env.example .env
-bun install
-bun run stack
-bun run db:migrate
+bun run setup
+# or: bun scripts/ensure-env.ts && bun install && bun run stack && bun run db:migrate
 ```
+
+Env is split: **`.env`** (secrets) + **`.env.development`** / **`.env.production`** (profiles). Dev commands use the development profile; `bun run prod` uses production.
 
 In **two terminals**: `bun server` and `bun bundler`. Open **http://localhost:8080**
 
@@ -21,11 +21,10 @@ In **two terminals**: `bun server` and `bun bundler`. Open **http://localhost:80
 
 | Script | What |
 |--------|------|
-| `bun run dev` | Docker stack + API watch + Vite HMR |
-| `bun run prod` / `bun run start` | Build once + Docker stack + API + Vite preview |
-| `bun run start:server` | API only (after `bun run build`) |
-| `bun run start:bundler` | Vite preview only (after `bun run build`) |
-| `bun run stack` | Postgres + nginx only |
+| `bun server` + `bun bundler` | Dev API watch + Vite HMR (development profile) |
+| `bun run prod` / `bun run start` | Build + production stack + API + Vite preview |
+| `bun run stack` | Postgres + nginx (development profile, :8080) |
+| `bun run stack:prod` | Recreate nginx for production (TLS / :443) |
 | `bun run build` | Compile shared, API, web |
 
 ## Docs

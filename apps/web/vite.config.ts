@@ -2,10 +2,11 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const port = Number(process.env.VITE_PORT ?? 5173);
-/** Public port users open (nginx). HMR WebSocket connects here when proxied. */
+/** Browser entry (nginx). HMR WebSocket must use ws:// on this port in dev — not wss. */
 const hmrClientPort = Number(
   process.env.VITE_HMR_CLIENT_PORT ?? process.env.NGINX_HTTP_PORT ?? process.env.HTTP_PORT ?? 8080,
 );
+const hmrProtocol = (process.env.VITE_HMR_PROTOCOL ?? 'ws') as 'ws' | 'wss';
 
 /** Hostnames nginx may forward — vite blocks unknown Host headers by default. */
 const allowedHosts = ['localhost', '127.0.0.1', 'hat3d.com', 'www.hat3d.com'];
@@ -17,8 +18,11 @@ export default defineConfig({
     port,
     strictPort: true,
     allowedHosts,
+    // HMR via nginx (:8080) → Vite WS server on :5173. Force ws:// (dev nginx has no TLS).
     hmr: {
-      host: 'localhost',
+      protocol: hmrProtocol,
+      host: process.env.VITE_HMR_HOST ?? 'localhost',
+      port,
       clientPort: hmrClientPort,
     },
     // Optional: hit Vite directly without nginx (localhost:5173)

@@ -31,3 +31,15 @@ export function emitToGame(
 ): void {
   io?.to(`game:${gameId}`).emit(event, { gameId, ...payload });
 }
+
+export function emitToUsers(
+  io: Server | null | undefined,
+  userIds: Iterable<string>,
+  event: string,
+  payload: Record<string, unknown>,
+): void {
+  if (!io) return;
+  for (const userId of userIds) {
+    io.to(`user:${userId}`).emit(event, payload);
+  }
+}

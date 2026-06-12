@@ -72,6 +72,7 @@ import type { TransferInventoryResult } from '../components/inventory/TransferIt
 import type { DiceRollLogEntry } from '../types/dice-roll-log';
 import type { TacticalGameMap } from '../types/map';
 import { useGameSocket } from '../hooks/useGameSocket';
+import { useGameDeleteNotifications } from '../hooks/useGameDeleteNotifications';
 import { formatError } from '../utils/errors';
 
 export default function GamePage() {
@@ -587,6 +588,8 @@ export default function GamePage() {
     },
     Boolean(gameId && detail),
   );
+
+  useGameDeleteNotifications({ gameId });
 
   useEffect(() => {
     setPresenceUsers([]);
@@ -1361,6 +1364,7 @@ export default function GamePage() {
             >
               {isDm && (
                 <DmControlPanel
+                  gameId={gameId}
                   initiative={initiative}
                   onStartInitiative={startInitiative}
                   onAdvanceTurn={advanceInitiative}
@@ -1377,6 +1381,9 @@ export default function GamePage() {
                   onRollMonsterAttack={rollMonsterAttack}
                   onOpenMonsterSheet={openMonsterSheet}
                   lastAttackSummary={lastMonsterAttackSummary}
+                  onMonstersChange={setMonsters}
+                  onMonsterInitiativeChange={applyInitiative}
+                  onMonsterPanelError={setError}
                 />
               )}
               <Box
@@ -1483,10 +1490,6 @@ export default function GamePage() {
           onEndTurn={endTurn}
           endTurnCharacterId={endTurnCharacterId}
           currentUserId={user?.id}
-          monsters={monsters}
-          onMonstersChange={setMonsters}
-          onMonsterInitiativeChange={applyInitiative}
-          onMonsterPanelError={setError}
           presenceUsers={presenceUsers}
         />
       </Box>

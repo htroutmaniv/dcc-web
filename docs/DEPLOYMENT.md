@@ -55,24 +55,26 @@ docker compose up -d
 
 Router/firewall must forward **80** and **443** to this machine.
 
-## 3. Environment (`.env`)
+## 3. Environment
 
-Copy `.env.production.example` → `.env` and set:
+Use **two layers** (see `.env.example` and `.env.production.example`):
 
-| Variable | Production value |
-|----------|------------------|
-| `NODE_ENV` | `production` |
-| `PUBLIC_URL` | `https://hat3d.com` |
-| `CORS_ORIGIN` | `https://hat3d.com` |
-| `JWT_SECRET` | Long random string |
-| `DATABASE_URL` | Postgres URL with **strong** password |
-| `RESEND_API_KEY` | From Resend dashboard |
-| `MAIL_FROM` | Verified sender, e.g. `noreply@hat3d.com` |
-| `NGINX_TLS` | `true` |
-| `LETSENCRYPT_DIR` | Host path to your `letsencrypt` folder |
-| `PORT` | `3003` (or another non-forwarded host port) |
+1. **`.env`** — secrets only (`POSTGRES_PASSWORD`, `DATABASE_URL`, `JWT_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`)
+2. **`.env.production`** — production profile (`PUBLIC_URL`, `NGINX_TLS`, `LETSENCRYPT_DIR`, etc.)
 
-Leave `ENABLE_DEV_LOGIN` unset so dev accounts are disabled.
+```bash
+bun scripts/ensure-env.ts   # creates missing files from *.example templates
+# Edit .env and .env.production with real secrets and paths
+```
+
+| Variable | Where |
+|----------|--------|
+| `JWT_SECRET`, `DATABASE_URL`, `RESEND_API_KEY` | `.env` |
+| `PUBLIC_URL`, `CORS_ORIGIN`, `NGINX_TLS`, `LETSENCRYPT_DIR` | `.env.production` |
+
+`bun run prod` loads both files and recreates nginx with the production profile. You do **not** need to flip flags in a single `.env` when switching back to dev — use `bun run stack` (development profile) instead.
+
+Leave `ENABLE_DEV_LOGIN` unset in production so dev accounts are disabled.
 
 ## 4. Resend (email verification)
 
@@ -127,11 +129,11 @@ If email does not arrive, check API logs for `Failed to send verification email`
 ## 5. Database
 
 ```bash
-cp .env.production.example .env   # then edit secrets
+bun scripts/ensure-env.ts
 bun install
 docker compose build nginx
-docker compose up -d
-bun run db:migrate
+bun run stack:prod
+bun run db:migrate:prod
 bun run db:seed
 ```
 
@@ -142,8 +144,10 @@ Postgres is bound to **127.0.0.1:5432** only (not exposed on all interfaces).
 **Option A — one command** (builds once, starts API + web together):
 
 ```bash
-NODE_ENV=production bun run prod
+bun run prod
 ```
+
+(No need to set `NODE_ENV` manually — the production profile sets it.)
 
 **Option B — separate terminals** (after a single build):
 

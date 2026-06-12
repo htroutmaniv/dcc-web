@@ -1,33 +1,34 @@
+import { useCallback, useState } from 'react';
 import {
   Box,
   Button,
+  IconButton,
   List,
   Tab,
   Tabs,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import CasinoIcon from '@mui/icons-material/Casino';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import GroupsIcon from '@mui/icons-material/Groups';
 import PeopleIcon from '@mui/icons-material/People';
-import PestControlIcon from '@mui/icons-material/PestControl';
 import { GamePresencePanel } from './GamePresencePanel';
 import { CharacterListItem, type CombatTargetOption } from './CharacterListItem';
 import { DmCharacterSections } from './DmCharacterSections';
 import type { DiceResult } from '../types/game';
 import { DiceTabPanel } from './DiceTabPanel';
-import { MonsterPanel } from './MonsterPanel';
 import type { Character, Game, GamePresenceUser, User } from '../types/game';
 import type { DiceRollLogEntry } from '../types/dice-roll-log';
 import {
   isCharacterTurn,
   type DiceTrayCounts,
   type GameInitiativeState,
-  type GameMonsterInstance,
 } from '@dcc-web/shared';
 import type { CharacterRollKind, CombatRollKind } from '../utils/character-rolls';
 
-export type GameMenuTab = 'characters' | 'monsters' | 'dice' | 'presence';
+export type GameMenuTab = 'characters' | 'dice' | 'presence';
 
 interface GameSideMenuProps {
   game: Game;
@@ -71,11 +72,6 @@ interface GameSideMenuProps {
   onEndTurn: (character: Character) => void;
   endTurnCharacterId?: string | null;
   currentUserId?: string;
-  monsters?: GameMonsterInstance[];
-  onMonstersChange?: (monsters: GameMonsterInstance[]) => void;
-  onMonsterInitiativeChange?: (initiative: GameInitiativeState | null) => void;
-  monsterPanelBusy?: boolean;
-  onMonsterPanelError?: (message: string | null) => void;
   presenceUsers?: GamePresenceUser[];
 }
 
@@ -121,14 +117,20 @@ export function GameSideMenu({
   onEndTurn,
   endTurnCharacterId,
   currentUserId,
-  monsters = [],
-  onMonstersChange,
-  onMonsterInitiativeChange,
-  monsterPanelBusy,
-  onMonsterPanelError,
   presenceUsers = [],
 }: GameSideMenuProps) {
+  const [copied, setCopied] = useState(false);
   const initiativeActive = initiative?.active ?? false;
+
+  const copyInviteCode = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(inviteCode);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard may be unavailable outside secure context.
+    }
+  }, [inviteCode]);
   return (
     <Box
       sx={{
@@ -148,9 +150,21 @@ export function GameSideMenu({
         <Typography variant="body2" noWrap title={game.title}>
           {game.title}
         </Typography>
-        <Typography variant="caption" color="text.secondary">
-          Code: {inviteCode}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, mt: 0.25 }}>
+          <Typography variant="caption" color="text.secondary">
+            Code: {inviteCode}
+          </Typography>
+          <Tooltip title={copied ? 'Copied!' : 'Copy invite code'}>
+            <IconButton
+              size="small"
+              onClick={() => void copyInviteCode()}
+              aria-label="Copy invite code"
+              sx={{ p: 0.25 }}
+            >
+              <ContentCopyIcon sx={{ fontSize: 14 }} />
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Box>
 
       <Tabs
@@ -160,14 +174,6 @@ export function GameSideMenu({
         sx={{ borderBottom: 1, borderColor: 'divider' }}
       >
         <Tab icon={<GroupsIcon />} iconPosition="start" label="PCs" value="characters" />
-        {isDm && (
-          <Tab
-            icon={<PestControlIcon />}
-            iconPosition="start"
-            label="Monsters"
-            value="monsters"
-          />
-        )}
         <Tab icon={<CasinoIcon />} iconPosition="start" label="Dice" value="dice" />
         <Tab icon={<PeopleIcon />} iconPosition="start" label="In game" value="presence" />
       </Tabs>
@@ -301,18 +307,6 @@ export function GameSideMenu({
               </List>
             )}
           </>
-        )}
-
-        {tab === 'monsters' && isDm && onMonstersChange && (
-          <MonsterPanel
-            gameId={game.id}
-            monsters={monsters}
-            initiative={initiative ?? null}
-            busy={monsterPanelBusy}
-            onMonstersChange={onMonstersChange}
-            onInitiativeChange={onMonsterInitiativeChange}
-            onError={onMonsterPanelError}
-          />
         )}
 
         {tab === 'dice' && (

@@ -4,16 +4,34 @@
 
 nginx + Postgres run in Docker. **API** and **Vite** run on the host in **separate terminals** so backend reloads do not restart the bundler (and vice versa).
 
-Open the app at **http://localhost:8080** (`NGINX_TLS=false`, nginx → host ports 3003 + 5173).
+Open the app at **http://localhost:8080** in development (`bun run stack` uses the **development** profile).
+
+## Environment profiles
+
+Secrets and profile settings are split so you can switch dev/prod without editing one file:
+
+| File | Purpose |
+|------|---------|
+| `.env` | Secrets shared by both profiles (DB password, JWT, Resend) |
+| `.env.development` | Dev URLs, `NGINX_TLS=false`, port 8080 |
+| `.env.production` | Prod URLs, TLS, Let's Encrypt path |
+
+`bun run setup` creates `.env`, `.env.development`, and `.env.production` from the `*.example` templates if missing.
+
+**Switch to dev:** `bun run stack`, `bun server`, `bun bundler` (all load `.env` + `.env.development`).
+
+**Switch to prod:** `bun run prod` (loads `.env` + `.env.production`, recreates nginx with TLS).
+
+Optional gitignored overrides: `.env.development.local`, `.env.production.local`.
+
+If you previously used a single `.env` for everything, move non-secret keys into the profile files (see the `*.example` templates). Keep secrets in `.env` only.
 
 ## Setup (once)
 
 ```bash
 bun run setup
-# or manually: cp .env.example .env && bun install && bun run stack && bun run db:migrate
+# or: bun scripts/ensure-env.ts && bun install && bun run stack && bun run db:migrate
 ```
-
-`bun server` auto-creates `.env` from `.env.example` if missing.
 
 ## Daily dev — three terminals (recommended)
 
@@ -47,9 +65,10 @@ Then restart `bun server` once after shared exports change (or leave `shared` wa
 
 | Command | What |
 |---------|------|
-| `bun run stack` | Postgres + nginx proxy |
-| `bun server` | API with `bun --watch` |
-| `bun bundler` | Vite dev server |
+| `bun run stack` | Postgres + nginx (**development** profile, port 8080) |
+| `bun run stack:prod` | Recreate nginx with **production** profile (TLS / 443) |
+| `bun server` | API with `bun --watch` (development profile) |
+| `bun bundler` | Vite dev server (development profile) |
 | `bun run shared` | `tsc --watch` on shared package |
 | `bun run start:server` | Compiled API only — run `bun run build` first |
 | `bun run start:bundler` | Vite preview only — run `bun run build` first |
@@ -110,3 +129,4 @@ When `bun server` and `bun bundler` (or nginx at :8080) are running, the game pa
 | API import errors from shared | `bun run build:shared` or `bun run shared` |
 | Equipment autocomplete empty | `bun run db:migrate` then `bun run db:seed` |
 | HMR broken | `VITE_HMR_CLIENT_PORT=8080` in `.env` |
+| `[vite] failed to connect to websocket` in console | **Vite hot-reload only** — not game sync. Open **http://localhost:8080** (not https). Restart `bun bundler` after vite config changes; `docker compose build nginx && docker compose up -d nginx` if nginx template changed. Safe to ignore if you are not editing frontend code. |

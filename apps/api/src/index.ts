@@ -39,7 +39,9 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  app.log.info({ socketId: socket.id, userId: socket.data.userId }, 'socket connected');
+  const userId = socket.data.userId as string;
+  socket.join(`user:${userId}`);
+  app.log.info({ socketId: socket.id, userId }, 'socket connected');
 
   socket.on('game:join', async (payload: { gameId?: string }) => {
     try {

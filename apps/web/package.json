@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "bundler": "vite",
+    "bundler": "bun ../../scripts/stop-bundler.ts && vite",
     "dev": "bun run bundler",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0 --port 5173"
+    "preview": "bun ../../scripts/stop-bundler.ts && vite preview --host 0.0.0.0 --port 5173"
   },
   "dependencies": {
     "@dcc-web/shared": "*",

@@ -1,22 +1,14 @@
 /**
- * Run Prisma CLI from apps/api with DATABASE_URL from repo root .env
- * (Prisma only auto-loads .env in the schema directory by default).
+ * Run Prisma CLI from apps/api with env from repo root (.env + profile).
  */
 import { spawnSync } from 'node:child_process';
-import { config } from 'dotenv';
-import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { loadProfileEnv } from './load-profile-env.js';
 
 const root = resolve(import.meta.dirname, '..');
 const apiDir = resolve(root, 'apps/api');
 
-for (const file of ['.env', '.env.example']) {
-  const envPath = resolve(root, file);
-  if (existsSync(envPath)) {
-    config({ path: envPath, override: false });
-    break;
-  }
-}
+loadProfileEnv();
 
 if (!process.env.DATABASE_URL) {
   process.env.DATABASE_URL = 'postgresql://dcc:dcc@localhost:5432/dcc';

@@ -2,14 +2,16 @@ import { copyFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
-const env = resolve(root, '.env');
-const example = resolve(root, '.env.example');
 
-if (!existsSync(env)) {
-  if (!existsSync(example)) {
-    console.error('Missing .env.example — cannot bootstrap .env');
-    process.exit(1);
+function ensureFromExample(target: string, example: string): void {
+  const envPath = resolve(root, target);
+  const examplePath = resolve(root, example);
+  if (!existsSync(envPath) && existsSync(examplePath)) {
+    copyFileSync(examplePath, envPath);
+    console.log(`Created ${target} from ${example}`);
   }
-  copyFileSync(example, env);
-  console.log('Created .env from .env.example');
 }
+
+ensureFromExample('.env', '.env.example');
+ensureFromExample('.env.development', '.env.development.example');
+ensureFromExample('.env.production', '.env.production.example');
