@@ -11,10 +11,10 @@ import {
   type MonsterStatsJson,
 } from '@dcc-web/shared';
 import type { Prisma } from '@prisma/client';
-import { mkdir, writeFile, unlink } from 'node:fs/promises';
-import path from 'node:path';
+import { unlink } from 'node:fs/promises';
 import { prisma } from '../lib/prisma.js';
-import { mapUploadDir, mapUploadPathFromUrl, MAP_UPLOAD_URL_PREFIX } from '../lib/storage-paths.js';
+import { saveMapImageBuffer } from '../lib/map-image-upload.js';
+import { mapUploadPathFromUrl } from '../lib/storage-paths.js';
 import {
   loadGameWithSettings,
   readGameSettings,
@@ -219,25 +219,24 @@ export async function setActiveMapId(gameId: string, mapId: string): Promise<str
   return setGameActiveMapId(gameId, mapId);
 }
 
-async function saveMapImage(mapId: string, dataUrl: string): Promise<{
-  imageUrl: string;
-  widthPx: number;
-  heightPx: number;
-}> {
-  const m = dataUrl.match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/i);
-  if (!m) throw new Error('Invalid image data URL');
-  const ext = m[1]!.toLowerCase() === 'jpeg' ? 'jpg' : m[1]!.toLowerCase();
-  const buf = Buffer.from(m[2]!, 'base64');
-  if (buf.length > 4_000_000) throw new Error('Image too large (max 4MB)');
-  await mkdir(mapUploadDir(), { recursive: true });
-  const filename = `${mapId}.${ext}`;
-  const filePath = path.join(mapUploadDir(), filename);
-  await writeFile(filePath, buf);
-  return {
-    imageUrl: `${MAP_UPLOAD_URL_PREFIX}${filename}`,
-    widthPx: 0,
-    heightPx: 0,
-  };
+export async function uploadGameMapImage(
+  gameId: string,
+  mapId: string,
+  buffer: Buffer,
+  dims: { widthPx?: number; heightPx?: number; imageScale?: number },
+): Promise<GameMapDto> {
+  const existing = await prisma.gameMap.findFirstOrThrow({ where: { id: mapId, gameId } });
+  const saved = await saveMapImageBuffer(mapId, buffer, existing.imageUrl);
+  await prisma.gameMap.update({
+    where: { id: mapId },
+    data: {
+      imageUrl: saved.imageUrl,
+      widthPx: dims.widthPx ?? 0,
+      heightPx: dims.heightPx ?? 0,
+      imageScale: dims.imageScale ?? 1,
+    },
+  });
+  return loadMapDto(mapId);
 }
 
 export async function patchGameMap(
@@ -248,7 +247,6 @@ export async function patchGameMap(
     visible?: boolean;
     gridPreset?: MapGridPreset;
     dmDrawings?: MapDrawing[];
-    imageDataUrl?: string | null;
     clearImage?: boolean;
     widthPx?: number;
     heightPx?: number;
@@ -283,12 +281,6 @@ export async function patchGameMap(
     data.widthPx = 0;
     data.heightPx = 0;
     (data as Prisma.GameMapUpdateInput & { imageScale?: number }).imageScale = 1;
-  } else if (patch.imageDataUrl) {
-    const saved = await saveMapImage(mapId, patch.imageDataUrl);
-    data.imageUrl = saved.imageUrl;
-    if (patch.widthPx !== undefined) data.widthPx = patch.widthPx;
-    if (patch.heightPx !== undefined) data.heightPx = patch.heightPx;
-    (data as Prisma.GameMapUpdateInput & { imageScale?: number }).imageScale = patch.imageScale ?? 1;
   }
 
   await prisma.gameMap.update({ where: { id: mapId }, data });

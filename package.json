@@ -32,7 +32,7 @@
     "db:migrate:dev": "bun run --filter @dcc-web/api db:migrate:dev",
     "db:seed": "bun run --filter @dcc-web/api db:seed",
     "docker:logs": "docker compose logs -f",
-    "postinstall": "bun run db:generate"
+    "postinstall": "bun scripts/postinstall.ts"
   },
   "engines": {
     "node": ">=20"

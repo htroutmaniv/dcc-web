@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
 import { Alert, Box, Button, Chip, CircularProgress, Link } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { api, ApiError } from '../api/client';
+import { api, apiFormData, ApiError } from '../api/client';
 import { AppShell } from '../components/AppShell';
 import {
   CreateCharacterDialog,
@@ -1524,25 +1524,32 @@ export default function GamePage() {
   };
 
   const uploadMapImage = (file: File, gridW?: number, gridH?: number) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const img = new window.Image();
-      img.onload = () => {
-        const fit =
-          gridW && gridH
-            ? fitImageToGrid(img.naturalWidth, img.naturalHeight, gridW, gridH)
-            : { widthPx: img.naturalWidth, heightPx: img.naturalHeight };
-        void patchActiveMap({
-          imageDataUrl: dataUrl,
-          widthPx: fit.widthPx,
-          heightPx: fit.heightPx,
-          imageScale: 1,
-        });
-      };
-      img.src = dataUrl;
+    if (!gameId || !activeMapId) return;
+    const img = new window.Image();
+    img.onload = () => {
+      const fit =
+        gridW && gridH
+          ? fitImageToGrid(img.naturalWidth, img.naturalHeight, gridW, gridH)
+          : { widthPx: img.naturalWidth, heightPx: img.naturalHeight };
+      const form = new FormData();
+      form.append('image', file);
+      form.append('widthPx', String(fit.widthPx));
+      form.append('heightPx', String(fit.heightPx));
+      form.append('imageScale', '1');
+      setMapBusy(true);
+      void apiFormData<{ map: TacticalGameMap }>(
+        `/games/${gameId}/maps/${activeMapId}/image`,
+        form,
+        { method: 'PUT' },
+      )
+        .then(({ map }) => {
+          setMaps((prev) => prev.map((m) => (m.id === map.id ? map : m)));
+          if (map.id === activeMapId) syncNpcTokensFromMap(map);
+        })
+        .catch((e) => setError(formatError(e)))
+        .finally(() => setMapBusy(false));
     };
-    reader.readAsDataURL(file);
+    img.src = URL.createObjectURL(file);
   };
 
   const applyMapFromServer = useCallback(

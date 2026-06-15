@@ -55,6 +55,7 @@ process.on('SIGTERM', () => shutdown(0));
 
 run('bun', ['scripts/stop-prod.ts']);
 run('bun', ['run', 'build']);
+run('bun', ['run', 'db:migrate:prod']);
 run('docker', ['compose', 'up', '-d', '--force-recreate', 'nginx']);
 
 children.push(spawnService('api', 'bun', ['run', 'start:server']));

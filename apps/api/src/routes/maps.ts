@@ -2,6 +2,7 @@ import {
   createGameMapSchema,
   patchGameMapSchema,
   setActiveMapSchema,
+  uploadGameMapImageFieldsSchema,
 } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
 import { createReadStream, existsSync } from 'node:fs';
@@ -22,6 +23,7 @@ import {
   patchGameMap,
   setActiveMapId,
   syncMapTokens,
+  uploadGameMapImage,
 } from '../services/map-service.js';
 
 const HOLDING_X = -1;
@@ -82,6 +84,43 @@ export async function mapRoutes(app: FastifyInstance) {
       const activeMapId = await setActiveMapId(gameId, parsed.data.mapId);
       emitMapState(app, gameId, request.userId);
       return { activeMapId };
+    },
+  );
+
+  app.put(
+    '/games/:gameId/maps/:mapId/image',
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
+    async (request) => {
+      const { gameId, mapId } = request.params as { gameId: string; mapId: string };
+      let imageBuffer: Buffer | null = null;
+      const fields: Record<string, string> = {};
+
+      for await (const part of request.parts()) {
+        if (part.type === 'file') {
+          if (part.fieldname !== 'image') {
+            return app.httpErrors.badRequest('Unexpected file field');
+          }
+          imageBuffer = await part.toBuffer();
+          continue;
+        }
+        fields[part.fieldname] = String(part.value);
+      }
+
+      if (!imageBuffer) {
+        return app.httpErrors.badRequest('Missing image file');
+      }
+
+      const parsed = uploadGameMapImageFieldsSchema.safeParse(fields);
+      if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
+
+      try {
+        const map = await uploadGameMapImage(gameId, mapId, imageBuffer, parsed.data);
+        emitMapState(app, gameId, request.userId);
+        return { map };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Upload failed';
+        return app.httpErrors.badRequest(msg);
+      }
     },
   );
 

@@ -14,18 +14,20 @@
     "db:push": "bun ../../scripts/prisma-env.ts db push",
     "db:studio": "bun ../../scripts/prisma-env.ts studio",
     "db:seed": "bun ../../scripts/prisma-env.ts db seed",
-    "test": "bun test"
+    "test": "NODE_ENV=test bun test"
   },
   "dependencies": {
     "@dcc-web/shared": "*",
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^10.0.2",
     "@fastify/jwt": "^9.0.4",
+    "@fastify/multipart": "^10.0.0",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/sensible": "^6.0.3",
     "@prisma/client": "^6.3.1",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
+    "file-type": "^22.0.1",
     "socket.io": "^4.8.1",
     "zod": "^3.24.2"
   },

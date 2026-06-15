@@ -23,15 +23,15 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
   - [x] `consumables.ts` — light source presets, `getCharacterLightRadiusFeet`, `resolveActiveLightItemId`
   - [x] `map-token-layout.ts` — `computeUpperLeftTokenGrid` / `computeUpperRightTokenGrid`
 
-### 0.2 API integration test harness — M *(deferred — see sequencing)*
-- [-] Choose: testcontainers-postgres **or** a shared throwaway db with schema-per-test.
-- [-] Add `apps/api/test/` with a `buildTestApp()` helper that boots `buildApp()` against the test db.
-- [-] First five tests (smoke):
-  - [-] `POST /auth/dev-login` + `GET /auth/me` round-trip
-  - [-] `POST /games` then `POST /games/join/:invite` as a second user
-  - [-] `PATCH /characters/:id` with `status: 'dead'` triggers initiative reconcile + map sync
-  - [-] `POST /games/:id/transfer-item` rejects player-to-player while initiative active
-  - [-] `POST /games/:id/initiative/start` + `/advance` cycles round and ticks mortality
+### 0.2 API integration test harness — M
+- [x] Choose: testcontainers-postgres **or** a shared throwaway db with schema-per-test. *(CI/local Postgres + truncate between tests.)*
+- [x] Add `apps/api/test/` with a `buildTestApp()` helper that boots `buildApp()` against the test db.
+- [x] First five tests (smoke):
+  - [x] `POST /auth/dev-login` + `GET /auth/me` round-trip
+  - [x] `POST /games` then `POST /games/join/:invite` as a second user
+  - [x] `PATCH /characters/:id` with `status: 'dead'` triggers initiative reconcile + map sync
+  - [x] `POST /games/:id/transfer-item` rejects player-to-player while initiative active
+  - [x] `POST /games/:id/initiative/start` + `/advance` cycles round and ticks mortality
 
 **Why deferred:** Phases 1–3 will reshape auth (rate limits, CSRF), `Game.settings` storage, initiative writes, route decorators, and the event facade. Writing integration tests now would mean rewriting the harness and every smoke test as those land. **Target: start 0.2 after Phase 3** (or late Phase 2 if 3 slips). Shared unit tests + CI (0.1, 0.3, 0.4) cover refactors until then.
 
@@ -39,7 +39,7 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [x] Add a workflow that runs on PR:
   - [x] `bun install`
   - [x] `bun run --filter @dcc-web/shared build` + tests
-  - [x] `bun run --filter @dcc-web/api build` + tests *(API tests deferred to 0.2)*
+  - [x] `bun run --filter @dcc-web/api build` + tests *(unit always; integration in CI via `GITHUB_ACTIONS`)*
   - [x] `bun run --filter @dcc-web/web build` (typecheck via `tsc --noEmit`)
 - [x] Add `bun run typecheck` script at root (run `tsc --noEmit` in each workspace).
 
@@ -139,7 +139,7 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 
 **Exit criteria:** no more JSON read-modify-write races; map sync is O(1) queries; data tables stop growing unbounded.
 
-> **Progress (2026-06-15):** Phase 3 — 3.1, 3.2, 3.3, 3.5, 3.6 complete. Next: 3.4 (multipart uploads) or 3.7 (Docker hygiene).
+> **Progress (2026-06-15):** Phase 3 complete (3.1–3.8). Next: Phase 4 frontend decomposition.
 
 ---
 
@@ -163,11 +163,11 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [x] Begin sending deltas in the event payload (`monsters:changed` includes `monsterIds` when known).
 
 ### 3.4 Multipart map uploads — M
-- [ ] Add `@fastify/multipart`.
-- [ ] Replace the base64-data-URL pipeline in `apps/api/src/services/map-service.ts:228-247`.
-- [ ] Stream to disk under `STORAGE_PATH` (already in config but unused — wire it up).
-- [ ] Use magic-byte sniffing (`file-type` package) to validate, not just the regex header.
-- [ ] Filename = `${mapId}-${sha256}.{ext}`; switch old file out atomically.
+- [x] Add `@fastify/multipart`.
+- [x] Replace the base64-data-URL pipeline in `apps/api/src/services/map-service.ts:228-247`.
+- [x] Stream to disk under `STORAGE_PATH` (already in config but unused — wire it up).
+- [x] Use magic-byte sniffing (`file-type` package) to validate, not just the regex header.
+- [x] Filename = `${mapId}-${sha256}.{ext}`; switch old file out atomically.
 
 ### 3.5 Storage path consistency — S
 - [x] Centralize map upload paths in `apps/api/src/lib/storage-paths.ts`; read from `config.storagePath` (default `./data/uploads`).
@@ -183,16 +183,16 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
   - `apps/web` utils (`armor.ts`, `consumables.ts`, `character-rolls.ts`, socket client) — Phase 4 cleanup.
 
 ### 3.7 Docker / deploy hygiene — S
-- [ ] `apps/api/Dockerfile` currently runs `npx prisma migrate deploy` in CMD — race condition with multiple replicas. Move migrations to a one-shot init job and have the app container only run the server.
-- [ ] Switch to `bun install --frozen-lockfile` instead of `npm install` for consistency with local dev.
-- [ ] Gate `prisma generate` in root `postinstall` on `SKIP_POSTINSTALL=1` so CI install is faster.
+- [x] `apps/api/Dockerfile` currently runs `npx prisma migrate deploy` in CMD — race condition with multiple replicas. Move migrations to a one-shot init job and have the app container only run the server.
+- [x] Switch to `bun install --frozen-lockfile` instead of `npm install` for consistency with local dev.
+- [x] Gate `prisma generate` in root `postinstall` on `SKIP_POSTINSTALL=1` so CI install is faster.
 
 **Exit criteria:** routes contain only domain logic; cross-cutting concerns (auth, events, uploads) live in plugins; deploy is reproducible.
 
 ### 3.8 API integration test harness *(carried from 0.2)* — M
-- [ ] Un-defer 0.2: choose test DB strategy, add `buildTestApp()`, land the five smoke tests listed in §0.2.
-- [ ] Wire `bun run --filter @dcc-web/api test` into CI (replace build-only step).
-- [ ] Add regression tests for Phase 2–3 work: optimistic initiative retry, batched `syncMapTokens`, decorator auth paths.
+- [x] Un-defer 0.2: choose test DB strategy, add `buildTestApp()`, land the five smoke tests listed in §0.2.
+- [x] Wire `bun run --filter @dcc-web/api test` into CI (replace build-only step).
+- [x] Add regression tests for Phase 2–3 work: optimistic initiative retry, batched `syncMapTokens`, decorator auth paths.
 
 ---
 

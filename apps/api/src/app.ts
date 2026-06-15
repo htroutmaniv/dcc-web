@@ -2,8 +2,10 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import jwt from '@fastify/jwt';
+import multipart from '@fastify/multipart';
 import sensible from '@fastify/sensible';
 import { config } from './lib/config.js';
+import { MAX_MAP_IMAGE_BYTES } from './lib/map-image-upload.js';
 import { registerAuth } from './plugins/auth.js';
 import { registerGameAccess } from './plugins/game-access.js';
 import { createRouteRateLimits, registerRateLimit } from './plugins/rate-limit.js';
@@ -36,6 +38,9 @@ export async function buildApp() {
     credentials: true,
   });
   await app.register(cookie);
+  await app.register(multipart, {
+    limits: { fileSize: MAX_MAP_IMAGE_BYTES, files: 1 },
+  });
   await app.register(jwt, {
     secret: config.jwtSecret,
     cookie: {

@@ -313,8 +313,13 @@ export const patchGameMapSchema = z.object({
   visible: z.boolean().optional(),
   gridPreset: z.enum(['tactical', 'town', 'regional']).optional(),
   dmDrawings: z.array(z.record(z.unknown())).max(500).optional(),
-  imageDataUrl: z.string().max(6_000_000).optional().nullable(),
   clearImage: z.boolean().optional(),
+  widthPx: z.coerce.number().int().min(0).max(20000).optional(),
+  heightPx: z.coerce.number().int().min(0).max(20000).optional(),
+  imageScale: z.coerce.number().min(0.1).max(5).optional(),
+});
+
+export const uploadGameMapImageFieldsSchema = z.object({
   widthPx: z.coerce.number().int().min(0).max(20000).optional(),
   heightPx: z.coerce.number().int().min(0).max(20000).optional(),
   imageScale: z.coerce.number().min(0.1).max(5).optional(),
