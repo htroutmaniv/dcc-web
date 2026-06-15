@@ -167,8 +167,9 @@ Run each start script **once** — API uses port 3003, web uses 5173.
 Smoke test:
 
 1. Open **https://hat3d.com**
-2. `https://hat3d.com/api/health` → `{ "status": "ok" }`
-3. Create a game — presence and sockets should work
+2. `https://hat3d.com/api/health` → includes `status`, `db`, `socket`, `version`, `gitSha`, `realtimeMode`
+3. `https://hat3d.com/api/ready` → `{ "status": "ready", "db": "ok" }` (503 if Postgres unreachable)
+4. Create a game — presence and sockets should work
 
 ## 7. Firewall
 
@@ -181,7 +182,24 @@ Smoke test:
 
 Do **not** publicly forward API or web ports — nginx on 443 is the only public entry.
 
-## 8. systemd (optional)
+## 8. Realtime / single-instance mode
+
+The API defaults to **single-instance** realtime (`REALTIME_MODE=single-instance`):
+
+- Socket.IO rooms and in-memory presence (`game-presence.ts`) are **process-local**.
+- Run **one** API process behind nginx unless you implement the multi-instance path (Redis + `@socket.io/redis-adapter` — see `plan.md` Phase 5.1).
+
+On startup the API logs a warning when single-instance mode is active. `/api/health` reports `realtimeMode`.
+
+Optional build metadata env vars (set at deploy time):
+
+| Variable | Purpose |
+|----------|---------|
+| `APP_VERSION` | Shown in `/health` (defaults to `@dcc-web/api` package version) |
+| `GIT_SHA` | Git commit in `/health` (defaults to `dev`) |
+| `REALTIME_MODE` | `single-instance` (default) or `redis` when multi-instance is wired |
+
+## 9. systemd (optional)
 
 See previous sections for `dcc-api.service` and `dcc-web.service` units pointing at `bun run start:server` and `start:bundler`.
 

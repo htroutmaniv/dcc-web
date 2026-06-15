@@ -6,9 +6,13 @@ import {
   transferInventoryItemSchema,
   upsertLootPoolSchema,
   upsertMonsterCatalogSchema,
+  isMonsterInPlay,
+  isMonsterKilled,
+  type MonsterStatsJson,
 } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
-import { publish, publishMany } from '../lib/game-events.js';
+import { publish, publishMany, publishContextFromRequest } from '../lib/game-events.js';
+import { AUDIT_KINDS, recordAudit } from '../services/audit-service.js';
 import { syncActiveMapTokens } from '../services/map-service.js';
 import { prisma } from '../lib/prisma.js';
 import {
@@ -276,15 +280,54 @@ export async function monsterRoutes(app: FastifyInstance) {
       const parsed = patchGameMonsterSchema.safeParse(request.body);
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
+      const existing = await prisma.gameMonster.findFirstOrThrow({
+        where: { id: monsterId, gameId },
+      });
+      const wasKilled = isMonsterKilled({
+        stats: existing.stats as MonsterStatsJson | undefined,
+      });
+      const wasInPlay = isMonsterInPlay({
+        stats: existing.stats as MonsterStatsJson | undefined,
+      });
+
       const { monster, initiative } = await patchGameMonster(gameId, monsterId, parsed.data);
       await syncActiveMapTokens(gameId);
+      const eventCtx = publishContextFromRequest(request);
       publishMany(app.io, gameId, [
         { type: 'monsters:changed', monsterIds: [monsterId], actorUserId: request.userId },
         { type: 'map:updated', actorUserId: request.userId },
-      ]);
+      ], eventCtx);
       if (initiative) {
         emitInitiativeUpdate(app, gameId, initiative, request.userId);
       }
+
+      const nowKilled = isMonsterKilled({
+        stats: monster.stats as MonsterStatsJson | undefined,
+      });
+      if (!wasKilled && nowKilled) {
+        await recordAudit({
+          gameId,
+          actorUserId: request.userId,
+          kind: AUDIT_KINDS.monsterKilled,
+          targetType: 'monster',
+          targetId: monsterId,
+          payload: { name: monster.name },
+        });
+      }
+      const nowInPlay = isMonsterInPlay({
+        stats: monster.stats as MonsterStatsJson | undefined,
+      });
+      if (wasInPlay !== nowInPlay) {
+        await recordAudit({
+          gameId,
+          actorUserId: request.userId,
+          kind: AUDIT_KINDS.monsterInPlay,
+          targetType: 'monster',
+          targetId: monsterId,
+          payload: { name: monster.name, from: wasInPlay, to: nowInPlay },
+        });
+      }
+
       return { monster, initiative };
     },
   );
@@ -324,19 +367,20 @@ export async function monsterRoutes(app: FastifyInstance) {
           input: parsed.data,
         });
         const result = await transferInventoryItem(gameId, parsed.data);
+        const eventCtx = publishContextFromRequest(request);
         if (result.sourceCharacter) {
           publish(app.io, gameId, {
             type: 'character:upsert',
             character: result.sourceCharacter,
             actorUserId: request.userId,
-          });
+          }, eventCtx);
         }
         if (result.targetCharacter) {
           publish(app.io, gameId, {
             type: 'character:upsert',
             character: result.targetCharacter,
             actorUserId: request.userId,
-          });
+          }, eventCtx);
         }
         if (result.sourceMonster || result.targetMonster) {
           const monsterIds = [
@@ -345,6 +389,20 @@ export async function monsterRoutes(app: FastifyInstance) {
           ].filter((id): id is string => Boolean(id));
           emitMonstersChanged(app, gameId, request.userId, monsterIds);
         }
+        await recordAudit({
+          gameId,
+          actorUserId: request.userId,
+          kind: AUDIT_KINDS.inventoryTransfer,
+          targetType: 'inventory',
+          targetId: parsed.data.sourceItemId,
+          payload: {
+            sourceType: parsed.data.sourceType,
+            sourceId: parsed.data.sourceId,
+            targetType: parsed.data.targetType,
+            targetId: parsed.data.targetId,
+            quantity: parsed.data.quantity ?? 1,
+          },
+        });
         return result;
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Transfer failed';

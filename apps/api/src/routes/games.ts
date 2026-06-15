@@ -10,9 +10,10 @@ import {
   gameWithSettingsInclude,
 } from '../services/game-settings-service.js';
 import { clearGameMembershipCache, generateUniqueInviteCode, isGameDm } from '../lib/game-access.js';
-import { publish, publishMany } from '../lib/game-events.js';
+import { publish, publishMany, publishContextFromRequest } from '../lib/game-events.js';
 import { emitToUsers } from '../lib/game-socket.js';
 import { prisma } from '../lib/prisma.js';
+import { AUDIT_KINDS, listAuditLog, recordAudit } from '../services/audit-service.js';
 
 const gameListSelect = {
   id: true,
@@ -166,19 +167,40 @@ export async function gameRoutes(app: FastifyInstance) {
     }
 
     const settings = await patchGameSettingsColumns(gameId, parsed.data);
+    const eventCtx = publishContextFromRequest(request);
     if (parsed.data.sharedMonsterInitiative !== undefined) {
       const initiative = await syncMonsterGroupInitiative(gameId);
       publishMany(app.io, gameId, [
         { type: 'initiative:updated', initiative, actorUserId: request.userId },
         { type: 'game:settings_updated', settings, actorUserId: request.userId },
-      ]);
-      return { settings };
+      ], eventCtx);
+    } else {
+      publish(app.io, gameId, {
+        type: 'game:settings_updated',
+        settings,
+        actorUserId: request.userId,
+      }, eventCtx);
     }
-    publish(app.io, gameId, {
-      type: 'game:settings_updated',
-      settings,
+    await recordAudit({
+      gameId,
       actorUserId: request.userId,
+      kind: AUDIT_KINDS.gameSettings,
+      targetType: 'game',
+      targetId: gameId,
+      payload: { changes: parsed.data },
     });
     return { settings };
+  });
+
+  app.get('/games/:gameId/audit', {
+    onRequest: [app.authenticate],
+    preHandler: [app.requireDm],
+  }, async (request) => {
+    const { gameId } = request.params as { gameId: string };
+    const { limit } = request.query as { limit?: string };
+    const parsedLimit = Number.parseInt(limit ?? '50', 10);
+    const take = Math.min(Math.max(Number.isFinite(parsedLimit) ? parsedLimit : 50, 1), 200);
+    const entries = await listAuditLog(gameId, take);
+    return { entries };
   });
 }

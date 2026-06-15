@@ -269,29 +269,29 @@ Goal: from 1948 LOC + 79 hooks down to a ≤300-LOC orchestrator.
 ## Phase 5 — Operability & realtime scale
 
 ### 5.1 Decide single-vs-multi-instance — ADR (see Phase 6)
-- [ ] If staying single-instance: document the limit in `docs/DEPLOYMENT.md`; add a startup banner + `/health` field reporting "single instance".
-- [ ] If scaling out:
+- [x] If staying single-instance: document the limit in `docs/DEPLOYMENT.md`; add a startup banner + `/health` field reporting "single instance".
+- [x] ~~If scaling out~~ **Deferred** — current deploy scale does not require horizontal API scaling; one process supports many concurrent games. Revisit when connection/CPU limits or zero-downtime multi-worker deploys are needed (see ADR-003):
   - [ ] Add Redis service to `docker-compose.yml`
   - [ ] Add `@socket.io/redis-adapter` wiring in `apps/api/src/index.ts`
   - [ ] Move `presenceByGame` Map from `apps/api/src/lib/game-presence.ts` into Redis (`game:{id}:presence` hash keyed by socketId)
   - [ ] Move the membership-LRU from 3.1 into Redis as well
 
 ### 5.2 Audit log — M
-- [ ] New `AuditLog` Prisma model: `id, gameId, actorUserId, kind, targetType, targetId, payload Json, createdAt`.
-- [ ] Log:
-  - [ ] character: status change (kill / revive / archive), ownership change
-  - [ ] monster: kill, in-play toggle
-  - [ ] inventory: every transfer between owners
-  - [ ] game: settings change, map clear/reset
-- [ ] Surface in DM-only `GET /games/:id/audit?limit=...` and a debug pane in `DmControlPanel`.
+- [x] New `AuditLog` Prisma model: `id, gameId, actorUserId, kind, targetType, targetId, payload Json, createdAt`.
+- [x] Log:
+  - [x] character: status change (kill / revive / archive), ownership change
+  - [x] monster: kill, in-play toggle
+  - [x] inventory: every transfer between owners
+  - [x] game: settings change, map clear/reset
+- [x] Surface in DM-only `GET /games/:id/audit?limit=...` and a debug pane in `DmControlPanel`.
 
 ### 5.3 Observability — S
-- [ ] Already have pino via Fastify default; add request ids in logs (Fastify does this) and ensure they bubble through to `emitToGame` debug lines.
-- [ ] Optional: Sentry on both API and web — env-gated.
+- [x] Already have pino via Fastify default; add request ids in logs (Fastify does this) and ensure they bubble through to `emitToGame` debug lines.
+- [x] ~~Optional: Sentry on both API and web — env-gated.~~ Skipped until public consumption / ops need justifies it.
 
 ### 5.4 Health & readiness — S
-- [ ] Expand `GET /health` to include `db: 'ok'|'fail'`, `socket: 'ok'`, `version` (from package.json + git sha at build).
-- [ ] Optional `/ready` that pings Postgres so nginx / k8s can gate traffic.
+- [x] Expand `GET /health` to include `db: 'ok'|'fail'`, `socket: 'ok'`, `version` (from package.json + git sha at build).
+- [x] Optional `/ready` that pings Postgres so nginx / k8s can gate traffic.
 
 **Exit criteria:** prod can be safely operated, scaled, and audited.
 
@@ -303,7 +303,7 @@ Goal: from 1948 LOC + 79 hooks down to a ≤300-LOC orchestrator.
 Create `docs/adr/` and add:
 - [ ] **ADR-001** Game state storage: dedicated tables vs JSON column with optimistic locking. *(Drives Phase 2.1.)*
 - [ ] **ADR-002** Auth surface: keep email+JWT cookie, role of dev-login in prod, CSRF strategy. *(Drives Phase 1.3.)*
-- [ ] **ADR-003** Realtime scope: single instance vs Redis adapter. *(Drives Phase 5.1.)*
+- [x] **ADR-003** Realtime scope: single instance vs Redis adapter. *(Drives Phase 5.1.)* — see `docs/adr/003-realtime-single-instance.md`
 - [ ] **ADR-004** Client data layer: keep ad-hoc state vs TanStack Query. *(Drives Phase 4.2.)*
 - [ ] **ADR-005** Image storage: local FS vs object storage (S3/MinIO) when going multi-instance.
 

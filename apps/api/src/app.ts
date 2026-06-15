@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { randomUUID } from 'node:crypto';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import jwt from '@fastify/jwt';
@@ -29,7 +30,12 @@ declare module 'fastify' {
 }
 
 export async function buildApp() {
-  const app = Fastify({ logger: true });
+  const app = Fastify({
+    logger: true,
+    genReqId: (req) => (req.headers['x-request-id'] as string | undefined) ?? randomUUID(),
+    requestIdHeader: 'x-request-id',
+    requestIdLogLabel: 'reqId',
+  });
   app.decorate('io', null);
 
   await app.register(sensible);

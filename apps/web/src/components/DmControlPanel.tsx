@@ -15,12 +15,14 @@ import SkipNextIcon from '@mui/icons-material/SkipNext';
 import StopIcon from '@mui/icons-material/Stop';
 import PestControlIcon from '@mui/icons-material/PestControl';
 import GavelIcon from '@mui/icons-material/Gavel';
+import HistoryIcon from '@mui/icons-material/History';
 import type { GameInitiativeState, GameMonsterInstance } from '@dcc-web/shared';
 import { MonsterQuickMenu, type MonsterCombatRollKind } from './MonsterQuickMenu';
 import { MonsterPanel } from './MonsterPanel';
+import { DmAuditPane } from './DmAuditPane';
 import type { Character } from '../types/game';
 
-export type DmPanelTab = 'controls' | 'monsters';
+export type DmPanelTab = 'controls' | 'monsters' | 'audit';
 
 const PANEL_WIDTH = { xs: 320, sm: 420 } as const;
 
@@ -122,6 +124,12 @@ export function DmControlPanel({
           iconPosition="start"
           label="Monsters"
           value="monsters"
+        />
+        <Tab
+          icon={<HistoryIcon />}
+          iconPosition="start"
+          label="Audit"
+          value="audit"
         />
       </Tabs>
 
@@ -264,6 +272,20 @@ export function DmControlPanel({
             onInitiativeChange={onMonsterInitiativeChange}
             onError={onMonsterPanelError}
           />
+        </Box>
+      )}
+
+      {tab === 'audit' && (
+        <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <Box sx={{ p: 1.5, flexShrink: 0 }}>
+            <Typography variant="subtitle2" fontWeight={700}>
+              Audit log
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Recent DM-sensitive actions (last 100)
+            </Typography>
+          </Box>
+          <DmAuditPane gameId={gameId} />
         </Box>
       )}
     </Box>

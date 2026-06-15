@@ -87,6 +87,7 @@ model User {
   diceRolls     DiceRoll[]
   movementReqs  MovementRequest[] @relation("MovementRequester")
   authTokens    AuthToken[]
+  auditLogs     AuditLog[]     @relation("AuditActor")
 
   @@map("users")
 }
@@ -135,6 +136,7 @@ model Game {
   movementRequests MovementRequest[]
   activeMap        GameMap?          @relation("ActiveGameMap", fields: [activeMapId], references: [id], onDelete: SetNull)
   initiative       GameInitiative?
+  auditLogs        AuditLog[]
 
   @@index([dmUserId, status])
   @@map("games")
@@ -424,4 +426,21 @@ model MovementRequest {
 
   @@index([gameId, status])
   @@map("movement_requests")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  gameId      String   @map("game_id") @db.Uuid
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  kind        String
+  targetType  String   @map("target_type")
+  targetId    String?  @map("target_id")
+  payload     Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  game  Game  @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([gameId, createdAt])
+  @@map("audit_logs")
 }

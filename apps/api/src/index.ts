@@ -1,6 +1,7 @@
 import './load-env.js';
 import { Server } from 'socket.io';
 import { config } from './lib/config.js';
+import { buildInfo } from './lib/build-info.js';
 import { buildApp } from './app.js';
 import { resolveGameMemberAccess } from './lib/game-access.js';
 import {
@@ -28,6 +29,13 @@ const io = new Server(app.server, {
   connectTimeout: 45_000,
 });
 app.io = io;
+
+if (buildInfo.realtimeMode === 'single-instance') {
+  app.log.warn(
+    { realtimeMode: buildInfo.realtimeMode },
+    'Running single-instance mode: WebSocket rooms and presence are process-local. Run only one API process unless REALTIME_MODE=redis is configured (see docs/DEPLOYMENT.md).',
+  );
+}
 
 io.use((socket, next) => {
   const userId = getUserIdFromSocketCookie(app, socket.handshake.headers.cookie);

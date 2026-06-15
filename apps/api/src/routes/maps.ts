@@ -8,7 +8,8 @@ import type { FastifyInstance } from 'fastify';
 import { createReadStream, existsSync } from 'node:fs';
 import path from 'node:path';
 import { resolveGameMemberAccess } from '../lib/game-access.js';
-import { publish } from '../lib/game-events.js';
+import { publish, publishContextFromRequest } from '../lib/game-events.js';
+import { AUDIT_KINDS, recordAudit } from '../services/audit-service.js';
 import { parseLayoutTokensBody } from '../lib/parse-layout-tokens.js';
 import { mapUploadFilePath } from '../lib/storage-paths.js';
 import { prisma } from '../lib/prisma.js';
@@ -204,8 +205,16 @@ export async function mapRoutes(app: FastifyInstance) {
         type: 'map:tokens_reset',
         tokens: updated,
         actorUserId: request.userId,
-      });
+      }, publishContextFromRequest(request));
       emitMapState(app, gameId, request.userId);
+      await recordAudit({
+        gameId,
+        actorUserId: request.userId,
+        kind: AUDIT_KINDS.mapTokensReset,
+        targetType: 'map',
+        targetId: activeMapId,
+        payload: { tokenCount: updated.length },
+      });
       return { tokens: updated };
     },
   );
@@ -232,8 +241,16 @@ export async function mapRoutes(app: FastifyInstance) {
         map,
         tokens: map.tokens,
         actorUserId: request.userId,
-      });
+      }, publishContextFromRequest(request));
       emitMapState(app, gameId, request.userId);
+      await recordAudit({
+        gameId,
+        actorUserId: request.userId,
+        kind: AUDIT_KINDS.mapClear,
+        targetType: 'map',
+        targetId: activeMapId,
+        payload: { clearImage: Boolean(body.clearImage) },
+      });
       return { map, tokens: map.tokens };
     },
   );

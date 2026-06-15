@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Server } from 'socket.io';
+import type { PublishContext } from './game-events.js';
 import { config } from './config.js';
 
 export function getUserIdFromSocketCookie(
@@ -23,7 +24,9 @@ export function emitToGame(
   gameId: string,
   event: string,
   payload: Record<string, unknown>,
+  ctx?: PublishContext,
 ): void {
+  ctx?.log?.debug({ gameId, event, reqId: ctx.reqId }, 'emit game socket event');
   io?.to(`game:${gameId}`).emit(event, { gameId, ...payload });
 }
 

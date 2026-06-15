@@ -19,10 +19,11 @@ import { characterMovementRange } from '../services/movement.js';
 import { gameWithSettingsInclude } from '../services/game-settings-service.js';
 import { deleteTokensForCharacter, syncActiveMapTokens } from '../services/map-service.js';
 import { reconcileInitiativeAfterCharacterDeath } from '../services/initiative-service.js';
-import { publish } from '../lib/game-events.js';
+import { publish, publishContextFromRequest } from '../lib/game-events.js';
+import { AUDIT_KINDS, recordAudit } from '../services/audit-service.js';
 
 function broadcastCharacter(
-  request: { server: { io: import('socket.io').Server | null }; userId?: string },
+  request: { server: { io: import('socket.io').Server | null }; userId?: string; log: import('fastify').FastifyBaseLogger; id: string },
   gameId: string,
   character: Awaited<ReturnType<typeof prisma.character.create>>,
 ) {
@@ -30,7 +31,7 @@ function broadcastCharacter(
     type: 'character:upsert',
     character,
     actorUserId: request.userId,
-  });
+  }, publishContextFromRequest(request));
 }
 
 async function assertValidCharacterOwner(
@@ -341,10 +342,48 @@ export async function characterRoutes(app: FastifyInstance) {
             type: 'initiative:updated',
             initiative,
             actorUserId: request.userId,
-          });
+          }, publishContextFromRequest(request));
         }
       }
       broadcastCharacter(request, existing.gameId, character);
+      if (statusChange) {
+        await recordAudit({
+          gameId: existing.gameId,
+          actorUserId: request.userId,
+          kind: AUDIT_KINDS.characterStatus,
+          targetType: 'character',
+          targetId: characterId,
+          payload: {
+            from: existing.status,
+            to: statusChange,
+            name: character.name,
+            viaHp: hpMarkDead && statusChange === undefined,
+          },
+        });
+      } else if (hpMarkDead && existing.status !== 'dead') {
+        await recordAudit({
+          gameId: existing.gameId,
+          actorUserId: request.userId,
+          kind: AUDIT_KINDS.characterStatus,
+          targetType: 'character',
+          targetId: characterId,
+          payload: { from: existing.status, to: 'dead', name: character.name, viaHp: true },
+        });
+      }
+      if (ownerChange !== undefined && ownerChange !== existing.ownerUserId) {
+        await recordAudit({
+          gameId: existing.gameId,
+          actorUserId: request.userId,
+          kind: AUDIT_KINDS.characterOwner,
+          targetType: 'character',
+          targetId: characterId,
+          payload: {
+            from: existing.ownerUserId,
+            to: ownerChange,
+            name: character.name,
+          },
+        });
+      }
       return { character };
     },
   );
