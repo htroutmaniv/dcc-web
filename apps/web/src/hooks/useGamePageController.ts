@@ -25,6 +25,7 @@ import {
 import { useGameDeleteNotifications } from './useGameDeleteNotifications';
 import { formatError } from '../utils/errors';
 import { findStaleAttackTargetCharacterIds } from '../utils/character-attack-target';
+import { resetFullListFetchMetrics } from '../utils/game-fetch-metrics';
 
 export function useGamePageController(gameId: string | undefined) {
   const navigate = useNavigate();
@@ -73,7 +74,6 @@ export function useGamePageController(gameId: string | undefined) {
     selectedCharacter,
     setSelectedCharacter,
     characterAttackTargetById,
-    setCharacterAttackTargetById,
     loadCharacters,
     applyCharacterFromServer,
   } = useCharacters(gameId, isDm, user?.id);
@@ -84,7 +84,6 @@ export function useGamePageController(gameId: string | undefined) {
     selectedMonster,
     setSelectedMonster,
     monsterTargetById,
-    setMonsterTargetById,
     loadMonsters,
     handleMonsterUpdated,
   } = useMonsters(gameId, isDm);
@@ -172,7 +171,6 @@ export function useGamePageController(gameId: string | undefined) {
     userId: user?.id,
     characters,
     characterAttackTargetById,
-    setCharacterAttackTargetById,
     applyCharacterFromServer,
     applyGamePatch,
     selectedCharacter,
@@ -208,12 +206,10 @@ export function useGamePageController(gameId: string | undefined) {
   const monsterActions = useMonsterActions({
     gameId,
     monsters,
-    setMonsters,
     selectedMonster,
     setSelectedMonster,
     setSelectedCharacter,
     monsterTargetById,
-    setMonsterTargetById,
     handleMonsterUpdated,
     applyInitiative,
     applyGamePatch,
@@ -232,7 +228,6 @@ export function useGamePageController(gameId: string | undefined) {
     initiative,
     initiativeActive,
     maps,
-    setMaps,
     activeMapId,
     setActiveMapId,
     activeMap,
@@ -253,6 +248,7 @@ export function useGamePageController(gameId: string | undefined) {
 
   useEffect(() => {
     if (!gameId) return;
+    resetFullListFetchMetrics();
     setLoading(true);
     void (async () => {
       try {
@@ -392,8 +388,9 @@ export function useGamePageController(gameId: string | undefined) {
     selectedMonster,
     setSelectedMonster,
     monsterTargetById,
-    setMonsters,
     applyInitiative,
+    applyGamePatch,
+    handleMonsterUpdated,
     menuTab,
     setMenuTab,
     createDialogOpen,
@@ -418,7 +415,6 @@ export function useGamePageController(gameId: string | undefined) {
     closeCorpseLoot,
     selectSidebarCharacter,
     applyCharacterFromServer,
-    handleMonsterUpdated,
   };
 }
 

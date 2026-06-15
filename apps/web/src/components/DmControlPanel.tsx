@@ -20,6 +20,7 @@ import type { GameInitiativeState, GameMonsterInstance } from '@dcc-web/shared';
 import { MonsterQuickMenu, type MonsterCombatRollKind } from './MonsterQuickMenu';
 import { MonsterPanel } from './MonsterPanel';
 import { DmAuditPane } from './DmAuditPane';
+import { GameFetchMetricsBar } from './GameFetchMetricsBar';
 import type { Character } from '../types/game';
 
 export type DmPanelTab = 'controls' | 'monsters' | 'audit';
@@ -54,7 +55,8 @@ interface DmControlPanelProps {
   rollingMonsterKind?: MonsterCombatRollKind | null;
   onOpenMonsterSheet: (monsterId: string) => void;
   lastAttackSummary?: string | null;
-  onMonstersChange: (monsters: GameMonsterInstance[]) => void;
+  handleMonsterUpdated: (monster: GameMonsterInstance) => void;
+  applyGamePatch: (patch: import('@dcc-web/shared').GamePatch) => void;
   onMonsterInitiativeChange?: (initiative: GameInitiativeState | null) => void;
   onMonsterPanelError?: (message: string | null) => void;
 }
@@ -87,7 +89,8 @@ export function DmControlPanel({
   rollingMonsterKind,
   onOpenMonsterSheet,
   lastAttackSummary,
-  onMonstersChange,
+  handleMonsterUpdated,
+  applyGamePatch,
   onMonsterInitiativeChange,
   onMonsterPanelError,
 }: DmControlPanelProps) {
@@ -268,7 +271,8 @@ export function DmControlPanel({
             gameId={gameId}
             monsters={monsters}
             busy={busy}
-            onMonstersChange={onMonstersChange}
+            handleMonsterUpdated={handleMonsterUpdated}
+            applyGamePatch={applyGamePatch}
             onInitiativeChange={onMonsterInitiativeChange}
             onError={onMonsterPanelError}
           />
@@ -288,6 +292,7 @@ export function DmControlPanel({
           <DmAuditPane gameId={gameId} />
         </Box>
       )}
+      <GameFetchMetricsBar />
     </Box>
   );
 }

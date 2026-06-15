@@ -3,6 +3,7 @@ import { api } from '../../api/client';
 import type { Character } from '../../types/game';
 import { readCharacterAttackTargetMap } from '../../utils/character-attack-target';
 import { dedupeAsync } from '../../utils/dedupe-async';
+import { recordFullListFetch } from '../../utils/game-fetch-metrics';
 
 export function useCharacters(
   gameId: string | undefined,
@@ -11,20 +12,22 @@ export function useCharacters(
 ) {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
-  const [characterAttackTargetById, setCharacterAttackTargetById] = useState<
-    Record<string, string>
-  >({});
+
+  const characterAttackTargetById = useMemo(
+    () => readCharacterAttackTargetMap(characters),
+    [characters],
+  );
 
   const loadCharacters = useMemo(
     () =>
       dedupeAsync(async () => {
         if (!gameId) return;
+        recordFullListFetch('characters');
         const q = isDm ? '?includeDead=true' : '';
         const data = await api<{ characters: Character[] }>(
           `/games/${gameId}/characters${q}`,
         );
         setCharacters(data.characters);
-        setCharacterAttackTargetById(readCharacterAttackTargetMap(data.characters));
         setSelectedCharacter((prev) => {
           if (!prev) return null;
           return data.characters.find((c) => c.id === prev.id) ?? null;
@@ -71,7 +74,6 @@ export function useCharacters(
     selectedCharacter,
     setSelectedCharacter,
     characterAttackTargetById,
-    setCharacterAttackTargetById,
     loadCharacters,
     applyCharacterFromServer,
   };

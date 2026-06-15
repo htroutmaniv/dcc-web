@@ -202,15 +202,51 @@ export async function listGameMaps(gameId: string): Promise<{
     where: { gameId },
     orderBy: { sortOrder: 'asc' },
   });
-  const maps: GameMapDto[] = [];
-  for (const row of rows) {
-    maps.push(toMapDto(row, await loadMapTokens(row.id)));
+  const mapIds = rows.map((row) => row.id);
+  const tokenRows =
+    mapIds.length > 0
+      ? await prisma.mapToken.findMany({
+          where: { mapId: { in: mapIds } },
+          include: mapTokenInclude,
+        })
+      : [];
+  const tokensByMapId = new Map<string, MapTokenDto[]>();
+  for (const token of tokenRows) {
+    const list = tokensByMapId.get(token.mapId) ?? [];
+    list.push(toTokenDto(token));
+    tokensByMapId.set(token.mapId, list);
   }
+  const maps = rows.map((row) => toMapDto(row, tokensByMapId.get(row.id) ?? []));
   const activeMapId =
     settings.activeMapId && maps.some((m) => m.id === settings.activeMapId)
       ? settings.activeMapId
       : maps.find((m) => m.visible)?.id ?? maps[0]?.id ?? null;
   return { maps, activeMapId };
+}
+
+/** Lightweight active-map lookup — avoids loading all maps + tokens. */
+export async function getGameActiveMapId(gameId: string): Promise<string | null> {
+  const game = await loadGameWithSettings(gameId);
+  const settings = readGameSettings(game);
+  if (settings.activeMapId) {
+    const row = await prisma.gameMap.findFirst({
+      where: { id: settings.activeMapId, gameId },
+      select: { id: true },
+    });
+    if (row) return row.id;
+  }
+  const visible = await prisma.gameMap.findFirst({
+    where: { gameId, visible: true },
+    orderBy: { sortOrder: 'asc' },
+    select: { id: true },
+  });
+  if (visible) return visible.id;
+  const first = await prisma.gameMap.findFirst({
+    where: { gameId },
+    orderBy: { sortOrder: 'asc' },
+    select: { id: true },
+  });
+  return first?.id ?? null;
 }
 
 export async function createGameMap(
@@ -570,7 +606,7 @@ export async function syncMapTokens(gameId: string, mapId: string): Promise<Game
 }
 
 export async function syncActiveMapTokens(gameId: string): Promise<GameMapDto | null> {
-  const { activeMapId } = await listGameMaps(gameId);
+  const activeMapId = await getGameActiveMapId(gameId);
   if (!activeMapId) return null;
   return syncMapTokens(gameId, activeMapId);
 }

@@ -1,5 +1,5 @@
 import { Divider, Stack, Typography } from '@mui/material';
-import type { GameInitiativeState, GameMonsterInstance } from '@dcc-web/shared';
+import type { GameInitiativeState, GameMonsterInstance, GamePatch } from '@dcc-web/shared';
 import { MonsterSpawnForm } from './monster-panel/MonsterSpawnForm';
 import { MonsterSpawnedList } from './monster-panel/MonsterSpawnedList';
 import { useMonsterPanelState } from './monster-panel/useMonsterPanelState';
@@ -8,7 +8,8 @@ interface MonsterPanelProps {
   gameId: string;
   monsters: GameMonsterInstance[];
   busy?: boolean;
-  onMonstersChange: (monsters: GameMonsterInstance[]) => void;
+  handleMonsterUpdated: (monster: GameMonsterInstance) => void;
+  applyGamePatch: (patch: GamePatch) => void;
   onInitiativeChange?: (initiative: GameInitiativeState | null) => void;
   onError?: (message: string | null) => void;
 }

@@ -52,8 +52,9 @@ export function GamePageView({ vm }: GamePageViewProps) {
     selectedMonster,
     setSelectedMonster,
     monsterTargetById,
-    setMonsters,
     applyInitiative,
+    applyGamePatch,
+    handleMonsterUpdated,
     menuTab,
     setMenuTab,
     createDialogOpen,
@@ -78,7 +79,6 @@ export function GamePageView({ vm }: GamePageViewProps) {
     closeCorpseLoot,
     selectSidebarCharacter,
     applyCharacterFromServer,
-    handleMonsterUpdated,
   } = vm;
 
   const headerActions = (
@@ -215,7 +215,8 @@ export function GamePageView({ vm }: GamePageViewProps) {
                 rollingMonsterKind={monsterActions.monsterRollingKind}
                 onOpenMonsterSheet={monsterActions.openMonsterSheet}
                 lastAttackSummary={monsterActions.lastMonsterAttackSummary}
-                onMonstersChange={setMonsters}
+                handleMonsterUpdated={handleMonsterUpdated}
+                applyGamePatch={applyGamePatch}
                 onMonsterInitiativeChange={applyInitiative}
                 onMonsterPanelError={setError}
                 maps={maps}

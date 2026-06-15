@@ -3,6 +3,7 @@ import type { GameInitiativeState, GameSettings } from '@dcc-web/shared';
 import { api, ApiError } from '../../api/client';
 import type { GameDetail } from '../../types/game';
 import { formatError } from '../../utils/errors';
+import { recordFullListFetch } from '../../utils/game-fetch-metrics';
 
 type GameSettingsPatch = Partial<
   Pick<
@@ -58,6 +59,7 @@ export function useGameDetail(gameId: string | undefined) {
 
   const loadDetail = useCallback(async () => {
     if (!gameId) return;
+    recordFullListFetch('detail');
     const data = await api<GameDetail>(`/games/${gameId}`);
     if (!data.game.settings) {
       throw new Error('Game API response missing game.settings');

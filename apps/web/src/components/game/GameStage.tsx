@@ -47,7 +47,8 @@ export type GameStageProps = {
   rollingMonsterKind: MonsterCombatRollKind | null;
   onOpenMonsterSheet: (monsterId: string) => void;
   lastAttackSummary: string | null;
-  onMonstersChange: React.Dispatch<React.SetStateAction<GameMonsterInstance[]>>;
+  handleMonsterUpdated: (monster: GameMonsterInstance) => void;
+  applyGamePatch: (patch: import('@dcc-web/shared').GamePatch) => void;
   onMonsterInitiativeChange: (next: GameInitiativeState | null) => void;
   onMonsterPanelError: (message: string | null) => void;
   maps: TacticalGameMap[];
@@ -144,7 +145,8 @@ export function GameStage(props: GameStageProps) {
             rollingMonsterKind={props.rollingMonsterKind}
             onOpenMonsterSheet={props.onOpenMonsterSheet}
             lastAttackSummary={props.lastAttackSummary}
-            onMonstersChange={props.onMonstersChange}
+            handleMonsterUpdated={props.handleMonsterUpdated}
+            applyGamePatch={props.applyGamePatch}
             onMonsterInitiativeChange={props.onMonsterInitiativeChange}
             onMonsterPanelError={props.onMonsterPanelError}
           />

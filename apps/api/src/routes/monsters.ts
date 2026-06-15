@@ -15,6 +15,7 @@ import type { FastifyInstance } from 'fastify';
 import { publishContextFromRequest } from '../lib/game-events.js';
 import { publishGamePatch } from '../lib/game-patch-publish.js';
 import { AUDIT_KINDS, recordAudit } from '../services/audit-service.js';
+import { buildMonsterDeletedPatch, buildMonsterUpsertPatch } from '../services/game-state.js';
 import { syncActiveMapTokens } from '../services/map-service.js';
 import { prisma } from '../lib/prisma.js';
 import {
@@ -266,11 +267,10 @@ export async function monsterRoutes(app: FastifyInstance) {
       const { monster, initiative } = await patchGameMonster(gameId, monsterId, parsed.data);
       const map = await syncActiveMapTokens(gameId);
       const eventCtx = publishContextFromRequest(request);
-      const patch: GamePatch = {
-        monsters: { upserted: [monster] },
-        ...(map ? { map } : {}),
+      const patch = buildMonsterUpsertPatch(monster, {
+        map,
         ...(initiative !== null ? { initiative } : {}),
-      };
+      });
       publishGamePatch(app.io, gameId, patch, request.userId, eventCtx);
 
       const nowKilled = isMonsterKilled({
@@ -316,7 +316,7 @@ export async function monsterRoutes(app: FastifyInstance) {
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
       const monster = await replaceMonsterItems(gameId, monsterId, parsed.data.items);
-      const patch: GamePatch = { monsters: { upserted: [monster] } };
+      const patch = buildMonsterUpsertPatch(monster);
       publishGamePatch(app.io, gameId, patch, request.userId);
       return { monster, patch };
     },
@@ -386,11 +386,10 @@ export async function monsterRoutes(app: FastifyInstance) {
       };
       const { initiative } = await deleteGameMonster(gameId, monsterId);
       const map = await syncActiveMapTokens(gameId);
-      const patch: GamePatch = {
-        monsters: { deletedIds: [monsterId] },
-        ...(map ? { map } : {}),
+      const patch = buildMonsterDeletedPatch(monsterId, {
+        map,
         ...(initiative !== null ? { initiative } : {}),
-      };
+      });
       publishGamePatch(app.io, gameId, patch, request.userId);
       return { ok: true, initiative, patch, ...(map ? { map } : {}) };
     },

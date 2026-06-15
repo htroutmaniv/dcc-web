@@ -6,6 +6,7 @@ import {
   scaleMonsterStats,
   type GameInitiativeState,
   type GameMonsterInstance,
+  type GamePatch,
   type MonsterCatalogEntry,
 } from '@dcc-web/shared';
 import { api } from '../../api/client';
@@ -28,16 +29,44 @@ type UseMonsterPanelStateArgs = {
   gameId: string;
   monsters: GameMonsterInstance[];
   busy?: boolean;
-  onMonstersChange: (monsters: GameMonsterInstance[]) => void;
+  handleMonsterUpdated: (monster: GameMonsterInstance) => void;
+  applyGamePatch: (patch: GamePatch) => void;
   onInitiativeChange?: (initiative: GameInitiativeState | null) => void;
   onError?: (message: string | null) => void;
 };
+
+function applyMonsterMutationResult(
+  data: {
+    patch?: GamePatch;
+    monster?: GameMonsterInstance;
+    monsters?: GameMonsterInstance[];
+    initiative?: GameInitiativeState | null;
+  },
+  handlers: Pick<
+    UseMonsterPanelStateArgs,
+    'applyGamePatch' | 'handleMonsterUpdated' | 'onInitiativeChange'
+  >,
+) {
+  if (data.patch) {
+    handlers.applyGamePatch(data.patch);
+    return;
+  }
+  if (data.monsters) {
+    for (const monster of data.monsters) handlers.handleMonsterUpdated(monster);
+  } else if (data.monster) {
+    handlers.handleMonsterUpdated(data.monster);
+  }
+  if (data.initiative !== undefined) {
+    handlers.onInitiativeChange?.(data.initiative);
+  }
+}
 
 export function useMonsterPanelState({
   gameId,
   monsters,
   busy,
-  onMonstersChange,
+  handleMonsterUpdated,
+  applyGamePatch,
   onInitiativeChange,
   onError,
 }: UseMonsterPanelStateArgs) {
@@ -50,6 +79,11 @@ export function useMonsterPanelState({
   const [custom, setCustom] = useState(DEFAULT_CUSTOM_MONSTER);
   const [spawning, setSpawning] = useState(false);
   const [localBusy, setLocalBusy] = useState(false);
+
+  const mutationHandlers = useMemo(
+    () => ({ applyGamePatch, handleMonsterUpdated, onInitiativeChange }),
+    [applyGamePatch, handleMonsterUpdated, onInitiativeChange],
+  );
 
   const loadCatalog = useCallback(async (q: string) => {
     try {
@@ -111,12 +145,12 @@ export function useMonsterPanelState({
       const data = await api<{
         monsters: GameMonsterInstance[];
         initiative: GameInitiativeState | null;
+        patch?: GamePatch;
       }>(`/games/${gameId}/monsters/spawn`, {
         method: 'POST',
         body: JSON.stringify(body),
       });
-      onMonstersChange([...monsters, ...data.monsters]);
-      if (data.initiative) onInitiativeChange?.(data.initiative);
+      applyMonsterMutationResult(data, mutationHandlers);
     } catch (e) {
       onError?.(formatError(e));
     } finally {
@@ -135,12 +169,12 @@ export function useMonsterPanelState({
       const data = await api<{
         monster: GameMonsterInstance;
         initiative?: GameInitiativeState | null;
+        patch?: GamePatch;
       }>(`/games/${gameId}/monsters/${monster.id}`, {
         method: 'PATCH',
         body: JSON.stringify(body),
       });
-      onMonstersChange(monsters.map((m) => (m.id === monster.id ? data.monster : m)));
-      if (data.initiative) onInitiativeChange?.(data.initiative);
+      applyMonsterMutationResult(data, mutationHandlers);
     } catch (e) {
       onError?.(formatError(e));
     } finally {
@@ -155,6 +189,7 @@ export function useMonsterPanelState({
       const data = await api<{
         monster: GameMonsterInstance;
         initiative?: GameInitiativeState | null;
+        patch?: GamePatch;
       }>(`/games/${gameId}/monsters/${monster.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
@@ -162,8 +197,7 @@ export function useMonsterPanelState({
           stats: buildMonsterKilledStats(monster.stats, true),
         }),
       });
-      onMonstersChange(monsters.map((m) => (m.id === monster.id ? data.monster : m)));
-      if (data.initiative) onInitiativeChange?.(data.initiative);
+      applyMonsterMutationResult(data, mutationHandlers);
     } catch (e) {
       onError?.(formatError(e));
     } finally {
@@ -175,12 +209,11 @@ export function useMonsterPanelState({
     setLocalBusy(true);
     onError?.(null);
     try {
-      const data = await api<{ initiative: GameInitiativeState | null }>(
-        `/games/${gameId}/monsters/${monsterId}`,
-        { method: 'DELETE' },
-      );
-      onMonstersChange(monsters.filter((m) => m.id !== monsterId));
-      if (data.initiative !== undefined) onInitiativeChange?.(data.initiative);
+      const data = await api<{
+        initiative: GameInitiativeState | null;
+        patch?: GamePatch;
+      }>(`/games/${gameId}/monsters/${monsterId}`, { method: 'DELETE' });
+      applyMonsterMutationResult(data, mutationHandlers);
     } catch (e) {
       onError?.(formatError(e));
     } finally {
@@ -196,6 +229,7 @@ export function useMonsterPanelState({
       const data = await api<{
         monster: GameMonsterInstance;
         initiative?: GameInitiativeState | null;
+        patch?: GamePatch;
       }>(`/games/${gameId}/monsters/${monster.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
@@ -205,8 +239,7 @@ export function useMonsterPanelState({
           },
         }),
       });
-      onMonstersChange(monsters.map((m) => (m.id === monster.id ? data.monster : m)));
-      if (data.initiative) onInitiativeChange?.(data.initiative);
+      applyMonsterMutationResult(data, mutationHandlers);
     } catch (e) {
       onError?.(formatError(e));
     } finally {
@@ -235,6 +268,7 @@ export function useMonsterPanelState({
     killMonster,
     removeMonster,
     toggleInPlay,
+    monsters,
   };
 }
 

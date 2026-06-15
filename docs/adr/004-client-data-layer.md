@@ -34,5 +34,6 @@ Realtime already pushes most mutations; REST is primarily initial load and optim
 ## Consequences
 
 - New features should follow existing hook patterns under `apps/web/src/hooks/game/`.
-- If adopting TanStack Query later, migrate one resource at a time (e.g. characters first) and keep socket handlers as cache invalidation sources.
+- **ADR-006** (`game:patch` + `applyGamePatch` reducer) is now the primary sync path; socket invalidation pings are retired.
+- If adopting TanStack Query later, migrate one resource at a time (e.g. characters first) and keep `game:patch` as the cache update source.
 - Plan item 4.2 remains `[-]` deferred with this ADR as the recorded reason.

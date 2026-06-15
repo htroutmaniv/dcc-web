@@ -23,13 +23,34 @@ import { CHARACTER_ATTACK_TARGET_KEY } from '../../utils/character-attack-target
 import { formatError } from '../../utils/errors';
 import { parseCharacterResponse } from './parse-character-response.js';
 
+function withCharacterCombatHp(character: Character, hpCurrent: number, hpMax: number): Character {
+  return {
+    ...character,
+    combat: { ...(character.combat ?? {}), hpCurrent, hpMax },
+  };
+}
+
+function withCharacterStatsCustom(
+  character: Character,
+  customPatch: Record<string, unknown>,
+): Character {
+  const prevStats = character.stats ?? {};
+  const prevCustom = (prevStats.custom ?? {}) as Record<string, unknown>;
+  return {
+    ...character,
+    stats: {
+      ...prevStats,
+      custom: { ...prevCustom, ...customPatch },
+    },
+  };
+}
+
 export type CharacterActionsDeps = {
   gameId: string | undefined;
   isDm: boolean;
   userId: string | undefined;
   characters: Character[];
   characterAttackTargetById: Record<string, string>;
-  setCharacterAttackTargetById: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   applyCharacterFromServer: (character: Character) => void;
   applyGamePatch: (patch: GamePatch) => void;
   selectedCharacter: Character | null;
@@ -48,7 +69,6 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
     userId,
     characters,
     characterAttackTargetById,
-    setCharacterAttackTargetById,
     applyCharacterFromServer,
     applyGamePatch,
     selectedCharacter,
@@ -125,12 +145,6 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
   };
 
   const setCharacterAttackTarget = async (characterId: string, targetRef: string | null) => {
-    setCharacterAttackTargetById((prev) => {
-      const next = { ...prev };
-      if (targetRef) next[characterId] = targetRef;
-      else delete next[characterId];
-      return next;
-    });
     const c = characters.find((x) => x.id === characterId);
     if (!c) return;
     const prevCustom = (c.stats?.custom ?? {}) as Record<string, unknown>;
@@ -147,8 +161,8 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
         }),
       );
       if (updated) applyCharacterFromServer(updated);
-    } catch {
-      /* keep local selection */
+    } catch (e) {
+      onError(formatError(e));
     }
   };
 
@@ -158,6 +172,8 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
         ? character.combat.hpMax
         : Math.max(0, hpCurrent);
     const nextHp = typeof hpMax === 'number' && hpCurrent > hpMax ? hpMax : hpCurrent;
+    const snapshot = character;
+    applyCharacterFromServer(withCharacterCombatHp(character, nextHp, hpMax));
     setHpAdjustingId(character.id);
     try {
       const updated = parseCharacterResponse(
@@ -171,6 +187,7 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
       if (updated) applyCharacterFromServer(updated);
       onError(null);
     } catch (e) {
+      applyCharacterFromServer(snapshot);
       onError(formatError(e));
     } finally {
       setHpAdjustingId(null);
@@ -280,6 +297,13 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
 
   const selectActiveLight = async (character: Character, lightItemId: string | null) => {
     if (!canEditCharacter(character)) return;
+    const snapshot = character;
+    applyCharacterFromServer(
+      withCharacterStatsCustom(character, {
+        [ACTIVE_LIGHT_ITEM_ID_KEY]: lightItemId ?? '',
+        ...(lightItemId === null ? { [USING_LIGHT_SOURCE_KEY]: false } : {}),
+      }),
+    );
     setConsumableAdjustingId(character.id);
     try {
       let updated = await patchLightCustom(character, { equippedId: lightItemId });
@@ -288,6 +312,7 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
       applyCharacterFromServer(updated);
       onError(null);
     } catch (e) {
+      applyCharacterFromServer(snapshot);
       onError(formatError(e));
     } finally {
       setConsumableAdjustingId(null);
@@ -300,11 +325,16 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
       onError('Select a light source first');
       return;
     }
+    const snapshot = character;
+    applyCharacterFromServer(
+      withCharacterStatsCustom(character, { [USING_LIGHT_SOURCE_KEY]: lit }),
+    );
     setConsumableAdjustingId(character.id);
     try {
       applyCharacterFromServer(await patchLightCustom(character, { lit }));
       onError(null);
     } catch (e) {
+      applyCharacterFromServer(snapshot);
       onError(formatError(e));
     } finally {
       setConsumableAdjustingId(null);

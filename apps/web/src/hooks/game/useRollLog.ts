@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import type { DiceResult } from '../../types/game';
 import type { DiceRollLogEntry } from '../../types/dice-roll-log';
 import { parseRollLogEntry } from '../../utils/roll-log';
+import { recordFullListFetch } from '../../utils/game-fetch-metrics';
 
 export function useRollLog(gameId: string | undefined) {
   const [rollLog, setRollLog] = useState<DiceRollLogEntry[]>([]);
@@ -11,6 +12,7 @@ export function useRollLog(gameId: string | undefined) {
 
   const loadDiceRolls = useCallback(async () => {
     if (!gameId) return;
+    recordFullListFetch('diceRolls');
     const data = await api<{ rolls: DiceRollLogEntry[] }>(
       `/games/${gameId}/dice-rolls?limit=80`,
     );

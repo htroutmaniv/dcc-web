@@ -19,12 +19,10 @@ import { formatError } from '../../utils/errors';
 export type MonsterActionsDeps = {
   gameId: string | undefined;
   monsters: GameMonsterInstance[];
-  setMonsters: React.Dispatch<React.SetStateAction<GameMonsterInstance[]>>;
   selectedMonster: GameMonsterInstance | null;
   setSelectedMonster: React.Dispatch<React.SetStateAction<GameMonsterInstance | null>>;
   setSelectedCharacter: React.Dispatch<React.SetStateAction<Character | null>>;
   monsterTargetById: Record<string, string>;
-  setMonsterTargetById: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   handleMonsterUpdated: (monster: GameMonsterInstance) => void;
   applyInitiative: (next: GameInitiativeState | null) => void;
   applyGamePatch: (patch: GamePatch) => void;
@@ -42,12 +40,9 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
   const {
     gameId,
     monsters,
-    setMonsters,
-    selectedMonster,
     setSelectedMonster,
     setSelectedCharacter,
     monsterTargetById,
-    setMonsterTargetById,
     handleMonsterUpdated,
     applyInitiative,
     applyGamePatch,
@@ -125,6 +120,15 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
 
   const patchMonsterHp = async (monster: GameMonsterInstance, hpCurrent: number) => {
     if (!gameId) return;
+    const snapshot = monster;
+    const optimistic: GameMonsterInstance = {
+      ...monster,
+      hpCurrent,
+      ...(hpCurrent > 0 && monster.stats?.custom?.killed === true
+        ? { stats: buildMonsterKilledStats(monster.stats, false) }
+        : {}),
+    };
+    handleMonsterUpdated(optimistic);
     setMonsterBusy(true);
     try {
       const body: Record<string, unknown> = { hpCurrent };
@@ -134,13 +138,18 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
       const data = await api<{
         monster: GameMonsterInstance;
         initiative: GameInitiativeState | null;
+        patch?: GamePatch;
       }>(`/games/${gameId}/monsters/${monster.id}`, {
         method: 'PATCH',
         body: JSON.stringify(body),
       });
-      handleMonsterUpdated(data.monster);
-      if (data.initiative) applyInitiative(data.initiative);
+      if (data.patch) applyGamePatch(data.patch);
+      else {
+        handleMonsterUpdated(data.monster);
+        if (data.initiative) applyInitiative(data.initiative);
+      }
     } catch (e) {
+      handleMonsterUpdated(snapshot);
       onError(formatError(e));
     } finally {
       setMonsterBusy(false);
@@ -189,8 +198,6 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
         `/games/${gameId}/monsters/${monsterId}`,
         { method: 'DELETE' },
       );
-      setMonsters((prev) => prev.filter((m) => m.id !== monsterId));
-      if (selectedMonster?.id === monsterId) setSelectedMonster(null);
       if (data.patch) applyGamePatch(data.patch);
       else {
         applyInitiative(data.initiative);
@@ -204,12 +211,6 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
   };
 
   const setMonsterAttackTarget = async (monsterId: string, characterId: string | null) => {
-    setMonsterTargetById((prev) => {
-      const next = { ...prev };
-      if (characterId) next[monsterId] = characterId;
-      else delete next[monsterId];
-      return next;
-    });
     const m = monsters.find((x) => x.id === monsterId);
     if (!m || !gameId) return;
     const prevCustom = (m.stats?.custom ?? {}) as Record<string, unknown>;
@@ -227,8 +228,8 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
         },
       );
       handleMonsterUpdated(updated);
-    } catch {
-      /* keep local target selection */
+    } catch (e) {
+      onError(formatError(e));
     }
   };
 

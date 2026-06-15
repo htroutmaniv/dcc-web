@@ -4,7 +4,6 @@ import {
   replaceCharacterItemsSchema,
   warnUnknownCharacterStatsCustomKeys,
   MAP_TOKEN_VISIBLE_KEY,
-  type GamePatch,
 } from '@dcc-web/shared';
 import type { CharacterStats } from '@dcc-web/shared';
 import type { Prisma } from '@prisma/client';
@@ -21,6 +20,7 @@ import { characterMovementRange } from '../services/movement.js';
 import { gameWithSettingsInclude } from '../services/game-settings-service.js';
 import { deleteTokensForCharacter, syncActiveMapTokens } from '../services/map-service.js';
 import { reconcileInitiativeAfterCharacterDeath } from '../services/initiative-service.js';
+import { buildCharacterUpsertPatch } from '../services/game-state.js';
 import { publishGamePatch } from '../lib/game-patch-publish.js';
 import { AUDIT_KINDS, recordAudit } from '../services/audit-service.js';
 
@@ -164,10 +164,7 @@ export async function characterRoutes(app: FastifyInstance) {
           });
           const character = await persistCharacter(gameId, ownerUserId, generated, 'random');
           const map = await syncActiveMapTokens(gameId);
-          const patch: GamePatch = {
-            characters: { upserted: [character] },
-            ...(map ? { map } : {}),
-          };
+          const patch = buildCharacterUpsertPatch(character, map ? { map } : {});
           publishGamePatch(request.server.io, gameId, patch, request.userId);
           return { character, patch, ...(map ? { map } : {}) };
         }
@@ -179,10 +176,7 @@ export async function characterRoutes(app: FastifyInstance) {
         });
         const character = await persistCharacter(gameId, ownerUserId, generated, 'manual');
         const map = await syncActiveMapTokens(gameId);
-        const patch: GamePatch = {
-          characters: { upserted: [character] },
-          ...(map ? { map } : {}),
-        };
+        const patch = buildCharacterUpsertPatch(character, map ? { map } : {});
         publishGamePatch(request.server.io, gameId, patch, request.userId);
         return { character, patch, ...(map ? { map } : {}) };
       } catch (e) {
@@ -393,11 +387,10 @@ export async function characterRoutes(app: FastifyInstance) {
           },
         });
       }
-      const patch: GamePatch = {
-        characters: { upserted: [character] },
+      const patch = buildCharacterUpsertPatch(character, {
         ...(syncedMap ? { map: syncedMap } : {}),
         ...(deathInitiative !== null ? { initiative: deathInitiative } : {}),
-      };
+      });
       publishGamePatch(request.server.io, existing.gameId, patch, request.userId);
       return {
         character,
@@ -468,7 +461,7 @@ export async function characterRoutes(app: FastifyInstance) {
           include: { items: { orderBy: { sortOrder: 'asc' } } },
         });
       });
-      const patch: GamePatch = { characters: { upserted: [character] } };
+      const patch = buildCharacterUpsertPatch(character);
       publishGamePatch(request.server.io, existing.gameId, patch, request.userId);
       return { character, patch };
     },

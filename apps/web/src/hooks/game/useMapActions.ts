@@ -31,7 +31,6 @@ export type MapActionsDeps = {
   initiative: GameInitiativeState | null;
   initiativeActive: boolean;
   maps: TacticalGameMap[];
-  setMaps: React.Dispatch<React.SetStateAction<TacticalGameMap[]>>;
   activeMapId: string | null;
   setActiveMapId: React.Dispatch<React.SetStateAction<string | null>>;
   activeMap: TacticalGameMap | null;
@@ -60,9 +59,8 @@ export function useMapActions(deps: MapActionsDeps) {
     initiative,
     initiativeActive,
     maps,
-    setMaps,
-    activeMapId,
     setActiveMapId,
+    activeMapId,
     activeMap,
     setMapBusy,
     loadMaps,
@@ -216,7 +214,7 @@ export function useMapActions(deps: MapActionsDeps) {
         method: 'POST',
         body: JSON.stringify({}),
       });
-      setMaps((prev) => [...prev, map]);
+      applyMapFromServer(map);
       await setActiveMap(map.id);
     } catch (e) {
       onError(formatError(e));
@@ -250,8 +248,7 @@ export function useMapActions(deps: MapActionsDeps) {
         `/games/${gameId}/maps/${activeMapId}`,
         { method: 'PATCH', body: JSON.stringify(body) },
       );
-      setMaps((prev) => prev.map((m) => (m.id === map.id ? map : m)));
-      if (map.id === activeMapId) syncNpcTokensFromMap(map);
+      applyMapFromServer(map);
     } catch (e) {
       onError(formatError(e));
     } finally {
@@ -279,8 +276,7 @@ export function useMapActions(deps: MapActionsDeps) {
         { method: 'PUT' },
       )
         .then(({ map }) => {
-          setMaps((prev) => prev.map((m) => (m.id === map.id ? map : m)));
-          if (map.id === activeMapId) syncNpcTokensFromMap(map);
+          applyMapFromServer(map);
         })
         .catch((e) => onError(formatError(e)))
         .finally(() => setMapBusy(false));
@@ -314,7 +310,7 @@ export function useMapActions(deps: MapActionsDeps) {
         `/games/${gameId}/maps/${activeMapId}/layout-tokens`,
         { method: 'POST', body: JSON.stringify({ ...(anchor ?? {}), kinds }) },
       );
-      setMaps((prev) => prev.map((m) => (m.id === map.id ? map : m)));
+      applyMapFromServer(map);
       syncNpcTokensFromMap(map);
     } catch (e) {
       onError(formatError(e));
@@ -328,28 +324,30 @@ export function useMapActions(deps: MapActionsDeps) {
     void layoutMapTokens(anchor, ['monster']);
 
   const moveMapToken = async (tokenId: string, x: number, y: number) => {
-    setMaps((prev) =>
-      prev.map((m) =>
-        m.id !== activeMapId
-          ? m
-          : {
-              ...m,
-              tokens: m.tokens.map((t) =>
-                t.id === tokenId ? { ...t, x, y, zone: 'map' as const } : t,
-              ),
-            },
-      ),
-    );
+    if (!activeMapId) return;
+    const prior = activeMap?.tokens.find((t) => t.id === tokenId);
+    applyMapTokenFromServer({ id: tokenId, mapId: activeMapId, x, y, zone: 'map' });
     try {
       const res = await api<{ token: unknown }>(`/tokens/${tokenId}/move`, {
         method: 'PATCH',
         body: JSON.stringify({ x, y, zone: 'map' }),
       });
       const patch = parseMapTokenPatch(res.token);
-      if (patch) applyMapTokenFromServer(patch);
+      if (!patch) {
+        throw new Error('Invalid token move response');
+      }
+      applyMapTokenFromServer(patch);
     } catch (e) {
+      if (prior) {
+        applyMapTokenFromServer({
+          id: prior.id,
+          mapId: activeMapId,
+          x: prior.x,
+          y: prior.y,
+          zone: prior.zone,
+        });
+      }
       onError(formatError(e));
-      await loadMaps();
     }
   };
 

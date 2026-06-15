@@ -62,8 +62,8 @@ flowchart TB
 |------|----------------|
 | Auth | Email login/register; session via httpOnly cookie |
 | Game page | `useGamePageController` + domain hooks under `hooks/game/` |
-| Server state | REST fetch on mount; **no TanStack Query** (ADR-004) |
-| Live updates | `useGameRealtimeSync` applies socket events to hook state |
+| Server state | REST on mount + reconnect; mutations return `{ patch }`; **no TanStack Query** (ADR-004) |
+| Live updates | `game:patch` WebSocket events → `applyGamePatch` reducer (ADR-006); legacy invalidation pings retired |
 | Map | `react-konva` tactical canvas |
 
 ### `apps/api`
@@ -94,9 +94,15 @@ Grouped by domain under `src/` (combat, dice, inventory, map, initiative, monste
 
 ### Live updates
 
-1. Client PATCH/POST → API persists to Postgres.
-2. API `publish(io, gameId, event)` → all sockets in `game:{gameId}`.
-3. Clients merge event into local hook state (no full refetch).
+1. Client sends a command via REST (PATCH/POST/DELETE).
+2. API persists in Postgres, builds a **`GamePatch`** (`packages/shared/src/game-patch.ts`), returns it on the HTTP response, and publishes the same patch on Socket.IO as `game:patch`.
+3. **Initiator** applies the response patch locally (skips the socket event when `actorUserId` matches).
+4. **Other clients** apply the socket patch via `applyGamePatch` — no full list refetch.
+5. **Reconnect** runs `resyncAll()` (full `loadDetail`, characters, monsters, maps, dice rolls) as the only sanctioned catch-up after missed events.
+
+Animation-only events (`damage:applied`, `dice:rolled`) remain; they do not drive list reloads.
+
+See [ADR-006](./adr/006-realtime-state-delivery.md).
 
 ### Map upload
 

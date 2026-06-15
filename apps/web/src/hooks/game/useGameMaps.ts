@@ -4,6 +4,7 @@ import type { MapTokenTarget } from '../../components/ApplyDamageDialog';
 import type { TacticalGameMap } from '../../types/map';
 import type { MapTokenPatch } from '../../utils/map-token-patch';
 import { dedupeAsync } from '../../utils/dedupe-async';
+import { recordFullListFetch } from '../../utils/game-fetch-metrics';
 
 export function useGameMaps(gameId: string | undefined) {
   const [maps, setMaps] = useState<TacticalGameMap[]>([]);
@@ -29,6 +30,7 @@ export function useGameMaps(gameId: string | undefined) {
     () =>
       dedupeAsync(async () => {
         if (!gameId) return;
+        recordFullListFetch('maps');
         const data = await api<{ maps: TacticalGameMap[]; activeMapId: string | null }>(
           `/games/${gameId}/maps`,
         );
