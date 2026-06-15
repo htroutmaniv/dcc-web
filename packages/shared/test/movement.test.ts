@@ -2,9 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   computeMovementFeet,
   movementRangeFromStats,
-  parseGameSettings,
+  composeGameSettingsFromRecord,
 } from '../src/movement.js';
-import { DEFAULT_GAME_SETTINGS } from '../src/types.js';
 import type { CharacterStats } from '../src/types.js';
 
 const baseStats: CharacterStats = {
@@ -12,49 +11,72 @@ const baseStats: CharacterStats = {
   speed: 30,
 };
 
-describe('parseGameSettings', () => {
-  test('returns defaults for null/undefined', () => {
-    const s = parseGameSettings(null);
-    expect(s.gridFtPerCell).toBe(DEFAULT_GAME_SETTINGS.gridFtPerCell);
-    expect(s.playerTokenMovement).toBe(DEFAULT_GAME_SETTINGS.playerTokenMovement);
-    expect(s.monstersVisibleOnMap).toBe(false);
-    expect(s.initiative).toBeNull();
-    expect(s.activeMapId).toBeNull();
-  });
+const validRecord = {
+  activeMapId: null as string | null,
+  monstersVisibleOnMap: false,
+  sharedMonsterInitiative: false,
+  hideMonsterAcInRollLog: false,
+  gridFtPerCell: 5,
+  playerTokenMovement: 'free' as const,
+};
 
-  test('parses initiative nested in settings blob', () => {
-    const s = parseGameSettings({
+describe('composeGameSettingsFromRecord', () => {
+  test('reads DB columns', () => {
+    const s = composeGameSettingsFromRecord({
+      ...validRecord,
+      activeMapId: 'map-1',
+      monstersVisibleOnMap: true,
+      gridFtPerCell: 10,
+      playerTokenMovement: 'approval',
       initiative: {
-        active: true,
-        round: 2,
-        turnIndex: 1,
-        order: [
-          {
-            entryId: 'c1',
-            kind: 'character',
-            characterId: 'c1',
-            name: 'Hero',
-            initiative: 14,
-          },
-        ],
+        state: {
+          active: true,
+          round: 1,
+          turnIndex: 0,
+          order: [
+            {
+              entryId: 'c1',
+              kind: 'character',
+              characterId: 'c1',
+              name: 'Hero',
+              initiative: 12,
+            },
+          ],
+        },
       },
     });
-    expect(s.initiative?.active).toBe(true);
-    expect(s.initiative?.round).toBe(2);
+    expect(s.gridFtPerCell).toBe(10);
+    expect(s.playerTokenMovement).toBe('approval');
+    expect(s.activeMapId).toBe('map-1');
+    expect(s.monstersVisibleOnMap).toBe(true);
     expect(s.initiative?.order).toHaveLength(1);
   });
 
-  test('reads DM flags and activeMapId', () => {
-    const s = parseGameSettings({
-      monstersVisibleOnMap: true,
-      sharedMonsterInitiative: true,
-      hideMonsterAcInRollLog: true,
-      activeMapId: 'map-uuid',
-    });
-    expect(s.monstersVisibleOnMap).toBe(true);
-    expect(s.sharedMonsterInitiative).toBe(true);
-    expect(s.hideMonsterAcInRollLog).toBe(true);
-    expect(s.activeMapId).toBe('map-uuid');
+  test('throws when required boolean fields are missing', () => {
+    expect(() =>
+      composeGameSettingsFromRecord({
+        ...validRecord,
+        monstersVisibleOnMap: undefined as unknown as boolean,
+      }),
+    ).toThrow(/monstersVisibleOnMap/);
+  });
+
+  test('throws when gridFtPerCell is invalid', () => {
+    expect(() =>
+      composeGameSettingsFromRecord({
+        ...validRecord,
+        gridFtPerCell: 0,
+      }),
+    ).toThrow(/gridFtPerCell/);
+  });
+
+  test('throws when playerTokenMovement is invalid', () => {
+    expect(() =>
+      composeGameSettingsFromRecord({
+        ...validRecord,
+        playerTokenMovement: 'invalid',
+      }),
+    ).toThrow(/playerTokenMovement/);
   });
 });
 

@@ -1,6 +1,5 @@
 import {
   createGameMapSchema,
-  parseGameSettings,
   patchGameMapSchema,
   setActiveMapSchema,
 } from '@dcc-web/shared';
@@ -11,6 +10,7 @@ import { assertGameMember } from '../lib/game-access.js';
 import { emitToGame } from '../lib/game-socket.js';
 import { parseLayoutTokensBody } from '../lib/parse-layout-tokens.js';
 import { prisma } from '../lib/prisma.js';
+import { gameWithSettingsInclude, readGameSettings } from '../services/game-settings-service.js';
 import {
   createGameMap,
   deleteGameMap,
@@ -242,13 +242,16 @@ export async function mapRoutes(app: FastifyInstance) {
 
       const token = await prisma.mapToken.findUniqueOrThrow({
         where: { id: tokenId },
-        include: { map: { include: { game: true } }, character: true },
+        include: {
+          map: { include: { game: { include: gameWithSettingsInclude } } },
+          character: true,
+        },
       });
       const gameId = token.map.gameId;
       const access = await assertGameMember(request.userId!, gameId);
       if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
 
-      const settings = parseGameSettings(token.map.game.settings);
+      const settings = readGameSettings(token.map.game);
       const isPcOwnedByPlayer =
         token.kind === 'pc' && token.character?.ownerUserId === request.userId;
 

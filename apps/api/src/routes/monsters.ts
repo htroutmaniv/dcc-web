@@ -23,8 +23,9 @@ import {
   spawnGameMonsters,
   syncMonsterGroupInitiative,
 } from '../services/monster-service.js';
-import { getInitiativeFromGame } from '../services/initiative-service.js';
+import { loadGameSettings } from '../services/game-settings-service.js';
 import { transferInventoryItem, assertTransferInventoryAllowed } from '../services/inventory-transfer-service.js';
+import type { GameInitiativeState } from '@dcc-web/shared';
 
 function emitMonstersChanged(
   app: FastifyInstance,
@@ -37,7 +38,7 @@ function emitMonstersChanged(
 function emitInitiativeUpdate(
   app: FastifyInstance,
   gameId: string,
-  initiative: ReturnType<typeof getInitiativeFromGame>,
+  initiative: GameInitiativeState | null,
   actorUserId?: string,
 ) {
   emitToGame(app.io, gameId, 'initiative:updated', { initiative, actorUserId });
@@ -338,7 +339,7 @@ export async function monsterRoutes(app: FastifyInstance) {
           gameId,
           userId: request.userId!,
           isDm: access.isDm,
-          gameSettings: access.game.settings,
+          gameSettings: await loadGameSettings(gameId),
           input: parsed.data,
         });
         const result = await transferInventoryItem(gameId, parsed.data);

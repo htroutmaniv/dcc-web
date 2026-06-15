@@ -1,9 +1,8 @@
 import type { ItemCategory, Prisma } from '@prisma/client';
+import type { GameSettings, MonsterStatsJson } from '@dcc-web/shared';
 import {
   getCharacterVitality,
   isMonsterKilled,
-  parseGameInitiative,
-  type MonsterStatsJson,
 } from '@dcc-web/shared';
 import { prisma } from '../lib/prisma.js';
 import { toMonsterInstance } from './monster-service.js';
@@ -65,13 +64,12 @@ export async function assertTransferInventoryAllowed(params: {
   gameId: string;
   userId: string;
   isDm: boolean;
-  gameSettings: unknown;
+  gameSettings: GameSettings;
   input: TransferInventoryInput;
 }): Promise<void> {
   if (params.isDm) return;
 
-  const initiative = parseGameInitiative(params.gameSettings);
-  if (initiative?.active) {
+  if (params.gameSettings.initiative?.active) {
     throw new Error('Looting is only available after combat ends');
   }
 

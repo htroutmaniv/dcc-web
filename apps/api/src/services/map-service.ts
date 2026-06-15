@@ -4,7 +4,6 @@ import {
   isCharacterMapTokenVisible,
   isMonsterInPlay,
   isMonsterKilled,
-  parseGameSettings,
   parseMapDrawings,
   resolveMapGridPreset,
   type MapDrawing,
@@ -15,6 +14,11 @@ import type { Prisma } from '@prisma/client';
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '../lib/prisma.js';
+import {
+  loadGameWithSettings,
+  readGameSettings,
+  setGameActiveMapId,
+} from './game-settings-service.js';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'data', 'uploads', 'maps');
 
@@ -173,8 +177,8 @@ export async function listGameMaps(gameId: string): Promise<{
   maps: GameMapDto[];
   activeMapId: string | null;
 }> {
-  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
-  const settings = parseGameSettings(game.settings);
+  const game = await loadGameWithSettings(gameId);
+  const settings = readGameSettings(game);
   const rows = await prisma.gameMap.findMany({
     where: { gameId },
     orderBy: { sortOrder: 'asc' },
@@ -213,16 +217,7 @@ export async function createGameMap(
 }
 
 export async function setActiveMapId(gameId: string, mapId: string): Promise<string | null> {
-  const map = await prisma.gameMap.findFirstOrThrow({ where: { id: mapId, gameId } });
-  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
-  const settings = parseGameSettings(game.settings);
-  await prisma.game.update({
-    where: { id: gameId },
-    data: {
-      settings: { ...settings, activeMapId: map.id } as Prisma.InputJsonValue,
-    },
-  });
-  return map.id;
+  return setGameActiveMapId(gameId, mapId);
 }
 
 async function saveMapImage(mapId: string, dataUrl: string): Promise<{

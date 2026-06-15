@@ -1,15 +1,12 @@
 import {
+  composeGameSettingsFromRecord,
   movementRangeFromStats,
-  parseGameSettings,
   type CharacterStats,
+  type GameSettingsRecord,
 } from '@dcc-web/shared';
-import type { Game } from '@prisma/client';
 
-export function characterMovementRange(
-  statsJson: unknown,
-  game: Pick<Game, 'settings'>,
-) {
-  const settings = parseGameSettings(game.settings);
+export function characterMovementRange(statsJson: unknown, game: GameSettingsRecord) {
+  const settings = composeGameSettingsFromRecord(game);
   const stats = statsJson as CharacterStats;
   return movementRangeFromStats(stats, settings.gridFtPerCell);
 }

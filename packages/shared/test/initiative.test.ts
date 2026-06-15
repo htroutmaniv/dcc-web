@@ -5,6 +5,7 @@ import {
   getCurrentTurnEntry,
   isCharacterTurn,
   normalizeInitiativeTurnIndex,
+  parseGameInitiativeState,
   type GameInitiativeState,
   type InitiativeEntry,
 } from '../src/initiative.js';
@@ -22,6 +23,32 @@ function charEntry(id: string, initiative: number): InitiativeEntry {
 function baseState(order: InitiativeEntry[], turnIndex = 0, round = 1): GameInitiativeState {
   return { active: true, round, turnIndex, order };
 }
+
+describe('parseGameInitiativeState', () => {
+  test('returns null when state is null or inactive', () => {
+    expect(parseGameInitiativeState(null)).toBeNull();
+    expect(parseGameInitiativeState({ active: false })).toBeNull();
+  });
+
+  test('parses active state', () => {
+    const state = parseGameInitiativeState({
+      active: true,
+      round: 2,
+      turnIndex: 1,
+      order: [charEntry('a', 10)],
+    });
+    expect(state?.round).toBe(2);
+    expect(state?.turnIndex).toBe(1);
+    expect(state?.order).toHaveLength(1);
+  });
+
+  test('throws on corrupt state', () => {
+    expect(() => parseGameInitiativeState({ active: true, round: 1 })).toThrow(/order/);
+    expect(() => parseGameInitiativeState({ active: true, round: 0, turnIndex: 0, order: [] })).toThrow(
+      /round/,
+    );
+  });
+});
 
 describe('getCurrentTurnEntry', () => {
   test('returns entry at turnIndex modulo length', () => {

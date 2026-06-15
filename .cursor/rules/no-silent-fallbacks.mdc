@@ -1,0 +1,41 @@
+---
+description: Fail loudly on invalid or missing data — no silent fallbacks or coercion
+alwaysApply: true
+---
+
+# No silent fallbacks
+
+Do not mask errors with defaults, `??`, `||`, empty-object coercion, or try/catch that swallows failures.
+
+## Required behavior
+
+- **Validate at boundaries** (API input, DB reads, socket payloads, env config). If data is missing or malformed, **throw** or return an explicit HTTP/client error.
+- **Log or surface errors** when something does not work as intended. Never silently continue with guessed values.
+- **Do not** use `value ?? default` (or `|| default`) to paper over absent or invalid data. Fix the producer or reject the request.
+- **Do not** parse unknown JSON into partial objects and fill gaps with defaults (e.g. legacy `parseGameSettings` patterns). Use typed DB columns and strict composers such as `composeGameSettingsFromRecord`.
+- **Do not** filter out invalid array elements during parse — throw if any element is invalid.
+
+## Acceptable exceptions
+
+- **Prisma/schema defaults** on insert (`@default`) and constants like `DEFAULT_GAME_SETTINGS` documented as seed/schema-only — not read-time fallbacks.
+- **UI before data loads** — optional chaining while `loading` is fine; once loaded, missing required fields must error.
+- **Domain rules** that are intentional game logic (e.g. `Math.max(0, feet)` for movement floor), not error hiding.
+
+## Examples
+
+```typescript
+// Bad — hides corrupt DB row
+const grid = Number(record.gridFtPerCell) || 5;
+
+// Good — fail fast
+if (!Number.isFinite(grid) || grid <= 0) {
+  throw new Error('Invalid game settings: gridFtPerCell must be a positive number');
+}
+```
+
+```typescript
+// Bad — legacy blob parser with defaults
+const settings = parseGameSettings(unknownJson);
+
+// Good — API composes settings from columns; client uses `game.settings` directly
+```

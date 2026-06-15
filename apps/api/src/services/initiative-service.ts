@@ -6,8 +6,6 @@ import {
   isCharacterInInitiative,
   isCharacterTurn,
   normalizeInitiativeTurnIndex,
-  parseGameInitiative,
-  parseGameSettings,
   rollDice,
   sortInitiativeEntries,
   type GameInitiativeState,
@@ -15,29 +13,13 @@ import {
 } from '@dcc-web/shared';
 import { secureRandomInt } from '../lib/rng.js';
 import { prisma } from '../lib/prisma.js';
+import {
+  loadInitiativeState,
+  readInitiativeFromGame,
+  saveInitiative,
+} from './game-settings-service.js';
 import { buildMonsterInitiativeEntriesForStart } from './monster-service.js';
 import { tickDyingCharactersForNewRound } from './character-combat.js';
-
-function mergeSettings(
-  current: unknown,
-  initiative: GameInitiativeState | null,
-): Record<string, unknown> {
-  const base = parseGameSettings(current);
-  return {
-    ...base,
-    initiative: initiative?.active ? initiative : null,
-  };
-}
-
-async function saveInitiative(gameId: string, initiative: GameInitiativeState | null) {
-  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
-  const settings = mergeSettings(game.settings, initiative);
-  await prisma.game.update({
-    where: { id: gameId },
-    data: { settings: settings as object },
-  });
-  return settings;
-}
 
 async function loadInitiativeCharacterSnapshots(gameId: string) {
   return prisma.character.findMany({
@@ -78,8 +60,7 @@ async function finalizeInitiativeTurn(
 export async function reconcileInitiativeAfterCharacterDeath(
   gameId: string,
 ): Promise<GameInitiativeState | null> {
-  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
-  const state = parseGameInitiative(game.settings);
+  const state = await loadInitiativeState(gameId);
   if (!state?.active) return null;
   return finalizeInitiativeTurn(gameId, state);
 }
@@ -140,8 +121,7 @@ export async function startGameInitiative(gameId: string): Promise<GameInitiativ
 export async function advanceGameInitiative(
   gameId: string,
 ): Promise<{ initiative: GameInitiativeState | null; mortalityUpdates: string[] }> {
-  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
-  const state = parseGameInitiative(game.settings);
+  const state = await loadInitiativeState(gameId);
   if (!state?.active) return { initiative: null, mortalityUpdates: [] };
 
   const shouldSkip = await buildCharacterSkipFn(gameId);
@@ -167,8 +147,7 @@ export async function addCharacterToInitiativeFromRoll(params: {
   d20Roll: number;
   modifier: number;
 }): Promise<GameInitiativeState | null> {
-  const game = await prisma.game.findUniqueOrThrow({ where: { id: params.gameId } });
-  const state = parseGameInitiative(game.settings);
+  const state = await loadInitiativeState(params.gameId);
   if (!state?.active) return null;
   if (isCharacterInInitiative(state, params.characterId)) return null;
 
@@ -199,8 +178,7 @@ export async function endCharacterTurn(params: {
   isDm: boolean;
   characterId?: string;
 }): Promise<{ initiative: GameInitiativeState | null; mortalityUpdates: string[] }> {
-  const game = await prisma.game.findUniqueOrThrow({ where: { id: params.gameId } });
-  const state = parseGameInitiative(game.settings);
+  const state = await loadInitiativeState(params.gameId);
   if (!state?.active) return { initiative: null, mortalityUpdates: [] };
 
   const shouldSkip = await buildCharacterSkipFn(params.gameId);
@@ -230,8 +208,8 @@ export async function endCharacterTurn(params: {
   return { initiative, mortalityUpdates };
 }
 
-export function getInitiativeFromGame(settings: unknown): GameInitiativeState | null {
-  return parseGameInitiative(settings);
+export async function getInitiativeForGame(gameId: string): Promise<GameInitiativeState | null> {
+  return loadInitiativeState(gameId);
 }
 
-export { ACTIVE_IN_PLAY_KEY };
+export { ACTIVE_IN_PLAY_KEY, readInitiativeFromGame, saveInitiative };

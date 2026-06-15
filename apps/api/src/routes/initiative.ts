@@ -7,7 +7,7 @@ import {
   advanceGameInitiative,
   endCharacterTurn,
   endGameInitiative,
-  getInitiativeFromGame,
+  getInitiativeForGame,
   startGameInitiative,
 } from '../services/initiative-service.js';
 import { emitToGame } from '../lib/game-socket.js';
@@ -34,7 +34,7 @@ async function broadcastMortalityUpdates(
 function emitInitiativeUpdate(
   app: FastifyInstance,
   gameId: string,
-  initiative: ReturnType<typeof getInitiativeFromGame>,
+  initiative: Awaited<ReturnType<typeof getInitiativeForGame>>,
   actorUserId?: string,
 ) {
   emitToGame(app.io, gameId, 'initiative:updated', { initiative, actorUserId });
@@ -47,8 +47,7 @@ export async function initiativeRoutes(app: FastifyInstance) {
     if (!access.ok) {
       throw app.httpErrors.createError(access.status, access.message);
     }
-    const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
-    return { initiative: getInitiativeFromGame(game.settings) };
+    return { initiative: await getInitiativeForGame(gameId) };
   });
 
   app.post(

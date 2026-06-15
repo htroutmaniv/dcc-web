@@ -40,24 +40,59 @@ export function isActiveInPlay(character: {
   return true;
 }
 
-export function parseGameInitiative(settings: unknown): GameInitiativeState | null {
-  if (!settings || typeof settings !== 'object') return null;
-  const init = (settings as { initiative?: unknown }).initiative;
-  if (!init || typeof init !== 'object') return null;
+function assertInitiativeEntry(entry: unknown, index: number): InitiativeEntry {
+  if (entry == null || typeof entry !== 'object') {
+    throw new Error(`Invalid initiative state: order[${index}] must be an object`);
+  }
+  const e = entry as Partial<InitiativeEntry>;
+  if (typeof e.entryId !== 'string' || e.entryId.length === 0) {
+    throw new Error(`Invalid initiative state: order[${index}].entryId must be a non-empty string`);
+  }
+  if (e.kind !== 'character' && e.kind !== 'monster' && e.kind !== 'monster_group') {
+    throw new Error(`Invalid initiative state: order[${index}].kind is invalid`);
+  }
+  if (typeof e.name !== 'string') {
+    throw new Error(`Invalid initiative state: order[${index}].name must be a string`);
+  }
+  if (typeof e.initiative !== 'number' || !Number.isFinite(e.initiative)) {
+    throw new Error(`Invalid initiative state: order[${index}].initiative must be a number`);
+  }
+  return entry as InitiativeEntry;
+}
+
+function requirePositiveInt(field: string, value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 1 || !Number.isInteger(value)) {
+    throw new Error(`Invalid initiative state: ${field} must be a positive integer, got ${String(value)}`);
+  }
+  return value;
+}
+
+function requireNonNegativeInt(field: string, value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
+    throw new Error(
+      `Invalid initiative state: ${field} must be a non-negative integer, got ${String(value)}`,
+    );
+  }
+  return value;
+}
+
+/** Parse initiative JSON from `game_initiative.state`. Returns null when combat is not active. */
+export function parseGameInitiativeState(init: unknown): GameInitiativeState | null {
+  if (init == null) return null;
+  if (typeof init !== 'object') {
+    throw new Error(`Invalid initiative state: expected object, got ${typeof init}`);
+  }
   const state = init as Partial<GameInitiativeState>;
-  if (!state.active || !Array.isArray(state.order)) return null;
+  if (!state.active) return null;
+  if (!Array.isArray(state.order)) {
+    throw new Error('Invalid initiative state: active initiative requires order array');
+  }
+  const order = state.order.map((entry, index) => assertInitiativeEntry(entry, index));
   return {
     active: true,
-    round: Math.max(1, Number(state.round) || 1),
-    turnIndex: Math.max(0, Number(state.turnIndex) || 0),
-    order: state.order.filter(
-      (e): e is InitiativeEntry =>
-        e != null &&
-        typeof e === 'object' &&
-        typeof (e as InitiativeEntry).entryId === 'string' &&
-        typeof (e as InitiativeEntry).name === 'string' &&
-        typeof (e as InitiativeEntry).initiative === 'number',
-    ),
+    round: requirePositiveInt('round', state.round),
+    turnIndex: requireNonNegativeInt('turnIndex', state.turnIndex),
+    order,
   };
 }
 

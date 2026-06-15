@@ -16,7 +16,7 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [x] Add `bun:test` (or Vitest if you prefer the ecosystem) to `packages/shared`.
 - [x] Write tests for the pure domain logic:
   - [x] `initiative.ts` — `advanceInitiativeTurn`, `normalizeInitiativeTurnIndex`, `createCharacterInitiativeSkipFn`, `getCurrentTurnEntry`, `isCharacterTurn`
-  - [x] `movement.ts` — `computeMovementFeet`, `movementRangeFromStats`, `parseGameSettings` (every default path)
+  - [x] `movement.ts` — `computeMovementFeet`, `movementRangeFromStats`, `composeGameSettingsFromRecord` (strict DB columns)
   - [x] `dice-notation.ts` — `rollDice` with a deterministic RNG injected
   - [x] `combat-mortality.ts` — `getCharacterVitality`, `resolveMonsterAfterHpChange`
   - [x] `monster-sheet.ts` — `parseMonsterSheet` (including the recently-fixed empty-attacks case)
@@ -107,13 +107,13 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 ## Phase 2 — Data integrity (eliminate silent overwrites)
 
 ### 2.1 Decompose `Game.settings` — L
-- [ ] Add Prisma migration introducing:
-  - [ ] `GameInitiative` table: `gameId PK FK`, `state Json`, `version Int`, `updatedAt`
-  - [ ] `Game.activeMapId String? @db.Uuid` FK column with `onDelete: SetNull`
-  - [ ] `Game.monstersVisibleOnMap Boolean`, `Game.sharedMonsterInitiative Boolean`, `Game.hideMonsterAcInRollLog Boolean`
-  - [ ] `Game.gridFtPerCell Decimal(6,2)`, `Game.playerTokenMovement TokenMovementMode` (new enum)
-- [ ] Data migration: backfill from `settings` Json blob into the new columns, then drop `settings`.
-- [ ] Update `parseGameSettings` to read from the columns; keep a deprecation shim for one release if any external caller depends on the Json shape.
+- [x] Add Prisma migration introducing:
+  - [x] `GameInitiative` table: `gameId PK FK`, `state Json`, `version Int`, `updatedAt`
+  - [x] `Game.activeMapId String? @db.Uuid` FK column with `onDelete: SetNull`
+  - [x] `Game.monstersVisibleOnMap Boolean`, `Game.sharedMonsterInitiative Boolean`, `Game.hideMonsterAcInRollLog Boolean`
+  - [x] `Game.gridFtPerCell Decimal(6,2)`, `Game.playerTokenMovement TokenMovementMode` (new enum)
+- [x] Data migration: backfill from `settings` Json blob into the new columns, then drop `settings`.
+- [x] Decompose `Game.settings` JSON into typed columns; API composes `game.settings` at read time via `serializeGameForClient` / `composeGameSettingsFromRecord` (strict — no legacy JSON parser).
 
 ### 2.2 Optimistic concurrency on initiative writes — M
 - [ ] All `saveInitiative` callers now do:
@@ -143,7 +143,7 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 
 **Exit criteria:** no more JSON read-modify-write races; map sync is O(1) queries; data tables stop growing unbounded.
 
-> **Progress (2026-06-15):** 2.3 and 2.4 complete. **2.1** (settings decomposition), **2.2** (optimistic initiative), and **2.5** (float coords) remain.
+> **Progress (2026-06-15):** 2.1, 2.3, and 2.4 complete. **2.2** (optimistic initiative) and **2.5** (float coords) remain.
 
 ---
 

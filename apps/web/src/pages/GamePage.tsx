@@ -29,8 +29,7 @@ import {
   isCharacterTurn,
   isUsingLightSource,
   resolveActiveLightItemId,
-  parseGameInitiative,
-  parseGameSettings,
+  type GameSettings,
   USING_LIGHT_SOURCE_KEY,
   type DiceTrayCounts,
   attackRollHits,
@@ -152,13 +151,16 @@ export default function GamePage() {
   /** DM = game creator only (server sets isDm from dm_user_id). */
   const isDm = detail?.isDm === true;
 
-  const gameSettings = useMemo(
-    () => (detail ? parseGameSettings(detail.game.settings) : parseGameSettings(null)),
-    [detail],
-  );
-  const monstersVisibleOnMap = gameSettings.monstersVisibleOnMap ?? false;
-  const sharedMonsterInitiative = gameSettings.sharedMonsterInitiative ?? false;
-  const hideMonsterAcInRollLog = gameSettings.hideMonsterAcInRollLog ?? false;
+  const gameSettings = useMemo((): GameSettings | null => {
+    if (!detail) return null;
+    if (!detail.game.settings) {
+      throw new Error('Game detail missing settings from API');
+    }
+    return detail.game.settings;
+  }, [detail]);
+  const monstersVisibleOnMap = gameSettings?.monstersVisibleOnMap === true;
+  const sharedMonsterInitiative = gameSettings?.sharedMonsterInitiative === true;
+  const hideMonsterAcInRollLog = gameSettings?.hideMonsterAcInRollLog === true;
   const initiativeActive = initiative?.active ?? false;
 
   const shouldSkipInitiative = useMemo(
@@ -203,13 +205,12 @@ export default function GamePage() {
   const applyInitiative = useCallback((next: GameInitiativeState | null) => {
     setInitiative(next);
     setDetail((prev) => {
-      if (!prev) return prev;
-      const settings = parseGameSettings(prev.game.settings);
+      if (!prev?.game.settings) return prev;
       return {
         ...prev,
         game: {
           ...prev.game,
-          settings: { ...settings, initiative: next },
+          settings: { ...prev.game.settings, initiative: next },
         },
       };
     });
@@ -222,13 +223,12 @@ export default function GamePage() {
       hideMonsterAcInRollLog?: boolean;
     }) => {
       setDetail((prev) => {
-        if (!prev) return prev;
-        const settings = parseGameSettings(prev.game.settings);
+        if (!prev?.game.settings) return prev;
         return {
           ...prev,
           game: {
             ...prev.game,
-            settings: { ...settings, ...patch },
+            settings: { ...prev.game.settings, ...patch },
           },
         };
       });
@@ -264,10 +264,12 @@ export default function GamePage() {
   const loadDetail = useCallback(async () => {
     if (!gameId) return;
     const data = await api<GameDetail>(`/games/${gameId}`);
+    if (!data.game.settings) {
+      throw new Error('Game API response missing game.settings');
+    }
     setDetail(data);
-    setInitiative(parseGameInitiative(data.game.settings));
-    const settings = parseGameSettings(data.game.settings);
-    if (settings.activeMapId) setActiveMapId(settings.activeMapId);
+    setInitiative(data.game.settings.initiative);
+    if (data.game.settings.activeMapId) setActiveMapId(data.game.settings.activeMapId);
     await loadMaps();
   }, [gameId, loadMaps]);
 

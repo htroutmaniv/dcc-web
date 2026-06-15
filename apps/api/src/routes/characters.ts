@@ -17,6 +17,7 @@ import {
 import { applyCharacterStatus } from '../services/character-status.js';
 import { mergeCharacterCombatWithMortality } from '../services/character-combat.js';
 import { characterMovementRange } from '../services/movement.js';
+import { gameWithSettingsInclude } from '../services/game-settings-service.js';
 import { deleteTokensForCharacter, syncActiveMapTokens } from '../services/map-service.js';
 import { reconcileInitiativeAfterCharacterDeath } from '../services/initiative-service.js';
 import { emitToGame } from '../lib/game-socket.js';
@@ -454,7 +455,7 @@ export async function characterRoutes(app: FastifyInstance) {
       const { characterId } = request.params as { characterId: string };
       const character = await prisma.character.findUniqueOrThrow({
         where: { id: characterId },
-        include: { game: true },
+        include: { game: { include: gameWithSettingsInclude } },
       });
       const access = await assertGameMember(request.userId!, character.gameId);
       if (!access.ok) throw app.httpErrors.createError(access.status, access.message);

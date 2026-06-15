@@ -11,19 +11,22 @@ import type { GameInitiativeState } from './initiative.js';
 export interface GameSettings {
   gridFtPerCell: number;
   playerTokenMovement: PlayerTokenMovement;
-  initiative?: GameInitiativeState | null;
-  activeMapId?: string | null;
+  initiative: GameInitiativeState | null;
+  activeMapId: string | null;
   /** When true, living monster tokens are visible to players outside of initiative. */
-  monstersVisibleOnMap?: boolean;
+  monstersVisibleOnMap: boolean;
   /** When true, in-play monsters share one initiative slot during combat. */
-  sharedMonsterInitiative?: boolean;
+  sharedMonsterInitiative: boolean;
   /** When true, players do not see monster AC in the roll log (DM still sees it). */
-  hideMonsterAcInRollLog?: boolean;
+  hideMonsterAcInRollLog: boolean;
 }
 
+/** Prisma column defaults / new-game seed values — not a runtime fallback. */
 export const DEFAULT_GAME_SETTINGS: GameSettings = {
   gridFtPerCell: 5,
   playerTokenMovement: 'free',
+  initiative: null,
+  activeMapId: null,
   monstersVisibleOnMap: false,
   sharedMonsterInitiative: false,
   hideMonsterAcInRollLog: false,

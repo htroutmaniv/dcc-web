@@ -105,25 +105,50 @@ model AuthToken {
   @@map("auth_tokens")
 }
 
-model Game {
-  id         String     @id @default(uuid()) @db.Uuid
-  dmUserId   String     @map("dm_user_id") @db.Uuid
-  title      String
-  inviteCode String     @unique @map("invite_code")
-  status     GameStatus @default(active)
-  settings   Json       @default("{\"gridFtPerCell\":5,\"playerTokenMovement\":\"free\"}")
-  createdAt  DateTime   @default(now()) @map("created_at")
+enum PlayerTokenMovement {
+  free
+  approval
 
-  dm              User              @relation("DmGames", fields: [dmUserId], references: [id])
-  players         GamePlayer[]
-  characters      Character[]
-  monsters        GameMonster[]
-  maps            GameMap[]
-  diceRolls       DiceRoll[]
+  @@map("player_token_movement")
+}
+
+model Game {
+  id                      String              @id @default(uuid()) @db.Uuid
+  dmUserId                String              @map("dm_user_id") @db.Uuid
+  title                   String
+  inviteCode              String              @unique @map("invite_code")
+  status                  GameStatus          @default(active)
+  activeMapId             String?             @map("active_map_id") @db.Uuid
+  monstersVisibleOnMap    Boolean             @default(false) @map("monsters_visible_on_map")
+  sharedMonsterInitiative Boolean             @default(false) @map("shared_monster_initiative")
+  hideMonsterAcInRollLog  Boolean             @default(false) @map("hide_monster_ac_in_roll_log")
+  gridFtPerCell           Decimal             @default(5) @map("grid_ft_per_cell") @db.Decimal(6, 2)
+  playerTokenMovement     PlayerTokenMovement @default(free) @map("player_token_movement")
+  createdAt               DateTime            @default(now()) @map("created_at")
+
+  dm               User              @relation("DmGames", fields: [dmUserId], references: [id])
+  players          GamePlayer[]
+  characters       Character[]
+  monsters         GameMonster[]
+  maps             GameMap[]
+  diceRolls        DiceRoll[]
   movementRequests MovementRequest[]
+  activeMap        GameMap?          @relation("ActiveGameMap", fields: [activeMapId], references: [id], onDelete: SetNull)
+  initiative       GameInitiative?
 
   @@index([dmUserId, status])
   @@map("games")
+}
+
+model GameInitiative {
+  gameId    String   @id @map("game_id") @db.Uuid
+  state     Json
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@map("game_initiative")
 }
 
 model GamePlayer {
@@ -328,8 +353,9 @@ model GameMap {
   dmDrawings     Json     @default("[]") @map("dm_drawings")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  game   Game       @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  tokens MapToken[]
+  game           Game       @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  activeForGames Game[]     @relation("ActiveGameMap")
+  tokens         MapToken[]
 
   @@index([gameId, sortOrder])
   @@map("game_maps")

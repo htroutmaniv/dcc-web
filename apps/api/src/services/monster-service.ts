@@ -2,8 +2,6 @@ import {
   defaultMonsterSheet,
   monsterGroupEntryId,
   monsterGroupLabel,
-  parseGameInitiative,
-  parseGameSettings,
   parseMonsterSheet,
   rollDice,
   rollLootFromPool,
@@ -25,29 +23,14 @@ import type { Prisma } from '@prisma/client';
 import type { z } from 'zod';
 import { secureRandomInt } from '../lib/rng.js';
 import { prisma } from '../lib/prisma.js';
+import {
+  loadGameWithSettings,
+  loadInitiativeState,
+  readGameSettings,
+  saveInitiative,
+} from './game-settings-service.js';
 
 type SpawnInput = z.infer<typeof spawnMonstersSchema>;
-
-function mergeSettings(
-  current: unknown,
-  initiative: GameInitiativeState | null,
-): Record<string, unknown> {
-  const base = parseGameSettings(current);
-  return {
-    ...base,
-    initiative: initiative?.active ? initiative : null,
-  };
-}
-
-async function saveInitiative(gameId: string, initiative: GameInitiativeState | null) {
-  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
-  const settings = mergeSettings(game.settings, initiative);
-  await prisma.game.update({
-    where: { id: gameId },
-    data: { settings: settings as object },
-  });
-  return settings;
-}
 
 function rollInitiativeForMod(mod: number) {
   const notation = `1d20${mod >= 0 ? `+${mod}` : mod}`;
@@ -281,8 +264,8 @@ export async function spawnGameMonsters(
   }
 
   let initiative: GameInitiativeState | null = null;
-  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
-  if (parseGameInitiative(game.settings)?.active) {
+  const active = await loadInitiativeState(gameId);
+  if (active?.active) {
     initiative = await syncMonsterGroupInitiative(gameId);
   }
 
@@ -428,9 +411,9 @@ export async function deleteGameMonster(
 export async function syncMonsterGroupInitiative(
   gameId: string,
 ): Promise<GameInitiativeState | null> {
-  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
-  const gameSettings = parseGameSettings(game.settings);
-  const state = parseGameInitiative(game.settings);
+  const game = await loadGameWithSettings(gameId);
+  const gameSettings = readGameSettings(game);
+  const state = await loadInitiativeState(gameId);
 
   if (gameSettings.sharedMonsterInitiative) {
     return syncSharedMonsterGroupInitiative(gameId, state);
@@ -596,8 +579,8 @@ async function buildIndividualMonsterInitiativeEntries(
 export async function buildMonsterGroupInitiativeEntry(
   gameId: string,
 ): Promise<InitiativeEntry | null> {
-  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
-  if (!parseGameSettings(game.settings).sharedMonsterInitiative) return null;
+  const game = await loadGameWithSettings(gameId);
+  if (!readGameSettings(game).sharedMonsterInitiative) return null;
 
   const livingRows = await prisma.gameMonster.findMany({
     where: { gameId, hpCurrent: { gt: 0 } },
@@ -622,8 +605,8 @@ export async function buildMonsterGroupInitiativeEntry(
 export async function buildMonsterInitiativeEntriesForStart(
   gameId: string,
 ): Promise<InitiativeEntry[]> {
-  const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
-  if (parseGameSettings(game.settings).sharedMonsterInitiative) {
+  const game = await loadGameWithSettings(gameId);
+  if (readGameSettings(game).sharedMonsterInitiative) {
     const entry = await buildMonsterGroupInitiativeEntry(gameId);
     return entry ? [entry] : [];
   }
