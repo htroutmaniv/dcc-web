@@ -45,6 +45,9 @@ jobs:
       - name: Run database migrations
         run: bun run db:migrate
 
+      - name: Seed reference data
+        run: bun run db:seed
+
       - name: Shared package — build & test
         run: |
           bun run --filter @dcc-web/shared build

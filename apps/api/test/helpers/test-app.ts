@@ -6,13 +6,29 @@ import '../../src/load-env.js';
 import type { InjectOptions, LightMyRequestResponse } from 'light-my-request';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../src/app.js';
+import { seedCharacterNames } from '../../src/data/name-seed.js';
+import { seedOccupations } from '../../src/data/occupation-seed.js';
 import { config } from '../../src/lib/config.js';
 import { prisma } from '../../src/lib/prisma.js';
+import { clearOccupationCache } from '../../src/services/occupation-service.js';
+import { clearCharacterNameCache } from '../../src/services/name-service.js';
 
 let sharedApp: FastifyInstance | null = null;
+let referenceDataReady = false;
+
+/** Occupations and character names are required at API boot; CI migrates but does not seed by default. */
+async function ensureTestReferenceData(): Promise<void> {
+  if (referenceDataReady) return;
+  await seedOccupations(prisma);
+  await seedCharacterNames(prisma);
+  clearOccupationCache();
+  clearCharacterNameCache();
+  referenceDataReady = true;
+}
 
 export async function buildTestApp(): Promise<FastifyInstance> {
   if (sharedApp) return sharedApp;
+  await ensureTestReferenceData();
   const app = await buildApp();
   await app.ready();
   sharedApp = app;
