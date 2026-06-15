@@ -194,7 +194,7 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [x] Wire `bun run --filter @dcc-web/api test` into CI (replace build-only step).
 - [x] Add regression tests for Phase 2–3 work: optimistic initiative retry, batched `syncMapTokens`, decorator auth paths.
 
-> **Progress (2026-06-15):** Phase 4 complete (4.1–4.6). All planned `.tsx` files ≤400 LOC. 4.2 deferred pending TanStack Query ADR.
+> **Progress (2026-06-15):** Phase 4 complete (4.1–4.6). All planned `.tsx` files ≤400 LOC. **4.2 TanStack Query skipped** for now (ADR-004; hooks + socket sync sufficient).
 
 ---
 
@@ -227,9 +227,11 @@ Goal: from 1948 LOC + 79 hooks down to a ≤300-LOC orchestrator.
 - [x] Web unit tests for dialog helpers (`parseCharacterResponse`, apply-damage tab selection) in `apps/web/test/`
 
 ### 4.2 Adopt TanStack Query — M
-- [-] Already recommended in `docs/ARCHITECTURE.md`. **Deferred** per ADR-004 — hook + socket sync sufficient for current scale.
-- [ ] If adopted: replace each `loadX` + state-tuple with `useQuery`; replace `setX(prev => ...)` writes after socket events with `queryClient.setQueryData(...)`.
-- [ ] Strangler-fig migration: do `characters` first, validate, then do the rest.
+- [-] **Skipped for now** — per ADR-004 and team decision (2026-06-15): custom hooks + `useGameRealtimeSync` are sufficient at current scale; no planned adoption in the remediation roadmap.
+- [-] ~~If adopted: replace each `loadX` + state-tuple with `useQuery`; replace socket `setX` with `queryClient.setQueryData(...)`.~~
+- [-] ~~Strangler-fig migration: do `characters` first, validate, then do the rest.~~
+
+Revisit only if duplicate fetches, cache invalidation bugs, or refetch-on-focus become painful — see `docs/adr/004-client-data-layer.md`.
 
 ### 4.3 Component file-size budget — M
 - [x] Target ≤ 400 LOC per `.tsx` file. Original splits:
@@ -304,7 +306,7 @@ Create `docs/adr/` and add:
 - [x] **ADR-001** Game state storage: dedicated tables vs JSON column with optimistic locking. *(Drives Phase 2.1.)* — `docs/adr/001-game-state-storage.md`
 - [x] **ADR-002** Auth surface: keep email+JWT cookie, role of dev-login in prod, CSRF strategy. *(Drives Phase 1.3.)* — `docs/adr/002-auth-session-csrf.md`
 - [x] **ADR-003** Realtime scope: single instance vs Redis adapter. *(Drives Phase 5.1.)* — `docs/adr/003-realtime-single-instance.md`
-- [x] **ADR-004** Client data layer: keep ad-hoc state vs TanStack Query. *(Drives Phase 4.2.)* — `docs/adr/004-client-data-layer.md`; TanStack Query deferred.
+- [x] **ADR-004** Client data layer: keep ad-hoc state vs TanStack Query. *(Drives Phase 4.2.)* — `docs/adr/004-client-data-layer.md`; **TanStack Query skipped** for remediation scope.
 - [x] **ADR-005** Image storage: local FS vs object storage (S3/MinIO) when going multi-instance. — `docs/adr/005-map-image-storage.md`
 - [x] ADR index: `docs/adr/README.md`
 
