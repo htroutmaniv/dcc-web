@@ -95,7 +95,7 @@ export function parseMonsterSheet(raw: unknown): MonsterSheetData {
       )
     : [];
   return {
-    attacks: attacks.length ? attacks : defaultMonsterSheet().attacks,
-    specialAbilities,
+    attacks: Array.isArray(o.attacks) ? attacks : defaultMonsterSheet().attacks,
+    specialAbilities: Array.isArray(o.specialAbilities) ? specialAbilities : [],
   };
 }

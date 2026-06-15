@@ -14,9 +14,9 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import SaveIcon from '@mui/icons-material/Save';
 import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import {
-  defaultMonsterSheet,
   isMonsterKilled,
   parseMonsterSheet,
   type GameMonsterInstance,
@@ -91,6 +91,32 @@ export function MonsterSheetView({
           damage: '1d6',
         },
       ],
+    }));
+  };
+
+  const removeAttack = (index: number) => {
+    setSheet((prev) => ({
+      ...prev,
+      attacks: prev.attacks.filter((_, i) => i !== index),
+    }));
+  };
+
+  const updateSpecialAbility = (
+    index: number,
+    patch: Partial<MonsterSheetData['specialAbilities'][number]>,
+  ) => {
+    setSheet((prev) => ({
+      ...prev,
+      specialAbilities: prev.specialAbilities.map((ab, i) =>
+        i === index ? { ...ab, ...patch } : ab,
+      ),
+    }));
+  };
+
+  const removeSpecialAbility = (index: number) => {
+    setSheet((prev) => ({
+      ...prev,
+      specialAbilities: prev.specialAbilities.filter((_, i) => i !== index),
     }));
   };
 
@@ -235,7 +261,7 @@ export function MonsterSheetView({
           Attacks
         </Typography>
         {sheet.attacks.map((atk, i) => (
-          <Stack key={atk.id} direction="row" spacing={1} sx={{ mb: 1 }} flexWrap="wrap" useFlexGap>
+          <Stack key={atk.id} direction="row" spacing={1} sx={{ mb: 1 }} flexWrap="wrap" useFlexGap alignItems="center">
             <TextField
               label="Name"
               size="small"
@@ -258,6 +284,15 @@ export function MonsterSheetView({
               onChange={(e) => updateAttack(i, { damage: e.target.value })}
               sx={{ width: 100 }}
             />
+            <Tooltip title="Remove attack">
+              <IconButton
+                size="small"
+                aria-label="Remove attack"
+                onClick={() => removeAttack(i)}
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Stack>
         ))}
         <Button size="small" startIcon={<AddIcon />} onClick={addAttack} sx={{ mb: 2 }}>
@@ -269,34 +304,36 @@ export function MonsterSheetView({
         <Typography variant="subtitle2" gutterBottom>
           Special abilities
         </Typography>
-        {(sheet.specialAbilities.length ? sheet.specialAbilities : defaultMonsterSheet().specialAbilities).map(
-          (ab, i) => (
-            <Stack key={i} spacing={1} sx={{ mb: 1 }}>
+        {sheet.specialAbilities.map((ab, i) => (
+          <Stack key={i} spacing={1} sx={{ mb: 1 }}>
+            <Stack direction="row" spacing={1} alignItems="center">
               <TextField
                 label="Ability"
                 size="small"
                 value={ab.name}
-                onChange={(e) => {
-                  const next = [...sheet.specialAbilities];
-                  next[i] = { ...ab, name: e.target.value };
-                  setSheet((p) => ({ ...p, specialAbilities: next }));
-                }}
+                onChange={(e) => updateSpecialAbility(i, { name: e.target.value })}
+                sx={{ flex: 1 }}
               />
-              <TextField
-                label="Description"
-                size="small"
-                multiline
-                minRows={2}
-                value={ab.description}
-                onChange={(e) => {
-                  const next = [...sheet.specialAbilities];
-                  next[i] = { ...ab, description: e.target.value };
-                  setSheet((p) => ({ ...p, specialAbilities: next }));
-                }}
-              />
+              <Tooltip title="Remove ability">
+                <IconButton
+                  size="small"
+                  aria-label="Remove ability"
+                  onClick={() => removeSpecialAbility(i)}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
             </Stack>
-          ),
-        )}
+            <TextField
+              label="Description"
+              size="small"
+              multiline
+              minRows={2}
+              value={ab.description}
+              onChange={(e) => updateSpecialAbility(i, { description: e.target.value })}
+            />
+          </Stack>
+        ))}
         <Button
           size="small"
           startIcon={<AddIcon />}

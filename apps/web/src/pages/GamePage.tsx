@@ -20,6 +20,7 @@ import {
   createCharacterInitiativeSkipFn,
   getCharacterLightRadiusFeet,
   getCurrentTurnEntry,
+  isMonsterTokenTurn,
   MONSTER_IN_PLAY_KEY,
   movementRangeFromStats,
   parseMonsterSheet,
@@ -170,10 +171,26 @@ export default function GamePage() {
 
   const isTokenInitiativeActive = useCallback(
     (token: TacticalMapToken) => {
-      if (!initiativeActive || !initiative || !token.characterId) return false;
-      return isCharacterTurn(initiative, token.characterId, shouldSkipInitiative);
+      if (!initiativeActive || !initiative) return false;
+      if (token.characterId) {
+        return isCharacterTurn(initiative, token.characterId, shouldSkipInitiative);
+      }
+      if (
+        token.kind === 'monster' &&
+        token.monsterId &&
+        !token.isDead &&
+        gameId
+      ) {
+        return isMonsterTokenTurn(
+          initiative,
+          token.monsterId,
+          gameId,
+          shouldSkipInitiative,
+        );
+      }
+      return false;
     },
-    [initiativeActive, initiative, shouldSkipInitiative],
+    [initiativeActive, initiative, shouldSkipInitiative, gameId],
   );
 
   const corpseLootTarget = useMemo((): CorpseLootTarget | null => {
