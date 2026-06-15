@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { createReadStream, existsSync } from 'node:fs';
 import path from 'node:path';
 import { resolveGameMemberAccess } from '../lib/game-access.js';
-import { emitToGame } from '../lib/game-socket.js';
+import { publish } from '../lib/game-events.js';
 import { parseLayoutTokensBody } from '../lib/parse-layout-tokens.js';
 import { mapUploadFilePath } from '../lib/storage-paths.js';
 import { prisma } from '../lib/prisma.js';
@@ -28,7 +28,7 @@ const HOLDING_X = -1;
 const HOLDING_Y_BASE = 0;
 
 function emitMapState(app: FastifyInstance, gameId: string, actorUserId?: string) {
-  emitToGame(app.io, gameId, 'map:updated', { actorUserId });
+  publish(app.io, gameId, { type: 'map:updated', actorUserId });
 }
 
 export async function mapRoutes(app: FastifyInstance) {
@@ -161,7 +161,11 @@ export async function mapRoutes(app: FastifyInstance) {
         i += 1;
       }
       const updated = await prisma.mapToken.findMany({ where: { mapId: activeMapId } });
-      emitToGame(app.io, gameId, 'map:tokens_reset', { tokens: updated });
+      publish(app.io, gameId, {
+        type: 'map:tokens_reset',
+        tokens: updated,
+        actorUserId: request.userId,
+      });
       emitMapState(app, gameId, request.userId);
       return { tokens: updated };
     },
@@ -184,7 +188,12 @@ export async function mapRoutes(app: FastifyInstance) {
         where: { mapId: activeMapId },
         data: { zone: 'holding', x: HOLDING_X, y: 0 },
       });
-      emitToGame(app.io, gameId, 'map:cleared', { map, tokens: map.tokens });
+      publish(app.io, gameId, {
+        type: 'map:cleared',
+        map,
+        tokens: map.tokens,
+        actorUserId: request.userId,
+      });
       emitMapState(app, gameId, request.userId);
       return { map, tokens: map.tokens };
     },
@@ -242,7 +251,7 @@ export async function mapRoutes(app: FastifyInstance) {
             targetZone: body.zone ?? 'map',
           },
         });
-        emitToGame(app.io, gameId, 'movement:pending', { request: req });
+        publish(app.io, gameId, { type: 'movement:pending', request: req });
         return { pending: true, request: req };
       }
 
@@ -254,7 +263,7 @@ export async function mapRoutes(app: FastifyInstance) {
           zone: body.zone ?? 'map',
         },
       });
-      emitToGame(app.io, gameId, 'map:token_moved', { token: updated });
+      publish(app.io, gameId, { type: 'map:token_moved', token: updated });
       return { token: updated };
     },
   );
@@ -311,7 +320,11 @@ export async function mapRoutes(app: FastifyInstance) {
           },
         });
       }
-      emitToGame(app.io, movement.gameId, 'movement:resolved', { request: updatedReq, token });
+      publish(app.io, movement.gameId, {
+        type: 'movement:resolved',
+        request: updatedReq,
+        token,
+      });
       return { request: updatedReq, token };
     },
   );

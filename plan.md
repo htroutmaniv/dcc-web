@@ -139,7 +139,7 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 
 **Exit criteria:** no more JSON read-modify-write races; map sync is O(1) queries; data tables stop growing unbounded.
 
-> **Progress (2026-06-15):** Phase 3 started — 3.1 (decorators + membership cache), 3.2 (game-state), 3.5 (storage paths) complete. Next: 3.3 event facade, 3.6 deprecated path removal.
+> **Progress (2026-06-15):** Phase 3 — 3.1, 3.2, 3.3, 3.5, 3.6 complete. Next: 3.4 (multipart uploads) or 3.7 (Docker hygiene).
 
 ---
 
@@ -157,10 +157,10 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [x] Remove the dynamic `await import('./map-service.js')` from `monster-service.ts`.
 
 ### 3.3 Domain event facade — M
-- [ ] Add `apps/api/src/lib/game-events.ts` exposing `publish(gameId, event)` and `publishMany`.
-- [ ] Centralize all `emitToGame` calls behind it.
-- [ ] Define a discriminated `GameEvent` union in `packages/shared` so the client can switch on `event.type` exhaustively.
-- [ ] Begin sending deltas in the event payload (e.g., `monsters:changed` includes the updated monster ids); client applies locally rather than refetching.
+- [x] Add `apps/api/src/lib/game-events.ts` exposing `publish(gameId, event)` and `publishMany`.
+- [x] Centralize all `emitToGame` calls behind it (routes + `game-presence.ts`).
+- [x] Define a discriminated `GameEvent` union in `packages/shared/src/game-events.ts`.
+- [x] Begin sending deltas in the event payload (`monsters:changed` includes `monsterIds` when known).
 
 ### 3.4 Multipart map uploads — M
 - [ ] Add `@fastify/multipart`.
@@ -174,10 +174,13 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [x] Reuse in `map-service.ts`, `routes/maps.ts`, and `data-retention.ts`.
 
 ### 3.6 Remove deprecated paths — S
-- [ ] Delete `POST /games/:gameId/characters/generate` (`apps/api/src/routes/characters.ts:182-213`).
-- [ ] Delete `generateCharacterSchema` from `packages/shared/src/schemas.ts`.
-- [ ] Delete `addMonstersToInitiative`, `buildMonsterInitiativeEntries` from `apps/api/src/services/monster-service.ts:634-647`.
-- [ ] Audit other `@deprecated` markers and either implement removal or document why they stay.
+- [x] Delete `POST /games/:gameId/characters/generate`.
+- [x] Delete `generateCharacterSchema` from `packages/shared/src/schemas.ts`.
+- [x] Delete `addMonstersToInitiative`, `buildMonsterInitiativeEntries` from `monster-service.ts`.
+- [x] Audit other `@deprecated` markers — remaining are intentional shims documented below:
+  - `InitiativeEntry.monsterId` — persisted legacy initiative rows; kept for parse compatibility.
+  - `packages/shared` consumables/map-token-layout legacy aliases — external save data may reference old keys.
+  - `apps/web` utils (`armor.ts`, `consumables.ts`, `character-rolls.ts`, socket client) — Phase 4 cleanup.
 
 ### 3.7 Docker / deploy hygiene — S
 - [ ] `apps/api/Dockerfile` currently runs `npx prisma migrate deploy` in CMD — race condition with multiple replicas. Move migrations to a one-shot init job and have the app container only run the server.

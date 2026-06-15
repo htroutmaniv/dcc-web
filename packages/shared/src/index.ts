@@ -1,3 +1,4 @@
+export * from './game-events.js';
 export * from './types.js';
 export * from './ability-scores.js';
 export * from './birth-augur.js';

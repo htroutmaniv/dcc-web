@@ -1,6 +1,5 @@
 import {
   createCharacterSchema,
-  generateCharacterSchema,
   patchCharacterSchema,
   replaceCharacterItemsSchema,
   warnUnknownCharacterStatsCustomKeys,
@@ -20,14 +19,15 @@ import { characterMovementRange } from '../services/movement.js';
 import { gameWithSettingsInclude } from '../services/game-settings-service.js';
 import { deleteTokensForCharacter, syncActiveMapTokens } from '../services/map-service.js';
 import { reconcileInitiativeAfterCharacterDeath } from '../services/initiative-service.js';
-import { emitToGame } from '../lib/game-socket.js';
+import { publish } from '../lib/game-events.js';
 
 function broadcastCharacter(
   request: { server: { io: import('socket.io').Server | null }; userId?: string },
   gameId: string,
   character: Awaited<ReturnType<typeof prisma.character.create>>,
 ) {
-  emitToGame(request.server.io, gameId, 'character:upsert', {
+  publish(request.server.io, gameId, {
+    type: 'character:upsert',
     character,
     actorUserId: request.userId,
   });
@@ -156,7 +156,7 @@ export async function characterRoutes(app: FastifyInstance) {
           const character = await persistCharacter(gameId, ownerUserId, generated, 'random');
           await syncActiveMapTokens(gameId);
           broadcastCharacter(request, gameId, character);
-          emitToGame(request.server.io, gameId, 'map:updated', { actorUserId: request.userId });
+          publish(request.server.io, gameId, { type: 'map:updated', actorUserId: request.userId });
           return { character };
         }
 
@@ -168,42 +168,10 @@ export async function characterRoutes(app: FastifyInstance) {
         const character = await persistCharacter(gameId, ownerUserId, generated, 'manual');
         await syncActiveMapTokens(gameId);
         broadcastCharacter(request, gameId, character);
-        emitToGame(request.server.io, gameId, 'map:updated', { actorUserId: request.userId });
+        publish(request.server.io, gameId, { type: 'map:updated', actorUserId: request.userId });
         return { character };
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Character creation failed';
-        throw app.httpErrors.badRequest(message);
-      }
-    },
-  );
-
-  /** @deprecated Prefer POST /games/:gameId/characters with mode "random" */
-  app.post(
-    '/games/:gameId/characters/generate',
-    { onRequest: [app.authenticate], preHandler: [app.requireMember] },
-    async (request) => {
-      const { gameId } = request.params as { gameId: string };
-      const access = request.gameAccess!;
-      const parsed = generateCharacterSchema.safeParse(request.body ?? {});
-      if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
-
-      const ownerUserId =
-        access.isDm && parsed.data.ownerUserId
-          ? parsed.data.ownerUserId
-          : request.userId!;
-      try {
-        const generated = generateRandomCharacterData({
-          level: parsed.data.level,
-          className: parsed.data.className,
-          noElves: parsed.data.noElves,
-          noDwarves: parsed.data.noDwarves,
-          noHalflings: parsed.data.noHalflings,
-        });
-        const character = await persistCharacter(gameId, ownerUserId, generated, 'random');
-        broadcastCharacter(request, gameId, character);
-        return { character };
-      } catch (e) {
-        const message = e instanceof Error ? e.message : 'Character generation failed';
         throw app.httpErrors.badRequest(message);
       }
     },
@@ -351,7 +319,8 @@ export async function characterRoutes(app: FastifyInstance) {
       });
       if (statusChange === 'archived') {
         await deleteTokensForCharacter(characterId);
-        emitToGame(request.server.io, existing.gameId, 'map:updated', {
+        publish(request.server.io, existing.gameId, {
+          type: 'map:updated',
           actorUserId: request.userId,
         });
       } else if (
@@ -360,14 +329,16 @@ export async function characterRoutes(app: FastifyInstance) {
         hpMarkDead
       ) {
         await syncActiveMapTokens(existing.gameId);
-        emitToGame(request.server.io, existing.gameId, 'map:updated', {
+        publish(request.server.io, existing.gameId, {
+          type: 'map:updated',
           actorUserId: request.userId,
         });
       }
       if (statusChange === 'dead' || hpMarkDead) {
         const initiative = await reconcileInitiativeAfterCharacterDeath(existing.gameId);
         if (initiative) {
-          emitToGame(request.server.io, existing.gameId, 'initiative:updated', {
+          publish(request.server.io, existing.gameId, {
+            type: 'initiative:updated',
             initiative,
             actorUserId: request.userId,
           });

@@ -637,7 +637,7 @@ export default function GamePage() {
         void loadDetail().catch(() => {});
         void loadDiceRolls().catch(() => {});
       },
-      onMonstersChanged: (actorUserId) => {
+      onMonstersChanged: ({ actorUserId }) => {
         if (actorUserId && actorUserId === user?.id) return;
         void loadMonsters().catch(() => {});
       },

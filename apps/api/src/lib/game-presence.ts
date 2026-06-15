@@ -1,6 +1,6 @@
 import type { Server } from 'socket.io';
 import { isGameDm } from './game-access.js';
-import { emitToGame } from './game-socket.js';
+import { publish } from './game-events.js';
 import { prisma } from './prisma.js';
 
 export type GamePresenceUser = {
@@ -34,7 +34,7 @@ function listPresence(gameId: string): GamePresenceUser[] {
 }
 
 function broadcastPresence(io: Server, gameId: string): void {
-  emitToGame(io, gameId, 'game:presence', { users: listPresence(gameId) });
+  publish(io, gameId, { type: 'game:presence', users: listPresence(gameId) });
 }
 
 export async function addGamePresence(

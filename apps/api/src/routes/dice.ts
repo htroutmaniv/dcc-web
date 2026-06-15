@@ -5,7 +5,7 @@ import {
 } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
 import { resolveGameMemberAccess } from '../lib/game-access.js';
-import { emitToGame } from '../lib/game-socket.js';
+import { publish } from '../lib/game-events.js';
 import { prisma } from '../lib/prisma.js';
 import { applyDamageToTarget, listGameDiceRolls, rollAndPersist } from '../services/dice.js';
 import {
@@ -60,14 +60,16 @@ export async function diceRoutes(app: FastifyInstance) {
         modifier: result.modifier,
       });
       if (initiative) {
-        emitToGame(request.server.io, parsed.data.gameId, 'initiative:updated', {
+        publish(request.server.io, parsed.data.gameId, {
+          type: 'initiative:updated',
           initiative,
           actorUserId: request.userId,
         });
       }
     }
 
-    emitToGame(request.server.io, parsed.data.gameId, 'dice:rolled', {
+    publish(request.server.io, parsed.data.gameId, {
+      type: 'dice:rolled',
       result,
       actorUserId: request.userId,
       characterId: parsed.data.characterId,
@@ -92,11 +94,13 @@ export async function diceRoutes(app: FastifyInstance) {
         amount: parsed.data.amount,
       });
 
-      emitToGame(request.server.io, gameId, 'damage:applied', {
-        ...outcome,
-        amount: parsed.data.amount,
+      publish(request.server.io, gameId, {
+        type: 'damage:applied',
         targetType: parsed.data.targetType,
         targetId: parsed.data.targetId,
+        amount: parsed.data.amount,
+        hpAfter: outcome.hpAfter,
+        targetName: outcome.targetName,
         rollLogId: parsed.data.rollLogId,
         actorUserId: request.userId,
       });
@@ -107,14 +111,16 @@ export async function diceRoutes(app: FastifyInstance) {
           include: { items: { orderBy: { sortOrder: 'asc' } } },
         });
         if (character) {
-          emitToGame(request.server.io, gameId, 'character:upsert', {
+          publish(request.server.io, gameId, {
+            type: 'character:upsert',
             character,
             actorUserId: request.userId,
           });
           if (character.status === 'dead') {
             const initiative = await reconcileInitiativeAfterCharacterDeath(gameId);
             if (initiative) {
-              emitToGame(request.server.io, gameId, 'initiative:updated', {
+              publish(request.server.io, gameId, {
+                type: 'initiative:updated',
                 initiative,
                 actorUserId: request.userId,
               });
@@ -124,7 +130,9 @@ export async function diceRoutes(app: FastifyInstance) {
       }
 
       if (parsed.data.targetType === 'monster') {
-        emitToGame(request.server.io, gameId, 'monsters:changed', {
+        publish(request.server.io, gameId, {
+          type: 'monsters:changed',
+          monsterIds: [parsed.data.targetId],
           actorUserId: request.userId,
         });
       }
@@ -132,7 +140,8 @@ export async function diceRoutes(app: FastifyInstance) {
       if (parsed.data.targetType === 'npc') {
         const token = await prisma.mapToken.findUnique({ where: { id: parsed.data.targetId } });
         if (token) {
-          emitToGame(request.server.io, gameId, 'token:updated', {
+          publish(request.server.io, gameId, {
+            type: 'token:updated',
             token,
             actorUserId: request.userId,
           });

@@ -10,7 +10,8 @@ import {
   gameWithSettingsInclude,
 } from '../services/game-settings-service.js';
 import { clearGameMembershipCache, generateUniqueInviteCode, isGameDm } from '../lib/game-access.js';
-import { emitToGame, emitToUsers } from '../lib/game-socket.js';
+import { publish, publishMany } from '../lib/game-events.js';
+import { emitToUsers } from '../lib/game-socket.js';
 import { prisma } from '../lib/prisma.js';
 
 const gameListSelect = {
@@ -103,7 +104,7 @@ export async function gameRoutes(app: FastifyInstance) {
         data: { gameId: game.id, userId, role: 'player' },
       });
       clearGameMembershipCache(game.id);
-      emitToGame(app.io, game.id, 'game:roster_changed', { actorUserId: userId });
+      publish(app.io, game.id, { type: 'game:roster_changed', actorUserId: userId });
     }
     return { game: serializeGameForClient(
       await prisma.game.findUniqueOrThrow({
@@ -167,12 +168,14 @@ export async function gameRoutes(app: FastifyInstance) {
     const settings = await patchGameSettingsColumns(gameId, parsed.data);
     if (parsed.data.sharedMonsterInitiative !== undefined) {
       const initiative = await syncMonsterGroupInitiative(gameId);
-      emitToGame(app.io, gameId, 'initiative:updated', {
-        initiative,
-        actorUserId: request.userId,
-      });
+      publishMany(app.io, gameId, [
+        { type: 'initiative:updated', initiative, actorUserId: request.userId },
+        { type: 'game:settings_updated', settings, actorUserId: request.userId },
+      ]);
+      return { settings };
     }
-    emitToGame(app.io, gameId, 'game:settings_updated', {
+    publish(app.io, gameId, {
+      type: 'game:settings_updated',
       settings,
       actorUserId: request.userId,
     });

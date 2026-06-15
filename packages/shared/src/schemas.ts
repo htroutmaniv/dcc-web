@@ -171,15 +171,6 @@ const raceFiltersSchema = z.object({
   noHalflings: z.boolean().optional().default(false),
 });
 
-/** @deprecated Use createCharacterSchema */
-export const generateCharacterSchema = z
-  .object({
-    ownerUserId: z.string().uuid().optional(),
-    level: z.number().int().min(0).max(10).default(0),
-    className: z.string().max(64).optional(),
-  })
-  .merge(raceFiltersSchema);
-
 export const itemCatalogQuerySchema = z.object({
   category: z.enum(['weapon', 'armor', 'treasure', 'misc', 'disposable']),
   q: z.string().max(100).optional(),
@@ -310,11 +301,6 @@ export const upsertLootPoolSchema = z.object({
       }),
     )
     .max(50),
-});
-
-/** @deprecated Monsters share one group initiative slot. */
-export const addMonstersToInitiativeSchema = z.object({
-  monsterIds: z.array(z.string().uuid()).max(50).optional(),
 });
 
 export const createGameMapSchema = z.object({

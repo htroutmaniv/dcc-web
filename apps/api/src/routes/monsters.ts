@@ -1,5 +1,4 @@
 import {
-  addMonstersToInitiativeSchema,
   monsterCatalogQuerySchema,
   patchGameMonsterSchema,
   replaceMonsterItemsSchema,
@@ -9,7 +8,7 @@ import {
   upsertMonsterCatalogSchema,
 } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
-import { emitToGame } from '../lib/game-socket.js';
+import { publish, publishMany } from '../lib/game-events.js';
 import { syncActiveMapTokens } from '../services/map-service.js';
 import { prisma } from '../lib/prisma.js';
 import {
@@ -29,8 +28,13 @@ function emitMonstersChanged(
   app: FastifyInstance,
   gameId: string,
   actorUserId?: string,
+  monsterIds?: string[],
 ) {
-  emitToGame(app.io, gameId, 'monsters:changed', { actorUserId });
+  publish(app.io, gameId, {
+    type: 'monsters:changed',
+    actorUserId,
+    ...(monsterIds && monsterIds.length > 0 ? { monsterIds } : {}),
+  });
 }
 
 function emitInitiativeUpdate(
@@ -39,7 +43,11 @@ function emitInitiativeUpdate(
   initiative: GameInitiativeState | null,
   actorUserId?: string,
 ) {
-  emitToGame(app.io, gameId, 'initiative:updated', { initiative, actorUserId });
+  publish(app.io, gameId, {
+    type: 'initiative:updated',
+    initiative,
+    actorUserId,
+  });
 }
 
 async function assertCatalogEditor(userId: string, app: FastifyInstance) {
@@ -234,8 +242,11 @@ export async function monsterRoutes(app: FastifyInstance) {
 
       const { monsters, initiative } = await spawnGameMonsters(gameId, parsed.data);
       await syncActiveMapTokens(gameId);
-      emitMonstersChanged(app, gameId, request.userId);
-      emitToGame(app.io, gameId, 'map:updated', { actorUserId: request.userId });
+      const monsterIds = monsters.map((m) => m.id);
+      publishMany(app.io, gameId, [
+        { type: 'monsters:changed', monsterIds, actorUserId: request.userId },
+        { type: 'map:updated', actorUserId: request.userId },
+      ]);
       if (initiative) {
         emitInitiativeUpdate(app, gameId, initiative, request.userId);
       }
@@ -248,9 +259,6 @@ export async function monsterRoutes(app: FastifyInstance) {
     { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const parsed = addMonstersToInitiativeSchema.safeParse(request.body ?? {});
-      if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
-
       const initiative = await syncMonsterGroupInitiative(gameId);
       emitInitiativeUpdate(app, gameId, initiative, request.userId);
       return { initiative };
@@ -270,8 +278,10 @@ export async function monsterRoutes(app: FastifyInstance) {
 
       const { monster, initiative } = await patchGameMonster(gameId, monsterId, parsed.data);
       await syncActiveMapTokens(gameId);
-      emitMonstersChanged(app, gameId, request.userId);
-      emitToGame(app.io, gameId, 'map:updated', { actorUserId: request.userId });
+      publishMany(app.io, gameId, [
+        { type: 'monsters:changed', monsterIds: [monsterId], actorUserId: request.userId },
+        { type: 'map:updated', actorUserId: request.userId },
+      ]);
       if (initiative) {
         emitInitiativeUpdate(app, gameId, initiative, request.userId);
       }
@@ -291,7 +301,7 @@ export async function monsterRoutes(app: FastifyInstance) {
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
       const monster = await replaceMonsterItems(gameId, monsterId, parsed.data.items);
-      emitMonstersChanged(app, gameId, request.userId);
+      emitMonstersChanged(app, gameId, request.userId, [monsterId]);
       return { monster };
     },
   );
@@ -315,19 +325,25 @@ export async function monsterRoutes(app: FastifyInstance) {
         });
         const result = await transferInventoryItem(gameId, parsed.data);
         if (result.sourceCharacter) {
-          emitToGame(app.io, gameId, 'character:upsert', {
+          publish(app.io, gameId, {
+            type: 'character:upsert',
             character: result.sourceCharacter,
             actorUserId: request.userId,
           });
         }
         if (result.targetCharacter) {
-          emitToGame(app.io, gameId, 'character:upsert', {
+          publish(app.io, gameId, {
+            type: 'character:upsert',
             character: result.targetCharacter,
             actorUserId: request.userId,
           });
         }
         if (result.sourceMonster || result.targetMonster) {
-          emitMonstersChanged(app, gameId, request.userId);
+          const monsterIds = [
+            result.sourceMonster?.id,
+            result.targetMonster?.id,
+          ].filter((id): id is string => Boolean(id));
+          emitMonstersChanged(app, gameId, request.userId, monsterIds);
         }
         return result;
       } catch (e) {
@@ -347,9 +363,11 @@ export async function monsterRoutes(app: FastifyInstance) {
       };
       const { initiative } = await deleteGameMonster(gameId, monsterId);
       await syncActiveMapTokens(gameId);
-      emitMonstersChanged(app, gameId, request.userId);
+      publishMany(app.io, gameId, [
+        { type: 'monsters:changed', monsterIds: [monsterId], actorUserId: request.userId },
+        { type: 'map:updated', actorUserId: request.userId },
+      ]);
       emitInitiativeUpdate(app, gameId, initiative, request.userId);
-      emitToGame(app.io, gameId, 'map:updated', { actorUserId: request.userId });
       return { ok: true, initiative };
     },
   );

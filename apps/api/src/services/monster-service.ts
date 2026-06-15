@@ -608,18 +608,3 @@ export async function buildMonsterInitiativeEntriesForStart(
   }
   return buildIndividualMonsterInitiativeEntries(gameId);
 }
-
-/** @deprecated Use syncMonsterGroupInitiative */
-export async function addMonstersToInitiative(
-  gameId: string,
-  _monsterIds?: string[],
-): Promise<GameInitiativeState | null> {
-  return syncMonsterGroupInitiative(gameId);
-}
-
-/** @deprecated Use buildMonsterInitiativeEntriesForStart */
-export async function buildMonsterInitiativeEntries(
-  gameId: string,
-): Promise<InitiativeEntry[]> {
-  return buildMonsterInitiativeEntriesForStart(gameId);
-}

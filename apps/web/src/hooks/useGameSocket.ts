@@ -22,7 +22,7 @@ export interface GameSocketHandlers {
     characterId?: string;
     actorUserId?: string;
   }) => void;
-  onMonstersChanged?: (actorUserId?: string) => void;
+  onMonstersChanged?: (payload: { actorUserId?: string; monsterIds?: string[] }) => void;
   onDamageApplied?: (payload: {
     targetType: string;
     targetId: string;
@@ -83,8 +83,8 @@ export function useGameSocket(
       },
     );
 
-    socket.on('monsters:changed', (payload: { actorUserId?: string }) => {
-      handlersRef.current.onMonstersChanged?.(payload?.actorUserId);
+    socket.on('monsters:changed', (payload: { actorUserId?: string; monsterIds?: string[] }) => {
+      handlersRef.current.onMonstersChanged?.(payload);
     });
 
     socket.on('damage:applied', (payload) => {
