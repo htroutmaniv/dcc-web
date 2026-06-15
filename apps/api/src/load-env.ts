@@ -23,8 +23,14 @@ if (!process.env.DCC_ENV) {
 }
 
 if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = 'postgresql://dcc:dcc@localhost:5432/dcc';
-  console.warn(
-    '[dcc-api] DATABASE_URL not set — using default localhost Postgres. Copy .env.example to .env to customize.',
-  );
+  const isProduction =
+    process.env.NODE_ENV === 'production' || process.env.DCC_ENV === 'production';
+  if (isProduction) {
+    // Fail in validateProductionConfig — do not silently default in prod.
+  } else {
+    process.env.DATABASE_URL = 'postgresql://dcc:dcc@localhost:5432/dcc';
+    console.warn(
+      '[dcc-api] DATABASE_URL not set — using default localhost Postgres. Copy .env.example to .env to customize.',
+    );
+  }
 }

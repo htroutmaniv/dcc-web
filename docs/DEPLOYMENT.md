@@ -223,6 +223,7 @@ See previous sections for `dcc-api.service` and `dcc-web.service` units pointing
 | nginx container exits on start | Cert paths wrong — check `NGINX_SSL_CERT` / files under `LETSENCRYPT_DIR` |
 | Port 443 already in use | Another nginx/IIS service — stop it or use one stack only |
 | 502 Bad Gateway | API or vite preview not running on host |
+| `DATABASE_URL must be set in production` | Add `DATABASE_URL` to `.env` (localhost/127.0.0.1 is fine — Postgres runs on the host loopback in this layout) |
 | Socket.IO fails / sync drops | Rebuild nginx after template changes (`docker compose build nginx && docker compose up -d nginx`). Check browser console for `[game socket]` messages. API logs show `socket connected` / `socket disconnected`. |
 | Session cookie not set | Use HTTPS; check `NODE_ENV=production` |
 | Verification emails not sent | Resend domain + `RESEND_API_KEY` / `MAIL_FROM` |

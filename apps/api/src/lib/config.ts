@@ -40,8 +40,8 @@ export function validateProductionConfig(): void {
   }
 
   const databaseUrl = process.env.DATABASE_URL?.trim() ?? '';
-  if (!databaseUrl || /localhost|127\.0\.0\.1/i.test(databaseUrl)) {
-    errors.push('DATABASE_URL must be set and must not use localhost in production');
+  if (!databaseUrl) {
+    errors.push('DATABASE_URL must be set in production');
   }
 
   if (emailAuthConfigured()) {
