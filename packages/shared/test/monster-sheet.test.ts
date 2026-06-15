@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { defaultMonsterSheet, parseMonsterSheet } from '../src/monster-sheet.js';
+import { defaultMonsterSheet, parseMonsterSheet } from '../src/monsters/monster-sheet.js';
 
 describe('parseMonsterSheet', () => {
   test('returns default sheet for invalid input', () => {

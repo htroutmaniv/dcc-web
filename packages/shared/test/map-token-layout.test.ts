@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   computeUpperLeftTokenGrid,
   computeUpperRightTokenGrid,
-} from '../src/map-token-layout.js';
+} from '../src/map/map-token-layout.js';
 
 describe('computeUpperRightTokenGrid', () => {
   test('places count tokens in a right-anchored grid', () => {

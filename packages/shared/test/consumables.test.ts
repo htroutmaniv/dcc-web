@@ -6,8 +6,8 @@ import {
   getLightSourceRadiusFeet,
   resolveActiveLightItemId,
   USING_LIGHT_SOURCE_KEY,
-} from '../src/consumables.js';
-import type { CatalogItemLike } from '../src/consumables.js';
+} from '../src/inventory/consumables.js';
+import type { CatalogItemLike } from '../src/inventory/consumables.js';
 
 function torch(id: string, uses = 3): CatalogItemLike {
   return {

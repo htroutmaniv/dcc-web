@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseCompoundNotation, parseDiceNotation, rollDice } from '../src/dice-notation.js';
+import { parseCompoundNotation, parseDiceNotation, rollDice } from '../src/dice/dice-notation.js';
 
 describe('parseDiceNotation', () => {
   test('parses simple notation', () => {

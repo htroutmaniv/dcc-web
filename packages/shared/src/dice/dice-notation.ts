@@ -1,4 +1,4 @@
-import type { DiceRollResult } from './types.js';
+import type { DiceRollResult } from '../types.js';
 
 const SINGLE_NOTATION_RE = /^(\d+)d(\d+)([+-]\d+)?$/i;
 const DIE_PART_RE = /(\d+)d(\d+)/gi;

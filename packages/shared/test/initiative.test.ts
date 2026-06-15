@@ -8,7 +8,7 @@ import {
   parseGameInitiativeState,
   type GameInitiativeState,
   type InitiativeEntry,
-} from '../src/initiative.js';
+} from '../src/initiative/initiative.js';
 
 function charEntry(id: string, initiative: number): InitiativeEntry {
   return {

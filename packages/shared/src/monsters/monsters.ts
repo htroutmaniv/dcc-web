@@ -1,4 +1,4 @@
-import { rollDice } from './dice-notation.js';
+import { rollDice } from '../dice/dice-notation.js';
 import type { MonsterCombatJson, MonsterSheetData, MonsterStatsJson } from './monster-sheet.js';
 
 export type { MonsterSheetData, MonsterStatsJson, MonsterCombatJson, MonsterItemRow } from './monster-sheet.js';

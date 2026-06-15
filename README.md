@@ -32,3 +32,14 @@ In **two terminals**: `bun server` and `bun bundler`. Open **http://localhost:80
 - [Development / structure](docs/DEVELOPMENT.md)
 - [Production deployment (hat3d.com)](docs/DEPLOYMENT.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Architecture decision records (ADRs)](docs/adr/README.md)
+- [Remediation plan](plan.md)
+
+## Tests
+
+```bash
+bun run test          # shared + API + web unit tests
+bun run typecheck     # tsc --noEmit in all workspaces
+```
+
+API integration tests run in CI (`GITHUB_ACTIONS=1`); locally they skip unless `RUN_INTEGRATION_TESTS=1`.

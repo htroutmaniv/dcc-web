@@ -1,12 +1,14 @@
-# System architecture
+# System architecture (as built)
+
+This document describes **how DCC Web works today**. For decision rationale, see [docs/adr/README.md](./adr/README.md). For the remediation roadmap, see [plan.md](../plan.md) at the repo root.
 
 ## Goals
 
-1. **Session-centric play** — A DM runs one or more concurrent *games*; each game has players, characters, and an optional tactical map.
-2. **Role-based visibility** — DM reads all character sheets in active game; each player reads only characters they own in that game.
-3. **Rich character sheets** — Stats, derived modifiers, equipment (weapons, armor, treasure, misc), disposables (torches, rations, liquids).
-4. **Tactical map** — DM uploads or draws maps; places and moves PC/NPC tokens; shows movement radius from speed/rules.
-5. **Optional Purple Sorcerer workflow** — Import JSON/CSV exports (no official API); native generator as fallback.
+1. **Session-centric play** — A DM runs one or more concurrent *games*; each game has players, characters, monsters, and a tactical map.
+2. **Role-based visibility** — DM sees all characters in a game; players see only their own.
+3. **Rich character sheets** — Stats, equipment, consumables, server-side dice.
+4. **Tactical map** — DM uploads maps, places tokens, draws overlays; movement radius from DCC rules.
+5. **Live sync** — Socket.IO pushes game events to room `game:{gameId}`.
 
 ## High-level diagram
 
@@ -17,20 +19,19 @@ flowchart TB
     PL[Player clients]
   end
 
-  subgraph edge [Edge Docker]
-    NGX[nginx reverse proxy]
+  subgraph edge [Docker nginx]
+    NGX[TLS + reverse proxy]
   end
 
-  subgraph host [Host processes]
-    WEB[Vite React]
-    API[Node API REST]
-    WS[WebSocket on API]
+  subgraph host [Single API process]
+    WEB[Vite static / preview]
+    API[Bun + Fastify REST]
+    WS[Socket.IO on same process]
   end
 
   subgraph data [Data tier]
     PG[(PostgreSQL)]
-    REDIS[(Redis pub/sub optional)]
-    S3[(Object storage maps)]
+    FS[Local map uploads]
   end
 
   DM --> NGX
@@ -38,171 +39,105 @@ flowchart TB
   NGX -->|/| WEB
   NGX -->|/api| API
   NGX -->|/socket.io| WS
-  WEB -.->|dev/preview :5173| NGX
-  API -.->|:3003| NGX
+  API --> PG
+  WS --> PG
+  API --> FS
   DM --> WS
   PL --> WS
-  API --> PG
-  API --> S3
-  WS --> PG
-  WS --> REDIS
 ```
 
-## Monorepo applications
+**Not in production today:** Redis adapter, S3 map storage, horizontal API scaling — see ADR-003 and ADR-005.
 
-### `apps/web` (React + MUI)
+## Monorepo
 
-| Area | Responsibility |
+| Package | Stack | Role |
+|---------|-------|------|
+| `apps/web` | React 19, MUI, Konva, Vite | SPA: lobby, game page, sheets, map |
+| `apps/api` | Bun, Fastify, Prisma, Socket.IO | REST + WebSocket + map file serving |
+| `packages/shared` | TypeScript, Zod | DTOs, validators, DCC domain logic |
+
+### `apps/web`
+
+| Area | Implementation |
 |------|----------------|
-| **Auth shell** | Login/register or invite-link join; JWT in httpOnly cookie or memory + refresh |
-| **Lobby** | DM: list/create games, switch active game; Player: join via code/link |
-| **Character workspace** | Tabbed sheet editor/viewer; inventory grids; modifier breakdown |
-| **Map workspace** | Canvas layer (recommend **Konva** or **react-konva**); DM tools only for edit; players see fog/visibility per policy |
-| **Import wizard** | Upload Purple Sorcerer JSON/CSV → map to internal schema → review → save |
+| Auth | Email login/register; session via httpOnly cookie |
+| Game page | `useGamePageController` + domain hooks under `hooks/game/` |
+| Server state | REST fetch on mount; **no TanStack Query** (ADR-004) |
+| Live updates | `useGameRealtimeSync` applies socket events to hook state |
+| Map | `react-konva` tactical canvas |
 
-MUI theming: dark “dungeon” default + light option; use `ThemeProvider` + per-game accent optional later.
+### `apps/api`
 
-### `apps/api` (Node + TypeScript)
+| Module | Responsibility |
+|--------|----------------|
+| `auth` | Register, login, verify-email, dev-login (dev only) |
+| `games` | CRUD, settings, invite join, audit log |
+| `characters` | CRUD, status, inventory |
+| `monsters` | Spawn, patch, catalog, transfer-item |
+| `maps` | Upload, tokens, drawings |
+| `initiative` | Start/advance/end with optimistic locking |
+| `realtime` | `publish()` → Socket.IO room `game:{id}` |
 
-Recommend **Fastify** for performance and schema-first routes (aligns with Zod in `packages/shared`).
-
-| Module | Endpoints / events |
-|--------|-------------------|
-| `auth` | Register, login, refresh, profile |
-| `games` | CRUD games, invite codes, membership |
-| `characters` | CRUD per game; list filtered by role |
-| `inventory` | Nested under character |
-| `maps` | Upload image, metadata, layers, tokens |
-| `realtime` | Sheet patches, map token moves, presence |
-
-**WebSocket rooms:** `game:{gameId}` — subscribe on join; server validates membership before emit.
+**Plugins:** `authenticate`, `requireMember`, `requireDm`, rate limits, membership LRU cache.
 
 ### `packages/shared`
 
-- TypeScript interfaces for all DTOs
-- Zod validators shared by API and web forms
-- DCC constants (ability keys, item categories, default movement rules)
+Grouped by domain under `src/` (combat, dice, inventory, map, initiative, monsters, characters, schemas). Public API is the root `index.ts` barrel — apps import `@dcc-web/shared` only.
 
-## Core user flows
+## Core flows
 
-### DM creates and switches games
+### DM creates a game
 
-1. DM authenticates → `POST /games` → receives `gameId` + invite code.
-2. Multiple games appear in sidebar; **active game** stored client-side and sent as `X-Game-Id` header (or path prefix `/games/:id/...`).
-3. DM opens game → loads all characters + map state via REST; subscribes to `game:{id}` socket.
+1. `POST /games` → game row + default map + invite code.
+2. Client navigates to `/games/:id`, loads detail/characters/maps via REST.
+3. Socket `game:join` → room membership + presence broadcast.
 
-### Player joins
+### Live updates
 
-1. Player uses invite link `/join/:code` → `POST /games/join` → membership row `game_players`.
-2. Player creates or imports characters → `game_id` + `owner_user_id` scoped.
-3. Player UI only lists `GET /games/:id/characters?mine=true` (server enforces).
+1. Client PATCH/POST → API persists to Postgres.
+2. API `publish(io, gameId, event)` → all sockets in `game:{gameId}`.
+3. Clients merge event into local hook state (no full refetch).
 
-### Live sheet edit
+### Map upload
 
-1. Optimistic UI update on field blur or debounced keystroke.
-2. Client sends `character:patch` with JSON Patch or field-level delta.
-3. Server persists, broadcasts to room; DM receives all, players only if `ownerUserId === socket.userId` OR event is `dm_broadcast`.
-
-Conflict policy: **last-write-wins per field** with `updatedAt` + `version` for optional merge UI later.
-
-### Map session
-
-1. DM uploads PNG/WebP → stored in object storage; URL returned to clients.
-2. DM sets **grid**: size (ft), cell px, snap on/off.
-3. Tokens: `{ id, type: pc|npc|object, label, x, y, imageUrl?, characterId? }`.
-4. Movement radius: client draws circle/hex from `speed` or user-entered feet; server stores optional `reachableArea` only for audit, compute client-side from rules.
-5. Player clients: read-only map or token move limited to own PC token if enabled in game settings.
+1. DM multipart POST → magic-byte validation → hash-named file under `STORAGE_PATH/maps/`.
+2. URL stored on `GameMap.imageUrl`; served at `/uploads/maps/...`.
 
 ## Security model
 
-| Role | Characters | Map edit | Map view | Game admin |
-|------|------------|----------|----------|------------|
-| DM (game owner) | All | Yes | Yes | Yes |
-| DM (co-DM future) | All | Yes | Yes | Configurable |
-| Player | Own only | No* | Yes | No |
+| Role | How determined | Characters | Map edit | Game admin |
+|------|----------------|------------|----------|------------|
+| DM | `games.dm_user_id === userId` | All | Yes | Yes |
+| Player | `game_players` row | Own only | No* | No |
+| co-DM | **Not implemented** | — | — | — |
 
-\*Optional: allow players to drag **their** token only.
+\*Players may move their own PC token when game settings allow.
 
-- All routes: `Authorization: Bearer` + membership check on `gameId`.
-- WebSocket handshake: same JWT; join room only if `game_players` or `games.dm_user_id`.
-- Uploaded maps: virus scan + MIME verify + size cap; signed URLs with TTL.
+- All game routes: JWT cookie + `requireMember` or `requireDm`.
+- WebSocket: same JWT from cookie on handshake.
+- `GamePlayerRole.co_dm` exists in the schema for future use; all joins create `player` role today.
 
-## Technology choices (recommended)
+## Technology choices (actual)
 
-| Concern | Choice | Rationale |
-|---------|--------|-----------|
-| ORM | Prisma | Migrations, TypeScript, PostgreSQL |
-| DB | PostgreSQL | Relational sheets + JSON columns for flexible PS import |
-| Cache / pubsub | Redis (phase 2) | Horizontal WS scaling |
-| File storage | Local dev / S3 prod | Map images |
-| API docs | OpenAPI from Fastify schemas | Client codegen optional |
-| State (web) | TanStack Query + Zustand | Server state vs UI (active game, map tool) |
-| Forms | React Hook Form + Zod | Shared schemas |
-| Map canvas | react-konva | Layers, drag, circles for radius |
+| Concern | Choice |
+|---------|--------|
+| Runtime | Bun |
+| ORM | Prisma + PostgreSQL |
+| API | Fastify 5, Pino logging, request IDs |
+| Realtime | Socket.IO, single process (ADR-003) |
+| Map files | Local FS (ADR-005) |
+| Client state | React hooks + socket sync (ADR-004) |
+| Forms | Controlled inputs + Zod from shared |
+| Map canvas | react-konva |
 
-## nginx configuration (production)
+## Production topology
 
-```nginx
-upstream api_upstream { server api:3003; }
-
-server {
-  listen 80;
-  client_max_body_size 20M;  # map uploads
-
-  location / {
-    root /usr/share/nginx/html;
-    try_files $uri $uri/ /index.html;
-  }
-
-  location /api/ {
-    proxy_pass http://api_upstream/;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-  }
-
-  location /socket.io/ {
-    proxy_pass http://api_upstream;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-  }
-}
-```
-
-## Deployment topology
-
-**Development:** Vite dev server proxies `/api` and `/socket.io` to local API.
-
-**Production:** Docker Compose or k8s: `nginx` + `api` + `web` (built static) + `postgres` + optional `redis`.
-
-Environment variables:
-
-- `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGIN`
-- `STORAGE_PATH` or `S3_BUCKET`, `S3_REGION`
-- `NODE_ENV`
-
-## Phased delivery
-
-| Phase | Deliverable |
-|-------|-------------|
-| **0** | Monorepo scaffold, auth, game CRUD, empty shell UI |
-| **1** | Character sheet CRUD, DM all / player own, basic inventory |
-| **2** | WebSocket live sync, invite links |
-| **3** | Map upload, grid, tokens, movement radius overlay |
-| **4** | Purple Sorcerer JSON/CSV import + field mapping UI |
-| **5** | Draw-on-map tools, fog of war, co-DM, Redis scale-out |
-
-## Open decisions
-
-Record choices in ADRs as you implement:
-
-1. **Auth provider** — Email/password with Resend for verification and password reset.
-2. **Movement rules** — DCC exact table vs simple “speed in ft” circle.
-3. **Fog of war** — Per-player socket events vs shared state with clip regions.
-4. **Offline / PWA** — Nice-to-have for players at table with flaky Wi‑Fi.
+See [DEPLOYMENT.md](./DEPLOYMENT.md): Docker nginx + Postgres; API and Vite preview on host ports; **one API worker**.
 
 ## Related docs
 
 - [DATA-MODEL.md](./DATA-MODEL.md)
-- [PURPLE-SORCERER.md](./PURPLE-SORCERER.md)
+- [DEPLOYMENT.md](./DEPLOYMENT.md)
+- [DEVELOPMENT.md](./DEVELOPMENT.md)
+- [ADR index](./adr/README.md)
+- [Remediation plan](../plan.md)

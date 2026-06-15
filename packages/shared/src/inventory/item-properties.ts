@@ -1,4 +1,4 @@
-import type { ItemCategory } from './types.js';
+import type { ItemCategory } from '../types.js';
 
 export type EquipmentSectionKey = 'consumables' | 'weapon' | 'armor' | 'misc';
 

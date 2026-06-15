@@ -1,4 +1,4 @@
-import { parseGameInitiativeState } from './initiative.js';
+import { parseGameInitiativeState } from './initiative/initiative.js';
 import type { CharacterStats, GameSettings, MovementRange, PlayerTokenMovement } from './types.js';
 
 /** DB row shape for composing {@link GameSettings} (settings JSON column removed). */

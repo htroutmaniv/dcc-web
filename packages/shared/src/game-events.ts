@@ -1,4 +1,4 @@
-import type { GameInitiativeState } from './initiative.js';
+import type { GameInitiativeState } from './initiative/initiative.js';
 import type { GameSettings } from './types.js';
 
 /** Realtime payloads emitted to the `game:{gameId}` Socket.IO room. */

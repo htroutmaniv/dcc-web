@@ -37,8 +37,15 @@ erDiagram
 | title | text | |
 | invite_code | text unique | Short code for join URL |
 | status | enum | `active`, `archived` |
-| settings | jsonb | `gridFtPerCell` (default 5), `playerTokenMovement`: `free` \| `approval` |
+| active_map_id | UUID FK | nullable |
+| monsters_visible_on_map | boolean | |
+| shared_monster_initiative | boolean | |
+| hide_monster_ac_in_roll_log | boolean | |
+| grid_ft_per_cell | decimal | default 5 |
+| player_token_movement | enum | `free`, `approval` |
 | created_at | timestamptz | |
+
+Game settings are typed columns (Phase 2.1); API composes a `settings` object at read time. Initiative lives in `game_initiative` (separate table).
 
 DM may have **many** active games; client tracks `activeGameId`.
 
@@ -48,7 +55,7 @@ DM may have **many** active games; client tracks `activeGameId`.
 |--------|------|-------|
 | game_id | UUID FK | |
 | user_id | UUID FK | |
-| role | enum | `player` (extend: `co_dm`) |
+| role | enum | `player` only at runtime; `co_dm` reserved for future (see ADR / ARCHITECTURE — not implemented) |
 | joined_at | timestamptz | |
 | PK | (game_id, user_id) | |
 

@@ -6,7 +6,7 @@ export type TokenZone = 'map' | 'holding';
 export type PlayerTokenMovement = 'free' | 'approval';
 export type MovementRequestStatus = 'pending' | 'accepted' | 'rejected';
 
-import type { GameInitiativeState } from './initiative.js';
+import type { GameInitiativeState } from './initiative/initiative.js';
 
 export interface GameSettings {
   gridFtPerCell: number;

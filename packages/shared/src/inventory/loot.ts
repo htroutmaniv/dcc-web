@@ -1,4 +1,4 @@
-import type { LootPoolEntry } from './monster-sheet.js';
+import type { LootPoolEntry } from '../monsters/monster-sheet.js';
 
 export function rollLootFromPool(
   entries: LootPoolEntry[],

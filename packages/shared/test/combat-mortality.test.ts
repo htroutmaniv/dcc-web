@@ -5,7 +5,7 @@ import {
   resolveCharacterCombatAfterHpChange,
   resolveMonsterAfterHpChange,
   tickMortalRound,
-} from '../src/combat-mortality.js';
+} from '../src/combat/combat-mortality.js';
 
 describe('getCharacterVitality', () => {
   test('level 0 dies immediately at 0 HP', () => {

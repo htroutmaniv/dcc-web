@@ -1,7 +1,7 @@
 import {
   getCharacterVitality,
   type CharacterCombatLike,
-} from './combat-mortality.js';
+} from '../combat/combat-mortality.js';
 
 /** Stored on character.stats.custom — character is eligible for initiative / in play. */
 export const ACTIVE_IN_PLAY_KEY = 'activeInPlay';

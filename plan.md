@@ -76,8 +76,8 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
   - [x] `POST /dice/roll` — 60/min/user (cheap defence against spam)
 
 ### 1.3 CSRF posture — M
-- [-] Decide via ADR (see Phase 6): double-submit token vs `SameSite=Strict` on the session cookie. *(Deferred — needs ADR-002 before implementation.)*
-- [-] If staying with `Lax`: add `@fastify/csrf-protection`, mint a token on `GET /auth/me`, validate on every non-GET. Update `apps/web/src/api/client.ts` to attach `X-CSRF-Token` automatically.
+- [x] Decide via ADR-002: SameSite=Lax + same-origin SPA sufficient for now; double-submit token deferred.
+- [-] If staying with `Lax`: add `@fastify/csrf-protection`, mint a token on `GET /auth/me`, validate on every non-GET. Update `apps/web/src/api/client.ts` to attach `X-CSRF-Token` automatically. *(Deferred — revisit if cross-origin embedding added.)*
 - [-] Add a test covering "cross-site POST without token is rejected".
 
 ### 1.4 CORS tightening — S
@@ -227,7 +227,7 @@ Goal: from 1948 LOC + 79 hooks down to a ≤300-LOC orchestrator.
 - [x] Web unit tests for dialog helpers (`parseCharacterResponse`, apply-damage tab selection) in `apps/web/test/`
 
 ### 4.2 Adopt TanStack Query — M
-- [-] Already recommended in `docs/ARCHITECTURE.md`. Decide via ADR (Phase 6).
+- [-] Already recommended in `docs/ARCHITECTURE.md`. **Deferred** per ADR-004 — hook + socket sync sufficient for current scale.
 - [ ] If adopted: replace each `loadX` + state-tuple with `useQuery`; replace `setX(prev => ...)` writes after socket events with `queryClient.setQueryData(...)`.
 - [ ] Strangler-fig migration: do `characters` first, validate, then do the rest.
 
@@ -301,31 +301,27 @@ Goal: from 1948 LOC + 79 hooks down to a ≤300-LOC orchestrator.
 
 ### 6.1 ADRs to write — S each
 Create `docs/adr/` and add:
-- [ ] **ADR-001** Game state storage: dedicated tables vs JSON column with optimistic locking. *(Drives Phase 2.1.)*
-- [ ] **ADR-002** Auth surface: keep email+JWT cookie, role of dev-login in prod, CSRF strategy. *(Drives Phase 1.3.)*
-- [x] **ADR-003** Realtime scope: single instance vs Redis adapter. *(Drives Phase 5.1.)* — see `docs/adr/003-realtime-single-instance.md`
-- [ ] **ADR-004** Client data layer: keep ad-hoc state vs TanStack Query. *(Drives Phase 4.2.)*
-- [ ] **ADR-005** Image storage: local FS vs object storage (S3/MinIO) when going multi-instance.
+- [x] **ADR-001** Game state storage: dedicated tables vs JSON column with optimistic locking. *(Drives Phase 2.1.)* — `docs/adr/001-game-state-storage.md`
+- [x] **ADR-002** Auth surface: keep email+JWT cookie, role of dev-login in prod, CSRF strategy. *(Drives Phase 1.3.)* — `docs/adr/002-auth-session-csrf.md`
+- [x] **ADR-003** Realtime scope: single instance vs Redis adapter. *(Drives Phase 5.1.)* — `docs/adr/003-realtime-single-instance.md`
+- [x] **ADR-004** Client data layer: keep ad-hoc state vs TanStack Query. *(Drives Phase 4.2.)* — `docs/adr/004-client-data-layer.md`; TanStack Query deferred.
+- [x] **ADR-005** Image storage: local FS vs object storage (S3/MinIO) when going multi-instance. — `docs/adr/005-map-image-storage.md`
+- [x] ADR index: `docs/adr/README.md`
 
 ### 6.2 Doc/code drift cleanup — S
-- [ ] `docs/ARCHITECTURE.md` recommends TanStack Query / Zustand / co_dm role — reconcile after ADRs.
-- [ ] Remove unused `GamePlayerRole.co_dm` enum value OR implement the role (likely the latter; it's a small change once role checks live in the new decorators from 3.1).
-- [ ] `README.md` add: link to plan.md, link to ADRs index, mention test commands.
+- [x] `docs/ARCHITECTURE.md` recommends TanStack Query / Zustand / co_dm role — reconcile after ADRs. *(Rewritten as as-built; ADR-004 defers TanStack Query.)*
+- [x] Remove unused `GamePlayerRole.co_dm` enum value OR implement the role — **kept enum, documented as reserved** in ARCHITECTURE + DATA-MODEL; runtime DM = `dm_user_id` only (co-DM is out of scope).
+- [x] `README.md` add: link to plan.md, link to ADRs index, mention test commands.
 
 ### 6.3 Shared package reorganization — M
-- [ ] `packages/shared/src/` is flat with 27 files. Group:
-  - `combat/` — `combat-mortality`, `combat-roll`, `dice-roll-kind`, `dice-roll-target`
-  - `dice/` — `dcc-dice`, `dice-notation`
-  - `inventory/` — `consumables`, `item-properties`, `item-uses`, `loot`
-  - `map/` — `map-drawings`, `map-grid`, `map-token-layout`, `map-token-visibility`
-  - `initiative/` — `initiative`, `monster-initiative`
-  - `monsters/` — `monsters`, `monster-sheet`, `monster-status`
-  - `characters/` — `ability-scores`, `birth-augur`, `character-race`, `dcc-classes`, `dcc-saves`
-  - `schemas/` — split `schemas.ts` per domain (auth, character, monster, map, game-settings)
-- [ ] Keep `index.ts` as the public barrel.
-- [ ] Split `consumables.ts` (640 LOC) into `consumable-types`, `consumable-parse`, `light-source`, `consumable-presets`.
+- [x] `packages/shared/src/` grouped into domain subfolders (combat, dice, inventory, map, initiative, monsters, characters).
+- [x] Keep `index.ts` as the public barrel.
+- [x] Split `consumables.ts` (640 LOC) into `consumable-types`, `consumable-parse`, `consumable-presets`, `light-source` + barrel.
+- [x] Split `schemas.ts` per domain under `schemas/` (auth, character, monster, map, game, dice, initiative).
 
 **Exit criteria:** future contributors find decisions documented and code grouped by concern.
+
+> **Progress (2026-06-15):** Phase 6 complete. All ADRs written; docs reconciled; shared package reorganized.
 
 ---
 

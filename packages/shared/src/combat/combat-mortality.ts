@@ -1,5 +1,5 @@
-import type { MonsterStatsJson } from './monster-sheet.js';
-import { buildMonsterKilledStats, isMonsterKilled } from './monster-status.js';
+import type { MonsterStatsJson } from '../monsters/monster-sheet.js';
+import { buildMonsterKilledStats, isMonsterKilled } from '../monsters/monster-status.js';
 
 /** Rounds remaining before death while at 0 HP or below (level 1+ only). Stored on combat.custom. */
 export const MORTAL_ROUNDS_KEY = 'mortalRoundsRemaining';
