@@ -133,14 +133,34 @@ function toMapDto(
     imageUrl: string | null;
     widthPx: number;
     heightPx: number;
-    imageScale?: number;
+    imageScale: number;
     gridCellPx: number;
     gridFtPerCell: Prisma.Decimal;
     dmDrawings: unknown;
   },
   tokens: MapTokenDto[],
 ): GameMapDto {
-  const preset = resolveMapGridPreset(row.gridPreset);
+  // Grid columns are non-null with schema defaults and only ever written from
+  // positive preset values. Trust them; fail fast if a row is corrupt rather
+  // than silently substituting a preset and hiding the bad data.
+  const gridCellPx = row.gridCellPx;
+  if (!Number.isInteger(gridCellPx) || gridCellPx <= 0) {
+    throw new Error(
+      `Invalid map ${row.id}: gridCellPx must be a positive integer, got ${String(gridCellPx)}`,
+    );
+  }
+  const gridFtPerCell = Number(row.gridFtPerCell);
+  if (!Number.isFinite(gridFtPerCell) || gridFtPerCell <= 0) {
+    throw new Error(
+      `Invalid map ${row.id}: gridFtPerCell must be a positive number, got ${String(row.gridFtPerCell)}`,
+    );
+  }
+  const imageScale = row.imageScale;
+  if (!Number.isFinite(imageScale) || imageScale <= 0) {
+    throw new Error(
+      `Invalid map ${row.id}: imageScale must be a positive number, got ${String(imageScale)}`,
+    );
+  }
   return {
     id: row.id,
     gameId: row.gameId,
@@ -151,9 +171,9 @@ function toMapDto(
     imageUrl: row.imageUrl,
     widthPx: row.widthPx,
     heightPx: row.heightPx,
-    imageScale: (row as { imageScale?: number }).imageScale ?? 1,
-    gridCellPx: row.gridCellPx || preset.gridCellPx,
-    gridFtPerCell: Number(row.gridFtPerCell) || preset.gridFtPerCell,
+    imageScale,
+    gridCellPx,
+    gridFtPerCell,
     dmDrawings: parseMapDrawings(row.dmDrawings),
     tokens,
   };
