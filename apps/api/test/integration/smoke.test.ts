@@ -91,9 +91,9 @@ describe.skipIf(!shouldRunIntegrationTests())('API integration smoke', () => {
       url: `/games/${game.id}/initiative/start`,
     });
     expect(start.statusCode).toBe(200);
-    const started = start.json() as { initiative: { active: boolean; entries: { characterId?: string }[] } };
+    const started = start.json() as { initiative: { active: boolean; order: { characterId?: string }[] } };
     expect(started.initiative.active).toBe(true);
-    expect(started.initiative.entries.some((e) => e.characterId === character.id)).toBe(true);
+    expect(started.initiative.order.some((e) => e.characterId === character.id)).toBe(true);
 
     const mapsBefore = await injectAuth(app, dm.cookie, {
       method: 'GET',
@@ -194,10 +194,10 @@ describe.skipIf(!shouldRunIntegrationTests())('API integration smoke', () => {
       url: `/games/${game.id}/initiative/start`,
     });
     expect(start.statusCode).toBe(200);
-    const started = start.json() as { initiative: { round: number; turnIndex: number; entries: unknown[] } };
-    expect(started.initiative.entries.length).toBeGreaterThan(0);
+    const started = start.json() as { initiative: { round: number; turnIndex: number; order: unknown[] } };
+    expect(started.initiative.order.length).toBeGreaterThan(0);
 
-    const entryCount = started.initiative.entries.length;
+    const entryCount = started.initiative.order.length;
     let round = started.initiative.round;
 
     for (let i = 0; i < entryCount; i += 1) {
