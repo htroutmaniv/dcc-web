@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
+import type { FastifyInstance } from 'fastify';
 import {
   buildTestApp,
   closeTestApp,
@@ -7,6 +8,23 @@ import {
   injectAuth,
   resetGameData,
 } from '../helpers/test-app.js';
+
+/** Level-0 random characters match production funnel flow and include starting gear. */
+async function createRandomPc(
+  app: FastifyInstance,
+  cookie: string,
+  gameId: string,
+) {
+  const res = await injectAuth(app, cookie, {
+    method: 'POST',
+    url: `/games/${gameId}/characters`,
+    payload: { mode: 'random', level: 0 },
+  });
+  expect(res.statusCode).toBe(200);
+  return res.json() as {
+    character: { id: string; name: string; items: { id: string }[] };
+  };
+}
 
 describe.skipIf(!shouldRunIntegrationTests())('API integration smoke', () => {
   beforeAll(async () => {
@@ -63,15 +81,10 @@ describe.skipIf(!shouldRunIntegrationTests())('API integration smoke', () => {
       url: '/games',
       payload: { title: 'Combat table' },
     });
+    expect(created.statusCode).toBe(200);
     const { game } = created.json() as { game: { id: string } };
 
-    const charRes = await injectAuth(app, dm.cookie, {
-      method: 'POST',
-      url: `/games/${game.id}/characters`,
-      payload: { mode: 'manual', name: 'Fighter', level: 1, className: 'Warrior' },
-    });
-    expect(charRes.statusCode).toBe(200);
-    const { character } = charRes.json() as { character: { id: string } };
+    const { character } = await createRandomPc(app, dm.cookie, game.id);
 
     const start = await injectAuth(app, dm.cookie, {
       method: 'POST',
@@ -86,6 +99,7 @@ describe.skipIf(!shouldRunIntegrationTests())('API integration smoke', () => {
       method: 'GET',
       url: `/games/${game.id}/maps`,
     });
+    expect(mapsBefore.statusCode).toBe(200);
     const { maps: mapsBeforeList } = mapsBefore.json() as { maps: { tokens: { characterId: string | null }[] }[] };
     const tokenCountBefore = mapsBeforeList.flatMap((m) => m.tokens).filter((t) => t.characterId === character.id).length;
     expect(tokenCountBefore).toBeGreaterThan(0);
@@ -101,16 +115,19 @@ describe.skipIf(!shouldRunIntegrationTests())('API integration smoke', () => {
       method: 'GET',
       url: `/games/${game.id}/initiative`,
     });
-    const initBody = initiative.json() as { initiative: { active: boolean } };
-    expect(initBody.initiative.active).toBe(true);
+    expect(initiative.statusCode).toBe(200);
+    const initBody = initiative.json() as { initiative: { active: boolean } | null };
+    expect(initBody.initiative?.active).toBe(true);
 
     const mapsAfter = await injectAuth(app, dm.cookie, {
       method: 'GET',
       url: `/games/${game.id}/maps`,
     });
+    expect(mapsAfter.statusCode).toBe(200);
     const { maps: mapsAfterList } = mapsAfter.json() as { maps: { tokens: { characterId: string | null; isDead: boolean }[] }[] };
     const deadToken = mapsAfterList.flatMap((m) => m.tokens).find((t) => t.characterId === character.id);
-    expect(deadToken?.isDead).toBe(true);
+    expect(deadToken).toBeDefined();
+    expect(deadToken!.isDead).toBe(true);
   });
 
   test('POST /games/:id/transfer-item rejects player-to-player while initiative active', async () => {
@@ -123,31 +140,24 @@ describe.skipIf(!shouldRunIntegrationTests())('API integration smoke', () => {
       url: '/games',
       payload: { title: 'Loot table' },
     });
+    expect(created.statusCode).toBe(200);
     const { game } = created.json() as { game: { inviteCode: string; id: string } };
 
-    await injectAuth(app, player.cookie, {
+    const joined = await injectAuth(app, player.cookie, {
       method: 'POST',
       url: `/games/join/${game.inviteCode}`,
     });
+    expect(joined.statusCode).toBe(200);
 
-    const charA = await injectAuth(app, player.cookie, {
-      method: 'POST',
-      url: `/games/${game.id}/characters`,
-      payload: { mode: 'manual', name: 'Alpha', level: 1, className: 'Warrior' },
-    });
-    const charB = await injectAuth(app, player.cookie, {
-      method: 'POST',
-      url: `/games/${game.id}/characters`,
-      payload: { mode: 'manual', name: 'Beta', level: 1, className: 'Thief' },
-    });
-    const a = charA.json() as { character: { id: string; items: { id: string }[] } };
-    const b = charB.json() as { character: { id: string } };
+    const a = await createRandomPc(app, player.cookie, game.id);
+    const b = await createRandomPc(app, player.cookie, game.id);
     expect(a.character.items.length).toBeGreaterThan(0);
 
-    await injectAuth(app, dm.cookie, {
+    const start = await injectAuth(app, dm.cookie, {
       method: 'POST',
       url: `/games/${game.id}/initiative/start`,
     });
+    expect(start.statusCode).toBe(200);
 
     const transfer = await injectAuth(app, player.cookie, {
       method: 'POST',
@@ -174,18 +184,16 @@ describe.skipIf(!shouldRunIntegrationTests())('API integration smoke', () => {
       url: '/games',
       payload: { title: 'Round table' },
     });
+    expect(created.statusCode).toBe(200);
     const { game } = created.json() as { game: { id: string } };
 
-    await injectAuth(app, dm.cookie, {
-      method: 'POST',
-      url: `/games/${game.id}/characters`,
-      payload: { mode: 'manual', name: 'Scout', level: 1, className: 'Thief' },
-    });
+    await createRandomPc(app, dm.cookie, game.id);
 
     const start = await injectAuth(app, dm.cookie, {
       method: 'POST',
       url: `/games/${game.id}/initiative/start`,
     });
+    expect(start.statusCode).toBe(200);
     const started = start.json() as { initiative: { round: number; turnIndex: number; entries: unknown[] } };
     expect(started.initiative.entries.length).toBeGreaterThan(0);
 

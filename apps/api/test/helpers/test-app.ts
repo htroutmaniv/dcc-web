@@ -80,6 +80,7 @@ export async function injectAuth(
 export async function resetGameData(): Promise<void> {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+      audit_logs,
       movement_requests,
       dice_rolls,
       map_tokens,
