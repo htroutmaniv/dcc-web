@@ -18,6 +18,8 @@ import type { CorpseLootTarget } from '../../components/inventory/CorpseLootShee
 import type { TokenMapOverlay } from '../../types/token-overlay';
 import type { TacticalGameMap, TacticalMapToken } from '../../types/map';
 import { formatError } from '../../utils/errors';
+import { parseMapTokenPatch } from '../../utils/map-token-patch';
+import type { MapTokenPatch } from '../../utils/map-token-patch';
 
 export type MapActionsDeps = {
   gameId: string | undefined;
@@ -38,6 +40,7 @@ export type MapActionsDeps = {
   loadMaps: () => Promise<unknown>;
   syncNpcTokensFromMap: (map: TacticalGameMap | null) => void;
   applyMapFromServer: (map: TacticalGameMap) => void;
+  applyMapTokenFromServer: (patch: MapTokenPatch) => void;
   onError: (message: string | null) => void;
   setCorpseLootRef: React.Dispatch<
     React.SetStateAction<{ kind: 'character' | 'monster'; id: string } | null>
@@ -65,6 +68,7 @@ export function useMapActions(deps: MapActionsDeps) {
     loadMaps,
     syncNpcTokensFromMap,
     applyMapFromServer,
+    applyMapTokenFromServer,
     onError,
     setCorpseLootRef,
     setCorpseLootOpen,
@@ -337,10 +341,12 @@ export function useMapActions(deps: MapActionsDeps) {
       ),
     );
     try {
-      await api(`/tokens/${tokenId}/move`, {
+      const res = await api<{ token: unknown }>(`/tokens/${tokenId}/move`, {
         method: 'PATCH',
         body: JSON.stringify({ x, y, zone: 'map' }),
       });
+      const patch = parseMapTokenPatch(res.token);
+      if (patch) applyMapTokenFromServer(patch);
     } catch (e) {
       onError(formatError(e));
       await loadMaps();

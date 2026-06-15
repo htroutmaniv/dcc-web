@@ -8,6 +8,8 @@ Plan to shift the app from **client-driven refetch** to **server-authoritative s
 
 **Effort:** S ≤ 1 day · M = 2–4 days · L = 1+ week
 
+> **Progress (2026-06-15):** Phase A complete. Phase B.1–B.2 complete (mutation responses carry `map`; initiator applies via `applyMapFromServer` / apply-damage response). Next: Phase B.3 (`GamePatch` type) and Phase C (rich socket payloads).
+
 ---
 
 ## The problem (why this plan exists)
@@ -63,20 +65,20 @@ The DB itself is fast (single-digit ms in logs). The latency is **round-trip fan
 Goal: cut redundant requests without changing the wire contract. Ship first; immediate felt improvement.
 
 ### A.1 Dedupe in-flight `loadMaps` / list loaders — S
-- [ ] In `apps/web/src/hooks/game/useGameMaps.ts`, store an in-flight promise ref; concurrent `loadMaps()` callers share one request instead of each hitting `/maps`.
-- [ ] Same pattern for `useCharacters.loadCharacters` and `useMonsters.loadMonsters`.
-- [ ] Coalesce the realtime debounce (`MAP_RELOAD_DEBOUNCE_MS`) with the dedupe so a burst of events = one fetch.
+- [x] In `apps/web/src/hooks/game/useGameMaps.ts`, store an in-flight promise ref; concurrent `loadMaps()` callers share one request instead of each hitting `/maps`.
+- [x] Same pattern for `useCharacters.loadCharacters` and `useMonsters.loadMonsters`.
+- [x] Coalesce the realtime debounce (`MAP_RELOAD_DEBOUNCE_MS`) with the dedupe so a burst of events = one fetch.
 
 ### A.2 Skip actor refetch on `damage:applied` — S
-- [ ] In `useGameRealtimeSync.ts` `onDamageApplied`, return early when `actorUserId === userId` (mirror `map:updated` / `monsters:changed`). The initiator's `useCombatActions.applyDamage` already reloads.
-- [ ] Confirm `damage:applied` payload carries `actorUserId` end-to-end (it does in `routes/dice.ts`); thread it into the `onDamageApplied` handler signature (currently dropped in `useGameSocket.ts`).
+- [x] In `useGameRealtimeSync.ts` `onDamageApplied`, return early when `actorUserId === userId` (mirror `map:updated` / `monsters:changed`). The initiator's `useCombatActions.applyDamage` already reloads.
+- [x] Confirm `damage:applied` payload carries `actorUserId` end-to-end (it does in `routes/dice.ts`); thread it into the `onDamageApplied` handler signature (currently dropped in `useGameSocket.ts`).
 
 ### A.3 Trim the initiator's apply-damage fan-out — S
-- [ ] `useCombatActions.applyDamage` currently calls `loadCharacters` + `loadMonsters` + `loadDetail`. The route already returns `outcome` and publishes `character:upsert`. Reduce to applying the returned character/monster; drop `loadDetail` unless initiative changed.
+- [x] `useCombatActions.applyDamage` currently calls `loadCharacters` + `loadMonsters` + `loadDetail`. The route already returns `outcome` and publishes `character:upsert`. Reduce to applying the returned character/monster/map/initiative from the HTTP response.
 
 ### A.4 Apply `map:token_moved` as a delta — S
-- [ ] `useGameSocket.ts` `map:token_moved` currently calls `onMapUpdated()` (full reload). Add an `onTokenMoved(token)` handler that patches just that token in `useGameMaps`.
-- [ ] Initiator's `moveMapToken` already updates local optimistically; ensure it reconciles from the response without a full `loadMaps`.
+- [x] `useGameSocket.ts` `map:token_moved` currently calls `onMapUpdated()` (full reload). Add an `onTokenMoved(token)` handler that patches just that token in `useGameMaps`.
+- [x] Initiator's `moveMapToken` already updates local optimistically; reconcile from the response without a full `loadMaps`.
 
 **Exit criteria:** a single damage/kill/move action produces ≤ 1 follow-up GET on the initiator and **zero** on other clients (they apply payloads). Measured in server logs.
 
@@ -87,16 +89,17 @@ Goal: cut redundant requests without changing the wire contract. Ship first; imm
 Goal: every write that already computes new server state **returns** it, so the initiator never re-fetches.
 
 ### B.1 Return the synced map from token-affecting mutations — M
-- [ ] `syncActiveMapTokens(gameId)` already returns `GameMapDto | null`. Surface it in responses for:
-  - [ ] `DELETE /games/:id/monsters/:id` (`routes/monsters.ts`)
-  - [ ] monster kill / in-play PATCH (`routes/monsters.ts`)
-  - [ ] character status PATCH dead/alive + `mapTokenVisible` change (`routes/characters.ts`)
-  - [ ] `POST /games/:id/characters` (create) and apply-damage death (`routes/dice.ts`)
-- [ ] Shape: `{ ...existing, map?: GameMapDto }`.
+- [x] `syncActiveMapTokens(gameId)` already returns `GameMapDto | null`. Surface it in responses for:
+  - [x] `DELETE /games/:id/monsters/:id` (`routes/monsters.ts`)
+  - [x] monster kill / in-play PATCH (`routes/monsters.ts`)
+  - [x] character status PATCH dead/alive + `mapTokenVisible` change (`routes/characters.ts`)
+  - [x] `POST /games/:id/characters` (create) and apply-damage death (`routes/dice.ts`)
+- [x] Shape: `{ ...existing, map?: GameMapDto }`.
 
 ### B.2 Initiator applies map response instead of `loadMaps()` — S
-- [ ] `useMonsterActions.killMonster` / `deleteMonsterQuick` → `applyMapFromServer(res.map)` instead of `await loadMaps()`.
-- [ ] `useCharacterActions.patchCharacterStatus` / `toggleCharacterMapToken` / `createCharacter` → same.
+- [x] `useMonsterActions.killMonster` / `deleteMonsterQuick` → `applyMapFromServer(res.map)` instead of `await loadMaps()`.
+- [x] `useCharacterActions.patchCharacterStatus` / `toggleCharacterMapToken` / `createCharacter` → same.
+- [x] `useCombatActions.applyDamageFromRoll` applies character/monster/map/initiative from response.
 
 ### B.3 Standardize the mutation envelope — M
 - [ ] Define a `GamePatch` type in `packages/shared/src/game-events.ts`:

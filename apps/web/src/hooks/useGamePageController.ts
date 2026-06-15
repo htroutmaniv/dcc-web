@@ -61,6 +61,7 @@ export function useGamePageController(gameId: string | undefined) {
     loadMaps,
     syncNpcTokensFromMap,
     applyMapFromServer,
+    applyMapTokenFromServer,
   } = useGameMaps(gameId);
 
   const {
@@ -126,7 +127,7 @@ export function useGamePageController(gameId: string | undefined) {
     characterAttackTargetById,
     setCharacterAttackTargetById,
     applyCharacterFromServer,
-    loadMaps,
+    applyMapFromServer,
     selectedCharacter,
     setSelectedCharacter,
     activeMapId,
@@ -145,9 +146,9 @@ export function useGamePageController(gameId: string | undefined) {
     diceTrayCounts,
     diceCharacterId,
     postDiceRoll,
-    loadCharacters,
-    loadMonsters,
-    loadDetail,
+    applyCharacterFromServer,
+    handleMonsterUpdated,
+    applyMapFromServer,
     applyInitiative,
     applyGameSettingsPatch,
     setMenuTab,
@@ -170,7 +171,7 @@ export function useGamePageController(gameId: string | undefined) {
     setMonsterTargetById,
     handleMonsterUpdated,
     applyInitiative,
-    loadMaps,
+    applyMapFromServer,
     loadCharacters,
     postDiceRoll,
     onError,
@@ -195,6 +196,7 @@ export function useGamePageController(gameId: string | undefined) {
     loadMaps,
     syncNpcTokensFromMap,
     applyMapFromServer,
+    applyMapTokenFromServer,
     onError,
     setCorpseLootRef,
     setCorpseLootOpen,
@@ -269,6 +271,7 @@ export function useGamePageController(gameId: string | undefined) {
     loadCharacters,
     loadMonsters,
     loadMaps,
+    applyMapTokenFromServer,
     applyInitiative,
     applyGameSettingsPatch,
     appendRollLog,
@@ -276,9 +279,6 @@ export function useGamePageController(gameId: string | undefined) {
     setPresenceUsers,
     onCharacterUpsert: (character) => {
       applyCharacterFromServer(character);
-      if (character.status === 'dead') {
-        void loadMaps();
-      }
     },
   });
 

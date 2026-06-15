@@ -9,6 +9,7 @@ import { publish } from '../lib/game-events.js';
 import { prisma } from '../lib/prisma.js';
 import { applyDamageToTarget, listGameDiceRolls, rollAndPersist } from '../services/dice.js';
 import { syncActiveMapTokens } from '../services/map-service.js';
+import { getGameMonster } from '../services/monster-service.js';
 import {
   addCharacterToInitiativeFromRoll,
   reconcileInitiativeAfterCharacterDeath,
@@ -106,8 +107,13 @@ export async function diceRoutes(app: FastifyInstance) {
         actorUserId: request.userId,
       });
 
+      let character = null;
+      let monster = null;
+      let initiative = null;
+      let map = null;
+
       if (parsed.data.targetType === 'character') {
-        const character = await prisma.character.findUnique({
+        character = await prisma.character.findUnique({
           where: { id: parsed.data.targetId },
           include: { items: { orderBy: { sortOrder: 'asc' } } },
         });
@@ -118,7 +124,7 @@ export async function diceRoutes(app: FastifyInstance) {
             actorUserId: request.userId,
           });
           if (character.status === 'dead') {
-            const initiative = await reconcileInitiativeAfterCharacterDeath(gameId);
+            initiative = await reconcileInitiativeAfterCharacterDeath(gameId);
             if (initiative) {
               publish(request.server.io, gameId, {
                 type: 'initiative:updated',
@@ -126,7 +132,7 @@ export async function diceRoutes(app: FastifyInstance) {
                 actorUserId: request.userId,
               });
             }
-            await syncActiveMapTokens(gameId);
+            map = await syncActiveMapTokens(gameId);
             publish(request.server.io, gameId, {
               type: 'map:updated',
               actorUserId: request.userId,
@@ -136,11 +142,19 @@ export async function diceRoutes(app: FastifyInstance) {
       }
 
       if (parsed.data.targetType === 'monster') {
+        monster = await getGameMonster(gameId, parsed.data.targetId);
+        map = await syncActiveMapTokens(gameId);
         publish(request.server.io, gameId, {
           type: 'monsters:changed',
           monsterIds: [parsed.data.targetId],
           actorUserId: request.userId,
         });
+        if (map) {
+          publish(request.server.io, gameId, {
+            type: 'map:updated',
+            actorUserId: request.userId,
+          });
+        }
       }
 
       if (parsed.data.targetType === 'npc') {
@@ -154,7 +168,14 @@ export async function diceRoutes(app: FastifyInstance) {
         }
       }
 
-      return { ok: true, ...outcome };
+      return {
+        ok: true,
+        ...outcome,
+        ...(character ? { character } : {}),
+        ...(monster ? { monster } : {}),
+        ...(initiative ? { initiative } : {}),
+        ...(map ? { map } : {}),
+      };
     },
   );
 }

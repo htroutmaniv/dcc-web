@@ -291,7 +291,7 @@ export async function monsterRoutes(app: FastifyInstance) {
       });
 
       const { monster, initiative } = await patchGameMonster(gameId, monsterId, parsed.data);
-      await syncActiveMapTokens(gameId);
+      const map = await syncActiveMapTokens(gameId);
       const eventCtx = publishContextFromRequest(request);
       publishMany(app.io, gameId, [
         { type: 'monsters:changed', monsterIds: [monsterId], actorUserId: request.userId },
@@ -328,7 +328,7 @@ export async function monsterRoutes(app: FastifyInstance) {
         });
       }
 
-      return { monster, initiative };
+      return { monster, initiative, ...(map ? { map } : {}) };
     },
   );
 
@@ -420,13 +420,13 @@ export async function monsterRoutes(app: FastifyInstance) {
         monsterId: string;
       };
       const { initiative } = await deleteGameMonster(gameId, monsterId);
-      await syncActiveMapTokens(gameId);
+      const map = await syncActiveMapTokens(gameId);
       publishMany(app.io, gameId, [
         { type: 'monsters:changed', monsterIds: [monsterId], actorUserId: request.userId },
         { type: 'map:updated', actorUserId: request.userId },
       ]);
       emitInitiativeUpdate(app, gameId, initiative, request.userId);
-      return { ok: true, initiative };
+      return { ok: true, initiative, ...(map ? { map } : {}) };
     },
   );
 }

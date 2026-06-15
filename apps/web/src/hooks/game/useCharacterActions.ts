@@ -12,6 +12,7 @@ import type { CreateCharacterPayload } from '../../components/CreateCharacterDia
 import type { GameMenuTab } from '../../components/GameSideMenu';
 import { api } from '../../api/client';
 import type { Character } from '../../types/game';
+import type { TacticalGameMap } from '../../types/map';
 import {
   buildItemsAfterActivateLight,
   buildItemsAfterConsume,
@@ -29,7 +30,7 @@ export type CharacterActionsDeps = {
   characterAttackTargetById: Record<string, string>;
   setCharacterAttackTargetById: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   applyCharacterFromServer: (character: Character) => void;
-  loadMaps: () => Promise<unknown>;
+  applyMapFromServer: (map: TacticalGameMap) => void;
   selectedCharacter: Character | null;
   setSelectedCharacter: React.Dispatch<React.SetStateAction<Character | null>>;
   activeMapId: string | null;
@@ -48,7 +49,7 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
     characterAttackTargetById,
     setCharacterAttackTargetById,
     applyCharacterFromServer,
-    loadMaps,
+    applyMapFromServer,
     selectedCharacter,
     setSelectedCharacter,
     activeMapId,
@@ -76,12 +77,12 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
     if (!gameId) return;
     setCreatingCharacter(true);
     try {
-      const { character } = await api<{ character: Character }>(
+      const { character, map } = await api<{ character: Character; map?: TacticalGameMap }>(
         `/games/${gameId}/characters`,
         { method: 'POST', body: JSON.stringify(payload) },
       );
       applyCharacterFromServer(character);
-      await loadMaps();
+      if (map) applyMapFromServer(map);
       setSelectedCharacter(character);
       setMenuTab('characters');
       setCreateDialogOpen(false);
@@ -367,17 +368,19 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
     status: 'alive' | 'dead' | 'archived',
   ) => {
     try {
-      const updated = parseCharacterResponse(
-        await api<{ character: Character } | Character>(`/characters/${characterId}`, {
+      const res = await api<{ character: Character; map?: TacticalGameMap }>(
+        `/characters/${characterId}`,
+        {
           method: 'PATCH',
           body: JSON.stringify({ status }),
-        }),
+        },
       );
+      const updated = parseCharacterResponse(res);
       if (updated) applyCharacterFromServer(updated);
+      if (res.map) applyMapFromServer(res.map);
       if (status === 'archived' && selectedCharacter?.id === characterId) {
         setSelectedCharacter(null);
       }
-      await loadMaps();
       onError(null);
     } catch (e) {
       onError(formatError(e));
@@ -412,8 +415,11 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
         }),
       );
       if (updated) applyCharacterFromServer(updated);
-      await api(`/games/${gameId}/maps/${activeMapId}/sync-tokens`, { method: 'POST' });
-      await loadMaps();
+      const { map } = await api<{ map: TacticalGameMap }>(
+        `/games/${gameId}/maps/${activeMapId}/sync-tokens`,
+        { method: 'POST' },
+      );
+      applyMapFromServer(map);
       onError(null);
     } catch (e) {
       onError(formatError(e));

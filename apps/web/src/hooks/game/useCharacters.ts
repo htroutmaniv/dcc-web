@@ -1,7 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import type { Character } from '../../types/game';
 import { readCharacterAttackTargetMap } from '../../utils/character-attack-target';
+import { dedupeAsync } from '../../utils/dedupe-async';
 
 export function useCharacters(
   gameId: string | undefined,
@@ -14,20 +15,24 @@ export function useCharacters(
     Record<string, string>
   >({});
 
-  const loadCharacters = useCallback(async () => {
-    if (!gameId) return;
-    const q = isDm ? '?includeDead=true' : '';
-    const data = await api<{ characters: Character[] }>(
-      `/games/${gameId}/characters${q}`,
-    );
-    setCharacters(data.characters);
-    setCharacterAttackTargetById(readCharacterAttackTargetMap(data.characters));
-    setSelectedCharacter((prev) => {
-      if (!prev) return null;
-      return data.characters.find((c) => c.id === prev.id) ?? null;
-    });
-    return data.characters;
-  }, [gameId, isDm]);
+  const loadCharacters = useMemo(
+    () =>
+      dedupeAsync(async () => {
+        if (!gameId) return;
+        const q = isDm ? '?includeDead=true' : '';
+        const data = await api<{ characters: Character[] }>(
+          `/games/${gameId}/characters${q}`,
+        );
+        setCharacters(data.characters);
+        setCharacterAttackTargetById(readCharacterAttackTargetMap(data.characters));
+        setSelectedCharacter((prev) => {
+          if (!prev) return null;
+          return data.characters.find((c) => c.id === prev.id) ?? null;
+        });
+        return data.characters;
+      }),
+    [gameId, isDm],
+  );
 
   const applyCharacterFromServer = useCallback(
     (updated: Character) => {

@@ -174,10 +174,10 @@ export async function characterRoutes(app: FastifyInstance) {
             noHalflings: parsed.data.noHalflings,
           });
           const character = await persistCharacter(gameId, ownerUserId, generated, 'random');
-          await syncActiveMapTokens(gameId);
+          const map = await syncActiveMapTokens(gameId);
           broadcastCharacter(request, gameId, character);
           publish(request.server.io, gameId, { type: 'map:updated', actorUserId: request.userId });
-          return { character };
+          return { character, ...(map ? { map } : {}) };
         }
 
         const generated = createManualCharacterData({
@@ -186,10 +186,10 @@ export async function characterRoutes(app: FastifyInstance) {
           name: parsed.data.name,
         });
         const character = await persistCharacter(gameId, ownerUserId, generated, 'manual');
-        await syncActiveMapTokens(gameId);
+        const map = await syncActiveMapTokens(gameId);
         broadcastCharacter(request, gameId, character);
         publish(request.server.io, gameId, { type: 'map:updated', actorUserId: request.userId });
-        return { character };
+        return { character, ...(map ? { map } : {}) };
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Character creation failed';
         throw app.httpErrors.badRequest(message);
@@ -345,6 +345,7 @@ export async function characterRoutes(app: FastifyInstance) {
           include: { items: { orderBy: { sortOrder: 'asc' } } },
         });
       });
+      let syncedMap: Awaited<ReturnType<typeof syncActiveMapTokens>> = null;
       if (statusChange === 'archived') {
         await deleteTokensForCharacter(characterId);
         publish(request.server.io, existing.gameId, {
@@ -357,7 +358,7 @@ export async function characterRoutes(app: FastifyInstance) {
         hpMarkDead ||
         mapTokenVisibilityChanged
       ) {
-        await syncActiveMapTokens(existing.gameId);
+        syncedMap = await syncActiveMapTokens(existing.gameId);
         publish(request.server.io, existing.gameId, {
           type: 'map:updated',
           actorUserId: request.userId,
@@ -412,7 +413,7 @@ export async function characterRoutes(app: FastifyInstance) {
           },
         });
       }
-      return { character };
+      return { character, ...(syncedMap ? { map: syncedMap } : {}) };
     },
   );
 

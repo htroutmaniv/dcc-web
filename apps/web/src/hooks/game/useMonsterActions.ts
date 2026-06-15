@@ -11,6 +11,7 @@ import type { DiceRollLogEntry } from '../../types/dice-roll-log';
 import type { MonsterCombatRollKind } from '../../components/MonsterQuickMenu';
 import { api } from '../../api/client';
 import type { Character, GameMonsterInstance } from '../../types/game';
+import type { TacticalGameMap } from '../../types/map';
 import { MONSTER_ATTACK_TARGET_KEY } from '../../utils/monster-targets';
 import { formatError } from '../../utils/errors';
 
@@ -25,7 +26,7 @@ export type MonsterActionsDeps = {
   setMonsterTargetById: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   handleMonsterUpdated: (monster: GameMonsterInstance) => void;
   applyInitiative: (next: GameInitiativeState | null) => void;
-  loadMaps: () => Promise<unknown>;
+  applyMapFromServer: (map: TacticalGameMap) => void;
   loadCharacters: () => Promise<unknown>;
   postDiceRoll: (params: {
     notation: string;
@@ -48,7 +49,7 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
     setMonsterTargetById,
     handleMonsterUpdated,
     applyInitiative,
-    loadMaps,
+    applyMapFromServer,
     loadCharacters,
     postDiceRoll,
     onError,
@@ -152,6 +153,7 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
       const data = await api<{
         monster: GameMonsterInstance;
         initiative: GameInitiativeState | null;
+        map?: TacticalGameMap;
       }>(`/games/${gameId}/monsters/${monster.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
@@ -161,7 +163,7 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
       });
       handleMonsterUpdated(data.monster);
       if (data.initiative) applyInitiative(data.initiative);
-      await loadMaps();
+      if (data.map) applyMapFromServer(data.map);
       onError(null);
     } catch (e) {
       onError(formatError(e));
@@ -174,14 +176,17 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
     if (!gameId) return;
     setMonsterBusy(true);
     try {
-      const data = await api<{ initiative: GameInitiativeState | null }>(
+      const data = await api<{
+        initiative: GameInitiativeState | null;
+        map?: TacticalGameMap;
+      }>(
         `/games/${gameId}/monsters/${monsterId}`,
         { method: 'DELETE' },
       );
       setMonsters((prev) => prev.filter((m) => m.id !== monsterId));
       if (selectedMonster?.id === monsterId) setSelectedMonster(null);
       applyInitiative(data.initiative);
-      await loadMaps();
+      if (data.map) applyMapFromServer(data.map);
     } catch (e) {
       onError(formatError(e));
     } finally {

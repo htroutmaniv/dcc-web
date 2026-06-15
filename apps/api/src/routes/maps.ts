@@ -319,7 +319,7 @@ export async function mapRoutes(app: FastifyInstance) {
           zone: body.zone ?? 'map',
         },
       });
-      publish(app.io, gameId, { type: 'map:token_moved', token: updated });
+      publish(app.io, gameId, { type: 'map:token_moved', token: updated, actorUserId: request.userId });
       return { token: updated };
     },
   );

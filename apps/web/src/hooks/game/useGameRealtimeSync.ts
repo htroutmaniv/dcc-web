@@ -4,6 +4,8 @@ import { useGameSocket } from '../useGameSocket';
 import type { Character, GameDetail, GamePresenceUser } from '../../types/game';
 import type { DiceRollLogEntry } from '../../types/dice-roll-log';
 import { parseRollLogEntry } from '../../utils/roll-log';
+import { parseMapTokenPatch } from '../../utils/map-token-patch';
+import type { MapTokenPatch } from '../../utils/map-token-patch';
 
 const ROOM_RESYNC_COOLDOWN_MS = 3000;
 const MAP_RELOAD_DEBOUNCE_MS = 250;
@@ -14,6 +16,7 @@ type SyncCallbacks = {
   loadCharacters: () => Promise<unknown>;
   loadMonsters: () => Promise<unknown>;
   loadMaps: () => Promise<unknown>;
+  applyMapTokenFromServer: (patch: MapTokenPatch) => void;
   applyInitiative: (next: GameInitiativeState | null) => void;
   applyGameSettingsPatch: (patch: {
     monstersVisibleOnMap?: boolean;
@@ -107,14 +110,28 @@ export function useGameRealtimeSync(
           }));
         }
       },
-      onDamageApplied: () => {
+      onDamageApplied: ({ actorUserId }) => {
+        if (actorUserId && actorUserId === userId) return;
         void callbacksRef.current.loadCharacters().catch(() => {});
         void callbacksRef.current.loadMonsters().catch(() => {});
-        void callbacksRef.current.loadDetail().catch(() => {});
         scheduleLoadMaps();
       },
-      onTokenUpdated: ({ actorUserId }) => {
+      onTokenMoved: ({ token, actorUserId }) => {
         if (actorUserId && actorUserId === userId) return;
+        const patch = parseMapTokenPatch(token);
+        if (patch) {
+          callbacksRef.current.applyMapTokenFromServer(patch);
+          return;
+        }
+        scheduleLoadMaps();
+      },
+      onTokenUpdated: ({ token, actorUserId }) => {
+        if (actorUserId && actorUserId === userId) return;
+        const patch = parseMapTokenPatch(token);
+        if (patch) {
+          callbacksRef.current.applyMapTokenFromServer(patch);
+          return;
+        }
         scheduleLoadMaps();
       },
       onMapUpdated: (actorUserId) => {
