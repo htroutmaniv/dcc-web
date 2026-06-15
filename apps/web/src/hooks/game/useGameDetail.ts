@@ -4,11 +4,15 @@ import { api, ApiError } from '../../api/client';
 import type { GameDetail } from '../../types/game';
 import { formatError } from '../../utils/errors';
 
-type GameSettingsPatch = {
-  monstersVisibleOnMap?: boolean;
-  sharedMonsterInitiative?: boolean;
-  hideMonsterAcInRollLog?: boolean;
-};
+type GameSettingsPatch = Partial<
+  Pick<
+    GameSettings,
+    | 'monstersVisibleOnMap'
+    | 'sharedMonsterInitiative'
+    | 'hideMonsterAcInRollLog'
+    | 'activeMapId'
+  >
+>;
 
 export function useGameDetail(gameId: string | undefined) {
   const [detail, setDetail] = useState<GameDetail | null>(null);

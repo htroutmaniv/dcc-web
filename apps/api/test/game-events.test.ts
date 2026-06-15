@@ -14,16 +14,20 @@ describe('publish', () => {
     };
 
     const event: GameEvent = {
-      type: 'monsters:changed',
-      monsterIds: ['m1'],
+      type: 'game:patch',
+      patch: { monsters: { upserted: [{ id: 'm1' }] } },
       actorUserId: 'u1',
     };
     publish(io as never, 'game-1', event);
 
     expect(emitted).toEqual([
       {
-        event: 'monsters:changed',
-        payload: { gameId: 'game-1', monsterIds: ['m1'], actorUserId: 'u1' },
+        event: 'game:patch',
+        payload: {
+          gameId: 'game-1',
+          patch: { monsters: { upserted: [{ id: 'm1' }] } },
+          actorUserId: 'u1',
+        },
       },
     ]);
   });

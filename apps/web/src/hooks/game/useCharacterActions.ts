@@ -13,6 +13,7 @@ import type { GameMenuTab } from '../../components/GameSideMenu';
 import { api } from '../../api/client';
 import type { Character } from '../../types/game';
 import type { TacticalGameMap } from '../../types/map';
+import type { GamePatch } from '@dcc-web/shared';
 import {
   buildItemsAfterActivateLight,
   buildItemsAfterConsume,
@@ -30,7 +31,7 @@ export type CharacterActionsDeps = {
   characterAttackTargetById: Record<string, string>;
   setCharacterAttackTargetById: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   applyCharacterFromServer: (character: Character) => void;
-  applyMapFromServer: (map: TacticalGameMap) => void;
+  applyGamePatch: (patch: GamePatch) => void;
   selectedCharacter: Character | null;
   setSelectedCharacter: React.Dispatch<React.SetStateAction<Character | null>>;
   activeMapId: string | null;
@@ -49,7 +50,7 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
     characterAttackTargetById,
     setCharacterAttackTargetById,
     applyCharacterFromServer,
-    applyMapFromServer,
+    applyGamePatch,
     selectedCharacter,
     setSelectedCharacter,
     activeMapId,
@@ -77,13 +78,13 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
     if (!gameId) return;
     setCreatingCharacter(true);
     try {
-      const { character, map } = await api<{ character: Character; map?: TacticalGameMap }>(
+      const res = await api<{ character: Character; patch?: GamePatch; map?: TacticalGameMap }>(
         `/games/${gameId}/characters`,
         { method: 'POST', body: JSON.stringify(payload) },
       );
-      applyCharacterFromServer(character);
-      if (map) applyMapFromServer(map);
-      setSelectedCharacter(character);
+      if (res.patch) applyGamePatch(res.patch);
+      else applyCharacterFromServer(res.character);
+      setSelectedCharacter(res.character);
       setMenuTab('characters');
       setCreateDialogOpen(false);
       onError(null);
@@ -368,16 +369,18 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
     status: 'alive' | 'dead' | 'archived',
   ) => {
     try {
-      const res = await api<{ character: Character; map?: TacticalGameMap }>(
+      const res = await api<{ character: Character; patch?: GamePatch; map?: TacticalGameMap }>(
         `/characters/${characterId}`,
         {
           method: 'PATCH',
           body: JSON.stringify({ status }),
         },
       );
-      const updated = parseCharacterResponse(res);
-      if (updated) applyCharacterFromServer(updated);
-      if (res.map) applyMapFromServer(res.map);
+      if (res.patch) applyGamePatch(res.patch);
+      else {
+        const updated = parseCharacterResponse(res);
+        if (updated) applyCharacterFromServer(updated);
+      }
       if (status === 'archived' && selectedCharacter?.id === characterId) {
         setSelectedCharacter(null);
       }
@@ -419,7 +422,7 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
         `/games/${gameId}/maps/${activeMapId}/sync-tokens`,
         { method: 'POST' },
       );
-      applyMapFromServer(map);
+      applyGamePatch({ map });
       onError(null);
     } catch (e) {
       onError(formatError(e));

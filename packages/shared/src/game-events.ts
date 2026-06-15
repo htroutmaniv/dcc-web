@@ -1,8 +1,13 @@
 import type { GameInitiativeState } from './initiative/initiative.js';
 import type { GameSettings } from './types.js';
+import type { GamePatch } from './game-patch.js';
+
+export type { GamePatch } from './game-patch.js';
+export { isEmptyGamePatch, validateGamePatch } from './game-patch.js';
 
 /** Realtime payloads emitted to the `game:{gameId}` Socket.IO room. */
 export type GameEvent =
+  | { type: 'game:patch'; patch: GamePatch; actorUserId?: string }
   | { type: 'character:upsert'; character: unknown; actorUserId?: string }
   | {
       type: 'initiative:updated';

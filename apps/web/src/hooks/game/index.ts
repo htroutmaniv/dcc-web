@@ -6,6 +6,7 @@ export { useRollLog, useDiceRollActions, type RollLogState } from './useRollLog.
 export { useDiceTray, type DiceTrayState } from './useDiceTray.js';
 export { usePresence, type PresenceState } from './usePresence.js';
 export { useGameRealtimeSync } from './useGameRealtimeSync.js';
+export { applyGamePatch, type ApplyGamePatchHandlers, type GamePatch } from './apply-game-patch.js';
 export { useCharacterActions } from './useCharacterActions.js';
 export { useMonsterActions } from './useMonsterActions.js';
 export { useMapActions } from './useMapActions.js';

@@ -3,12 +3,14 @@ import {
   patchGameMapSchema,
   setActiveMapSchema,
   uploadGameMapImageFieldsSchema,
+  type GamePatch,
 } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
 import { createReadStream, existsSync } from 'node:fs';
 import path from 'node:path';
 import { resolveGameMemberAccess } from '../lib/game-access.js';
 import { publish, publishContextFromRequest } from '../lib/game-events.js';
+import { publishGamePatch } from '../lib/game-patch-publish.js';
 import { AUDIT_KINDS, recordAudit } from '../services/audit-service.js';
 import { parseLayoutTokensBody } from '../lib/parse-layout-tokens.js';
 import { mapUploadFilePath } from '../lib/storage-paths.js';
@@ -26,12 +28,55 @@ import {
   syncMapTokens,
   uploadGameMapImage,
 } from '../services/map-service.js';
+import type { GameMapDto } from '../services/map-service.js';
 
 const HOLDING_X = -1;
 const HOLDING_Y_BASE = 0;
 
-function emitMapState(app: FastifyInstance, gameId: string, actorUserId?: string) {
-  publish(app.io, gameId, { type: 'map:updated', actorUserId });
+function publishMapPatch(
+  app: FastifyInstance,
+  gameId: string,
+  map: GameMapDto,
+  actorUserId?: string,
+  ctx?: ReturnType<typeof publishContextFromRequest>,
+) {
+  publishGamePatch(app.io, gameId, { map }, actorUserId, ctx);
+}
+
+async function publishActiveMapSwitchPatch(
+  app: FastifyInstance,
+  gameId: string,
+  activeMapId: string | null,
+  actorUserId?: string,
+) {
+  const listed = await listGameMaps(gameId);
+  const active = activeMapId
+    ? listed.maps.find((m) => m.id === activeMapId) ?? null
+    : null;
+  const patch: GamePatch = {
+    settings: { activeMapId },
+    ...(active ? { map: active } : {}),
+  };
+  publishGamePatch(app.io, gameId, patch, actorUserId);
+}
+
+async function publishMapDeletePatch(
+  app: FastifyInstance,
+  gameId: string,
+  deletedMapId: string,
+  activeMapId: string | null,
+  actorUserId?: string,
+) {
+  const listed = await listGameMaps(gameId);
+  const active = activeMapId
+    ? listed.maps.find((m) => m.id === activeMapId) ?? null
+    : null;
+  const patch: GamePatch = {
+    maps: { deletedIds: [deletedMapId] },
+    settings: { activeMapId },
+    ...(active ? { map: active } : {}),
+  };
+  publishGamePatch(app.io, gameId, patch, actorUserId);
 }
 
 export async function mapRoutes(app: FastifyInstance) {
@@ -70,8 +115,8 @@ export async function mapRoutes(app: FastifyInstance) {
       const parsed = createGameMapSchema.safeParse(request.body ?? {});
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
       const map = await createGameMap(gameId, parsed.data);
-      emitMapState(app, gameId, request.userId);
-      return { map };
+      publishMapPatch(app, gameId, map, request.userId);
+      return { map, patch: { map } };
     },
   );
 
@@ -83,8 +128,12 @@ export async function mapRoutes(app: FastifyInstance) {
       const parsed = setActiveMapSchema.safeParse(request.body);
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
       const activeMapId = await setActiveMapId(gameId, parsed.data.mapId);
-      emitMapState(app, gameId, request.userId);
-      return { activeMapId };
+      await publishActiveMapSwitchPatch(app, gameId, activeMapId, request.userId);
+      const patch: GamePatch = { settings: { activeMapId } };
+      const listed = await listGameMaps(gameId);
+      const active = listed.maps.find((m) => m.id === activeMapId) ?? null;
+      if (active) patch.map = active;
+      return { activeMapId, patch };
     },
   );
 
@@ -116,8 +165,8 @@ export async function mapRoutes(app: FastifyInstance) {
 
       try {
         const map = await uploadGameMapImage(gameId, mapId, imageBuffer, parsed.data);
-        emitMapState(app, gameId, request.userId);
-        return { map };
+        publishMapPatch(app, gameId, map, request.userId);
+        return { map, patch: { map } };
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Upload failed';
         return app.httpErrors.badRequest(msg);
@@ -136,8 +185,8 @@ export async function mapRoutes(app: FastifyInstance) {
         ...parsed.data,
         dmDrawings: parsed.data.dmDrawings as never,
       });
-      emitMapState(app, gameId, request.userId);
-      return { map };
+      publishMapPatch(app, gameId, map, request.userId);
+      return { map, patch: { map } };
     },
   );
 
@@ -148,8 +197,17 @@ export async function mapRoutes(app: FastifyInstance) {
       const { gameId, mapId } = request.params as { gameId: string; mapId: string };
       try {
         const { activeMapId } = await deleteGameMap(gameId, mapId);
-        emitMapState(app, gameId, request.userId);
-        return { ok: true, activeMapId };
+        await publishMapDeletePatch(app, gameId, mapId, activeMapId, request.userId);
+        const listed = await listGameMaps(gameId);
+        const active = activeMapId
+          ? listed.maps.find((m) => m.id === activeMapId) ?? null
+          : null;
+        const patch: GamePatch = {
+          maps: { deletedIds: [mapId] },
+          settings: { activeMapId },
+          ...(active ? { map: active } : {}),
+        };
+        return { ok: true, activeMapId, patch };
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Delete failed';
         return app.httpErrors.badRequest(msg);
@@ -163,8 +221,8 @@ export async function mapRoutes(app: FastifyInstance) {
     async (request) => {
       const { gameId, mapId } = request.params as { gameId: string; mapId: string };
       const map = await syncMapTokens(gameId, mapId);
-      emitMapState(app, gameId, request.userId);
-      return { map };
+      publishMapPatch(app, gameId, map, request.userId);
+      return { map, patch: { map } };
     },
   );
 
@@ -178,8 +236,8 @@ export async function mapRoutes(app: FastifyInstance) {
         mapId,
         parseLayoutTokensBody(request.body ?? {}),
       );
-      emitMapState(app, gameId, request.userId);
-      return { map };
+      publishMapPatch(app, gameId, map, request.userId);
+      return { map, patch: { map } };
     },
   );
 
@@ -201,12 +259,14 @@ export async function mapRoutes(app: FastifyInstance) {
         i += 1;
       }
       const updated = await prisma.mapToken.findMany({ where: { mapId: activeMapId } });
-      publish(app.io, gameId, {
-        type: 'map:tokens_reset',
-        tokens: updated,
-        actorUserId: request.userId,
-      }, publishContextFromRequest(request));
-      emitMapState(app, gameId, request.userId);
+      const map = await syncMapTokens(gameId, activeMapId);
+      publishMapPatch(
+        app,
+        gameId,
+        map,
+        request.userId,
+        publishContextFromRequest(request),
+      );
       await recordAudit({
         gameId,
         actorUserId: request.userId,
@@ -215,7 +275,7 @@ export async function mapRoutes(app: FastifyInstance) {
         targetId: activeMapId,
         payload: { tokenCount: updated.length },
       });
-      return { tokens: updated };
+      return { tokens: updated, map, patch: { map } };
     },
   );
 
@@ -236,13 +296,13 @@ export async function mapRoutes(app: FastifyInstance) {
         where: { mapId: activeMapId },
         data: { zone: 'holding', x: HOLDING_X, y: 0 },
       });
-      publish(app.io, gameId, {
-        type: 'map:cleared',
+      publishMapPatch(
+        app,
+        gameId,
         map,
-        tokens: map.tokens,
-        actorUserId: request.userId,
-      }, publishContextFromRequest(request));
-      emitMapState(app, gameId, request.userId);
+        request.userId,
+        publishContextFromRequest(request),
+      );
       await recordAudit({
         gameId,
         actorUserId: request.userId,
@@ -251,7 +311,7 @@ export async function mapRoutes(app: FastifyInstance) {
         targetId: activeMapId,
         payload: { clearImage: Boolean(body.clearImage) },
       });
-      return { map, tokens: map.tokens };
+      return { map, tokens: map.tokens, patch: { map } };
     },
   );
 
@@ -264,9 +324,10 @@ export async function mapRoutes(app: FastifyInstance) {
         mapId: string;
         characterId: string;
       };
-      const token = await ensureCharacterMapToken(gameId, mapId, characterId);
-      emitMapState(app, gameId, request.userId);
-      return { token };
+      await ensureCharacterMapToken(gameId, mapId, characterId);
+      const map = await syncMapTokens(gameId, mapId);
+      publishMapPatch(app, gameId, map, request.userId);
+      return { map, patch: { map } };
     },
   );
 
@@ -319,8 +380,9 @@ export async function mapRoutes(app: FastifyInstance) {
           zone: body.zone ?? 'map',
         },
       });
-      publish(app.io, gameId, { type: 'map:token_moved', token: updated, actorUserId: request.userId });
-      return { token: updated };
+      const patch: GamePatch = { tokens: { upserted: [updated] } };
+      publishGamePatch(app.io, gameId, patch, request.userId);
+      return { token: updated, patch };
     },
   );
 
@@ -338,9 +400,11 @@ export async function mapRoutes(app: FastifyInstance) {
       if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
       if (!access.isDm) throw app.httpErrors.forbidden('DM only');
 
+      const mapId = token.mapId;
       await deleteMapToken(tokenId, gameId);
-      emitMapState(app, gameId, request.userId);
-      return { ok: true, tokenId };
+      const map = await syncMapTokens(gameId, mapId);
+      publishMapPatch(app, gameId, map, request.userId);
+      return { ok: true, tokenId, map, patch: { map } };
     },
   );
 
@@ -381,6 +445,11 @@ export async function mapRoutes(app: FastifyInstance) {
         request: updatedReq,
         token,
       });
+      if (token) {
+        publishGamePatch(app.io, movement.gameId, {
+          tokens: { upserted: [token] },
+        }, request.userId);
+      }
       return { request: updatedReq, token };
     },
   );

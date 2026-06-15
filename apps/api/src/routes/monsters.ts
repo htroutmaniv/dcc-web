@@ -8,10 +8,12 @@ import {
   upsertMonsterCatalogSchema,
   isMonsterInPlay,
   isMonsterKilled,
+  type GamePatch,
   type MonsterStatsJson,
 } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
-import { publish, publishMany, publishContextFromRequest } from '../lib/game-events.js';
+import { publishContextFromRequest } from '../lib/game-events.js';
+import { publishGamePatch } from '../lib/game-patch-publish.js';
 import { AUDIT_KINDS, recordAudit } from '../services/audit-service.js';
 import { syncActiveMapTokens } from '../services/map-service.js';
 import { prisma } from '../lib/prisma.js';
@@ -26,33 +28,6 @@ import {
 } from '../services/monster-service.js';
 import { loadGameSettings } from '../services/game-settings-service.js';
 import { transferInventoryItem, assertTransferInventoryAllowed } from '../services/inventory-transfer-service.js';
-import type { GameInitiativeState } from '@dcc-web/shared';
-
-function emitMonstersChanged(
-  app: FastifyInstance,
-  gameId: string,
-  actorUserId?: string,
-  monsterIds?: string[],
-) {
-  publish(app.io, gameId, {
-    type: 'monsters:changed',
-    actorUserId,
-    ...(monsterIds && monsterIds.length > 0 ? { monsterIds } : {}),
-  });
-}
-
-function emitInitiativeUpdate(
-  app: FastifyInstance,
-  gameId: string,
-  initiative: GameInitiativeState | null,
-  actorUserId?: string,
-) {
-  publish(app.io, gameId, {
-    type: 'initiative:updated',
-    initiative,
-    actorUserId,
-  });
-}
 
 async function assertCatalogEditor(userId: string, app: FastifyInstance) {
   const dmGame = await prisma.game.findFirst({
@@ -245,16 +220,14 @@ export async function monsterRoutes(app: FastifyInstance) {
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
       const { monsters, initiative } = await spawnGameMonsters(gameId, parsed.data);
-      await syncActiveMapTokens(gameId);
-      const monsterIds = monsters.map((m) => m.id);
-      publishMany(app.io, gameId, [
-        { type: 'monsters:changed', monsterIds, actorUserId: request.userId },
-        { type: 'map:updated', actorUserId: request.userId },
-      ]);
-      if (initiative) {
-        emitInitiativeUpdate(app, gameId, initiative, request.userId);
-      }
-      return { monsters, initiative };
+      const map = await syncActiveMapTokens(gameId);
+      const patch: GamePatch = {
+        monsters: { upserted: monsters },
+        ...(map ? { map } : {}),
+        ...(initiative ? { initiative } : {}),
+      };
+      publishGamePatch(app.io, gameId, patch, request.userId);
+      return { monsters, initiative, patch };
     },
   );
 
@@ -264,8 +237,8 @@ export async function monsterRoutes(app: FastifyInstance) {
     async (request) => {
       const { gameId } = request.params as { gameId: string };
       const initiative = await syncMonsterGroupInitiative(gameId);
-      emitInitiativeUpdate(app, gameId, initiative, request.userId);
-      return { initiative };
+      publishGamePatch(app.io, gameId, { initiative }, request.userId);
+      return { initiative, patch: { initiative } };
     },
   );
 
@@ -293,13 +266,12 @@ export async function monsterRoutes(app: FastifyInstance) {
       const { monster, initiative } = await patchGameMonster(gameId, monsterId, parsed.data);
       const map = await syncActiveMapTokens(gameId);
       const eventCtx = publishContextFromRequest(request);
-      publishMany(app.io, gameId, [
-        { type: 'monsters:changed', monsterIds: [monsterId], actorUserId: request.userId },
-        { type: 'map:updated', actorUserId: request.userId },
-      ], eventCtx);
-      if (initiative) {
-        emitInitiativeUpdate(app, gameId, initiative, request.userId);
-      }
+      const patch: GamePatch = {
+        monsters: { upserted: [monster] },
+        ...(map ? { map } : {}),
+        ...(initiative !== null ? { initiative } : {}),
+      };
+      publishGamePatch(app.io, gameId, patch, request.userId, eventCtx);
 
       const nowKilled = isMonsterKilled({
         stats: monster.stats as MonsterStatsJson | undefined,
@@ -328,7 +300,7 @@ export async function monsterRoutes(app: FastifyInstance) {
         });
       }
 
-      return { monster, initiative, ...(map ? { map } : {}) };
+      return { monster, initiative, patch, ...(map ? { map } : {}) };
     },
   );
 
@@ -344,8 +316,9 @@ export async function monsterRoutes(app: FastifyInstance) {
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
       const monster = await replaceMonsterItems(gameId, monsterId, parsed.data.items);
-      emitMonstersChanged(app, gameId, request.userId, [monsterId]);
-      return { monster };
+      const patch: GamePatch = { monsters: { upserted: [monster] } };
+      publishGamePatch(app.io, gameId, patch, request.userId);
+      return { monster, patch };
     },
   );
 
@@ -367,28 +340,20 @@ export async function monsterRoutes(app: FastifyInstance) {
           input: parsed.data,
         });
         const result = await transferInventoryItem(gameId, parsed.data);
-        const eventCtx = publishContextFromRequest(request);
-        if (result.sourceCharacter) {
-          publish(app.io, gameId, {
-            type: 'character:upsert',
-            character: result.sourceCharacter,
-            actorUserId: request.userId,
-          }, eventCtx);
+        const patch: GamePatch = {};
+        const upsertedCharacters = [result.sourceCharacter, result.targetCharacter].filter(
+          (row): row is NonNullable<typeof result.sourceCharacter> => row != null,
+        );
+        if (upsertedCharacters.length > 0) {
+          patch.characters = { upserted: upsertedCharacters };
         }
-        if (result.targetCharacter) {
-          publish(app.io, gameId, {
-            type: 'character:upsert',
-            character: result.targetCharacter,
-            actorUserId: request.userId,
-          }, eventCtx);
+        const upsertedMonsters = [result.sourceMonster, result.targetMonster].filter(
+          (row): row is NonNullable<typeof result.sourceMonster> => row != null,
+        );
+        if (upsertedMonsters.length > 0) {
+          patch.monsters = { upserted: upsertedMonsters };
         }
-        if (result.sourceMonster || result.targetMonster) {
-          const monsterIds = [
-            result.sourceMonster?.id,
-            result.targetMonster?.id,
-          ].filter((id): id is string => Boolean(id));
-          emitMonstersChanged(app, gameId, request.userId, monsterIds);
-        }
+        publishGamePatch(app.io, gameId, patch, request.userId, publishContextFromRequest(request));
         await recordAudit({
           gameId,
           actorUserId: request.userId,
@@ -403,7 +368,7 @@ export async function monsterRoutes(app: FastifyInstance) {
             quantity: parsed.data.quantity ?? 1,
           },
         });
-        return result;
+        return { ...result, patch };
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Transfer failed';
         return app.httpErrors.badRequest(msg);
@@ -421,12 +386,13 @@ export async function monsterRoutes(app: FastifyInstance) {
       };
       const { initiative } = await deleteGameMonster(gameId, monsterId);
       const map = await syncActiveMapTokens(gameId);
-      publishMany(app.io, gameId, [
-        { type: 'monsters:changed', monsterIds: [monsterId], actorUserId: request.userId },
-        { type: 'map:updated', actorUserId: request.userId },
-      ]);
-      emitInitiativeUpdate(app, gameId, initiative, request.userId);
-      return { ok: true, initiative, ...(map ? { map } : {}) };
+      const patch: GamePatch = {
+        monsters: { deletedIds: [monsterId] },
+        ...(map ? { map } : {}),
+        ...(initiative !== null ? { initiative } : {}),
+      };
+      publishGamePatch(app.io, gameId, patch, request.userId);
+      return { ok: true, initiative, patch, ...(map ? { map } : {}) };
     },
   );
 }

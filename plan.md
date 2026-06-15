@@ -102,7 +102,7 @@ Goal: every write that already computes new server state **returns** it, so the 
 - [x] `useCombatActions.applyDamageFromRoll` applies character/monster/map/initiative from response.
 
 ### B.3 Standardize the mutation envelope — M
-- [ ] Define a `GamePatch` type in `packages/shared/src/game-events.ts`:
+- [x] Define a `GamePatch` type in `packages/shared/src/game-patch.ts`:
   ```ts
   type GamePatch = {
     characters?: { upserted?: CharacterDto[]; deletedIds?: string[] };
@@ -113,8 +113,8 @@ Goal: every write that already computes new server state **returns** it, so the 
     settings?: Partial<GameSettings>;
   };
   ```
-- [ ] Mutations return `{ ok: true, patch: GamePatch }` (plus any command-specific result like `outcome`).
-- [ ] Keep existing fields during migration; add `patch` alongside, then remove the redundant top-level fields in a later pass.
+- [x] Mutations return `{ ok: true, patch: GamePatch }` (plus any command-specific result like `outcome`).
+- [x] Keep existing fields during migration; add `patch` alongside, then remove the redundant top-level fields in a later pass.
 
 **Exit criteria:** initiator-side `loadMaps()` / `loadCharacters()` / `loadMonsters()` calls remain **only** in initial load and reconnect resync.
 
@@ -125,23 +125,23 @@ Goal: every write that already computes new server state **returns** it, so the 
 Goal: other clients receive the same `GamePatch` and apply it; no socket handler triggers a full refetch.
 
 ### C.1 Add a unified `game:patch` event — M
-- [ ] Extend the `GameEvent` union in `packages/shared/src/game-events.ts` with `{ type: 'game:patch'; patch: GamePatch; actorUserId?: string }`.
-- [ ] `publish`/`publishMany` in `apps/api/src/lib/game-events.ts` already forward arbitrary payloads — no transport change needed.
-- [ ] After each mutation, publish the **same** `GamePatch` returned to the initiator (single source of truth for "what changed").
+- [x] Extend the `GameEvent` union in `packages/shared/src/game-events.ts` with `{ type: 'game:patch'; patch: GamePatch; actorUserId?: string }`.
+- [x] `publish`/`publishMany` in `apps/api/src/lib/game-events.ts` already forward arbitrary payloads — no transport change needed.
+- [x] After each mutation, publish the **same** `GamePatch` returned to the initiator (single source of truth for "what changed").
 
 ### C.2 Client patch reducer — M
-- [ ] Add `applyGamePatch(patch)` in the controller (`useGamePageController.ts`) that fans out to `applyCharacterFromServer`, `handleMonsterUpdated`, `applyMapFromServer`, `applyInitiative`, `applyGameSettingsPatch`.
-- [ ] `useGameRealtimeSync.onGamePatch` → `applyGamePatch`, with `actorUserId === userId` short-circuit (initiator already applied via HTTP response).
-- [ ] Validate the patch shape on receipt; on validation failure, fall back to a **single** targeted resync (not silent partial merge).
+- [x] Add `applyGamePatch(patch)` in the controller (`useGamePageController.ts`) that fans out to `applyCharacterFromServer`, `handleMonsterUpdated`, `applyMapFromServer`, `applyInitiative`, `applyGameSettingsPatch`.
+- [x] `useGameRealtimeSync.onGamePatch` → `applyGamePatch`, with `actorUserId === userId` short-circuit (initiator already applied via HTTP response).
+- [x] Validate the patch shape on receipt; on validation failure, fall back to a **single** targeted resync (not silent partial merge).
 
 ### C.3 Enrich or retire the legacy ping events — M
-- [ ] `map:updated` → carry `{ map }` (deprecate empty-payload form); or emit `game:patch` with `map` and drop `map:updated`.
-- [ ] `monsters:changed` → carry `{ monsters: { upserted, deletedIds } }` instead of just IDs.
-- [ ] `damage:applied` → keep for log/animation purposes, but it should no longer drive list refetches (state arrives via `game:patch` / `character:upsert`).
-- [ ] `map:token_moved` → already carries the token; route it through the token delta path (A.4), not a reload.
+- [x] `map:updated` → carry `{ map }` (deprecate empty-payload form); or emit `game:patch` with `map` and drop `map:updated`.
+- [x] `monsters:changed` → carry `{ monsters: { upserted, deletedIds } }` instead of just IDs.
+- [x] `damage:applied` → keep for log/animation purposes, but it should no longer drive list refetches (state arrives via `game:patch` / `character:upsert`).
+- [x] `map:token_moved` → already carries the token; route it through the token delta path (A.4), not a reload.
 
 ### C.4 Reconnect resync stays full — S
-- [ ] Keep `onConnected` doing `loadDetail` + `loadDiceRolls` (+ maps/characters/monsters) as the authoritative catch-up after any missed events. This is the only sanctioned full pull post-initial-load.
+- [x] Keep `onConnected` doing `loadDetail` + `loadDiceRolls` (+ maps/characters/monsters) as the authoritative catch-up after any missed events. This is the only sanctioned full pull post-initial-load.
 
 **Exit criteria:** with two clients open, a mutation by one produces **zero** `GET /maps|/monsters|/characters` on the other; both reach identical state via `game:patch`.
 

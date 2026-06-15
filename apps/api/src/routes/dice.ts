@@ -2,10 +2,12 @@ import {
   applyDamageSchema,
   diceRollQuerySchema,
   diceRollRequestSchema,
+  type GamePatch,
 } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
 import { resolveGameMemberAccess } from '../lib/game-access.js';
 import { publish } from '../lib/game-events.js';
+import { publishGamePatch } from '../lib/game-patch-publish.js';
 import { prisma } from '../lib/prisma.js';
 import { applyDamageToTarget, listGameDiceRolls, rollAndPersist } from '../services/dice.js';
 import { syncActiveMapTokens } from '../services/map-service.js';
@@ -62,11 +64,7 @@ export async function diceRoutes(app: FastifyInstance) {
         modifier: result.modifier,
       });
       if (initiative) {
-        publish(request.server.io, parsed.data.gameId, {
-          type: 'initiative:updated',
-          initiative,
-          actorUserId: request.userId,
-        });
+        publishGamePatch(request.server.io, parsed.data.gameId, { initiative }, request.userId);
       }
     }
 
@@ -118,25 +116,9 @@ export async function diceRoutes(app: FastifyInstance) {
           include: { items: { orderBy: { sortOrder: 'asc' } } },
         });
         if (character) {
-          publish(request.server.io, gameId, {
-            type: 'character:upsert',
-            character,
-            actorUserId: request.userId,
-          });
           if (character.status === 'dead') {
             initiative = await reconcileInitiativeAfterCharacterDeath(gameId);
-            if (initiative) {
-              publish(request.server.io, gameId, {
-                type: 'initiative:updated',
-                initiative,
-                actorUserId: request.userId,
-              });
-            }
             map = await syncActiveMapTokens(gameId);
-            publish(request.server.io, gameId, {
-              type: 'map:updated',
-              actorUserId: request.userId,
-            });
           }
         }
       }
@@ -144,33 +126,27 @@ export async function diceRoutes(app: FastifyInstance) {
       if (parsed.data.targetType === 'monster') {
         monster = await getGameMonster(gameId, parsed.data.targetId);
         map = await syncActiveMapTokens(gameId);
-        publish(request.server.io, gameId, {
-          type: 'monsters:changed',
-          monsterIds: [parsed.data.targetId],
-          actorUserId: request.userId,
-        });
-        if (map) {
-          publish(request.server.io, gameId, {
-            type: 'map:updated',
-            actorUserId: request.userId,
-          });
-        }
       }
+
+      const patch: GamePatch = {};
+      if (character) patch.characters = { upserted: [character] };
+      if (monster) patch.monsters = { upserted: [monster] };
+      if (map) patch.map = map;
+      if (initiative !== null) patch.initiative = initiative;
 
       if (parsed.data.targetType === 'npc') {
         const token = await prisma.mapToken.findUnique({ where: { id: parsed.data.targetId } });
         if (token) {
-          publish(request.server.io, gameId, {
-            type: 'token:updated',
-            token,
-            actorUserId: request.userId,
-          });
+          patch.tokens = { upserted: [token] };
         }
       }
+
+      publishGamePatch(request.server.io, gameId, patch, request.userId);
 
       return {
         ok: true,
         ...outcome,
+        patch,
         ...(character ? { character } : {}),
         ...(monster ? { monster } : {}),
         ...(initiative ? { initiative } : {}),

@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { buildDiceNotation, type DiceRollKind, type GameInitiativeState } from '@dcc-web/shared';
+import { buildDiceNotation, type DiceRollKind, type GameInitiativeState, type GamePatch } from '@dcc-web/shared';
 import type { GameMenuTab } from '../../components/GameSideMenu';
 import { api } from '../../api/client';
-import type { Character, GameMonsterInstance } from '../../types/game';
-import type { TacticalGameMap } from '../../types/map';
+import type { Character } from '../../types/game';
 import type { DiceRollLogEntry } from '../../types/dice-roll-log';
 import {
   getCharacterRollSpec,
@@ -13,17 +12,13 @@ import {
 import { characterRollKindToDiceKind } from '../../utils/roll-log';
 import { parseAttackTargetRef } from '../../utils/character-attack-target';
 import { formatError } from '../../utils/errors';
-import { parseCharacterResponse } from './parse-character-response.js';
 
 type ApplyDamageResponse = {
   ok: boolean;
   hpBefore: number;
   hpAfter: number;
   targetName: string;
-  character?: Character;
-  monster?: GameMonsterInstance;
-  map?: TacticalGameMap;
-  initiative?: GameInitiativeState | null;
+  patch?: GamePatch;
 };
 
 export type CombatActionsDeps = {
@@ -42,9 +37,7 @@ export type CombatActionsDeps = {
     targetType?: 'character' | 'monster' | 'npc';
     targetId?: string;
   }) => Promise<DiceRollLogEntry>;
-  applyCharacterFromServer: (character: Character) => void;
-  handleMonsterUpdated: (monster: GameMonsterInstance) => void;
-  applyMapFromServer: (map: TacticalGameMap) => void;
+  applyGamePatch: (patch: GamePatch) => void;
   applyInitiative: (next: GameInitiativeState | null) => void;
   applyGameSettingsPatch: (patch: {
     monstersVisibleOnMap?: boolean;
@@ -70,9 +63,7 @@ export function useCombatActions(deps: CombatActionsDeps) {
     diceTrayCounts,
     diceCharacterId,
     postDiceRoll,
-    applyCharacterFromServer,
-    handleMonsterUpdated,
-    applyMapFromServer,
+    applyGamePatch,
     applyInitiative,
     applyGameSettingsPatch,
     setMenuTab,
@@ -185,13 +176,7 @@ export function useCombatActions(deps: CombatActionsDeps) {
         }),
       });
       setApplyDamageRoll(null);
-      const character = res.character
-        ? parseCharacterResponse(res.character)
-        : null;
-      if (character) applyCharacterFromServer(character);
-      if (res.monster) handleMonsterUpdated(res.monster);
-      if (res.initiative !== undefined) applyInitiative(res.initiative);
-      if (res.map) applyMapFromServer(res.map);
+      if (res.patch) applyGamePatch(res.patch);
       onError(null);
     } catch (e) {
       onError(formatError(e));

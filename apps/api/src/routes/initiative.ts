@@ -1,6 +1,6 @@
-import { initiativeEndTurnSchema } from '@dcc-web/shared';
+import { initiativeEndTurnSchema, type GamePatch } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
-import { publish, publishMany } from '../lib/game-events.js';
+import { publishGamePatch } from '../lib/game-patch-publish.js';
 import { prisma } from '../lib/prisma.js';
 import {
   advanceGameInitiative,
@@ -22,15 +22,12 @@ async function broadcastMortalityUpdates(
     where: { id: { in: characterIds } },
     include: { items: { orderBy: { sortOrder: 'asc' } } },
   });
-  for (const character of characters) {
-    publish(app.io, gameId, {
-      type: 'character:upsert',
-      character,
-      actorUserId,
-    });
-  }
-  await syncActiveMapTokens(gameId);
-  publish(app.io, gameId, { type: 'map:updated', actorUserId });
+  const map = await syncActiveMapTokens(gameId);
+  const patch: GamePatch = {
+    characters: { upserted: characters },
+    ...(map ? { map } : {}),
+  };
+  publishGamePatch(app.io, gameId, patch, actorUserId);
 }
 
 export async function initiativeRoutes(app: FastifyInstance) {
@@ -49,12 +46,13 @@ export async function initiativeRoutes(app: FastifyInstance) {
     async (request) => {
       const { gameId } = request.params as { gameId: string };
       const initiative = await startGameInitiative(gameId);
-      await syncActiveMapTokens(gameId);
-      publishMany(app.io, gameId, [
-        { type: 'initiative:updated', initiative, actorUserId: request.userId },
-        { type: 'map:updated', actorUserId: request.userId },
-      ]);
-      return { initiative };
+      const map = await syncActiveMapTokens(gameId);
+      const patch: GamePatch = {
+        initiative,
+        ...(map ? { map } : {}),
+      };
+      publishGamePatch(app.io, gameId, patch, request.userId);
+      return { initiative, patch };
     },
   );
 
@@ -64,11 +62,7 @@ export async function initiativeRoutes(app: FastifyInstance) {
     async (request) => {
       const { gameId } = request.params as { gameId: string };
       const { initiative, mortalityUpdates } = await advanceGameInitiative(gameId);
-      publish(app.io, gameId, {
-        type: 'initiative:updated',
-        initiative,
-        actorUserId: request.userId,
-      });
+      publishGamePatch(app.io, gameId, { initiative }, request.userId);
       await broadcastMortalityUpdates(app, gameId, mortalityUpdates, request.userId);
       return { initiative };
     },
@@ -80,12 +74,9 @@ export async function initiativeRoutes(app: FastifyInstance) {
     async (request) => {
       const { gameId } = request.params as { gameId: string };
       await endGameInitiative(gameId);
-      publish(app.io, gameId, {
-        type: 'initiative:updated',
-        initiative: null,
-        actorUserId: request.userId,
-      });
-      return { initiative: null };
+      const patch: GamePatch = { initiative: null };
+      publishGamePatch(app.io, gameId, patch, request.userId);
+      return { initiative: null, patch };
     },
   );
 
@@ -106,11 +97,7 @@ export async function initiativeRoutes(app: FastifyInstance) {
           isDm: access.isDm,
           characterId: parsed.data.characterId,
         });
-        publish(app.io, gameId, {
-          type: 'initiative:updated',
-          initiative,
-          actorUserId: request.userId,
-        });
+        publishGamePatch(app.io, gameId, { initiative }, request.userId);
         await broadcastMortalityUpdates(app, gameId, mortalityUpdates, request.userId);
         return { initiative };
       } catch (e) {

@@ -4,13 +4,15 @@ import {
 } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
 import { syncMonsterGroupInitiative } from '../services/monster-service.js';
+import { publishGamePatch } from '../lib/game-patch-publish.js';
+import type { GamePatch } from '@dcc-web/shared';
 import {
   patchGameSettingsColumns,
   serializeGameForClient,
   gameWithSettingsInclude,
 } from '../services/game-settings-service.js';
 import { clearGameMembershipCache, generateUniqueInviteCode, isGameDm } from '../lib/game-access.js';
-import { publish, publishMany, publishContextFromRequest } from '../lib/game-events.js';
+import { publish, publishContextFromRequest } from '../lib/game-events.js';
 import { emitToUsers } from '../lib/game-socket.js';
 import { prisma } from '../lib/prisma.js';
 import { AUDIT_KINDS, listAuditLog, recordAudit } from '../services/audit-service.js';
@@ -168,19 +170,11 @@ export async function gameRoutes(app: FastifyInstance) {
 
     const settings = await patchGameSettingsColumns(gameId, parsed.data);
     const eventCtx = publishContextFromRequest(request);
+    const patch: GamePatch = { settings };
     if (parsed.data.sharedMonsterInitiative !== undefined) {
-      const initiative = await syncMonsterGroupInitiative(gameId);
-      publishMany(app.io, gameId, [
-        { type: 'initiative:updated', initiative, actorUserId: request.userId },
-        { type: 'game:settings_updated', settings, actorUserId: request.userId },
-      ], eventCtx);
-    } else {
-      publish(app.io, gameId, {
-        type: 'game:settings_updated',
-        settings,
-        actorUserId: request.userId,
-      }, eventCtx);
+      patch.initiative = await syncMonsterGroupInitiative(gameId);
     }
+    publishGamePatch(app.io, gameId, patch, request.userId, eventCtx);
     await recordAudit({
       gameId,
       actorUserId: request.userId,
@@ -189,7 +183,7 @@ export async function gameRoutes(app: FastifyInstance) {
       targetId: gameId,
       payload: { changes: parsed.data },
     });
-    return { settings };
+    return { settings, patch };
   });
 
   app.get('/games/:gameId/audit', {

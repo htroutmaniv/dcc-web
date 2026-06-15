@@ -43,7 +43,13 @@ export function useGameMaps(gameId: string | undefined) {
 
   const applyMapFromServer = useCallback(
     (map: TacticalGameMap) => {
-      setMaps((prev) => prev.map((m) => (m.id === map.id ? map : m)));
+      setMaps((prev) => {
+        const idx = prev.findIndex((m) => m.id === map.id);
+        if (idx >= 0) {
+          return prev.map((m) => (m.id === map.id ? map : m));
+        }
+        return [...prev, map];
+      });
       if (map.id === activeMapId) syncNpcTokensFromMap(map);
     },
     [activeMapId, syncNpcTokensFromMap],
@@ -58,6 +64,27 @@ export function useGameMaps(gameId: string | undefined) {
           const tokens = m.tokens.map((t) =>
             t.id === patch.id ? { ...t, ...patch } : t,
           );
+          const updated = { ...m, tokens };
+          if (m.id === activeMapId) activeMap = updated;
+          return updated;
+        });
+        return next;
+      });
+      if (activeMap) syncNpcTokensFromMap(activeMap);
+    },
+    [activeMapId, syncNpcTokensFromMap],
+  );
+
+  const removeMapTokens = useCallback(
+    (tokenIds: string[], mapId?: string) => {
+      if (tokenIds.length === 0) return;
+      const removed = new Set(tokenIds);
+      let activeMap: TacticalGameMap | null = null;
+      setMaps((prev) => {
+        const next = prev.map((m) => {
+          if (mapId && m.id !== mapId) return m;
+          const tokens = m.tokens.filter((t) => !removed.has(t.id));
+          if (tokens.length === m.tokens.length) return m;
           const updated = { ...m, tokens };
           if (m.id === activeMapId) activeMap = updated;
           return updated;
@@ -87,6 +114,7 @@ export function useGameMaps(gameId: string | undefined) {
     syncNpcTokensFromMap,
     applyMapFromServer,
     applyMapTokenFromServer,
+    removeMapTokens,
   };
 }
 

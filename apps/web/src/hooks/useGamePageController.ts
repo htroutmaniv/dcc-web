@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import type { GamePatch } from '@dcc-web/shared';
 import { buildCombatTargetOptions } from '../utils/combat-target-options';
 import type { GameMenuTab } from '../components/GameSideMenu';
 import type { TransferInventoryResult } from '../components/inventory/TransferItemDialog';
@@ -19,6 +20,7 @@ import {
   useMonsters,
   usePresence,
   useRollLog,
+  applyGamePatch as applyGamePatchReducer,
 } from './game';
 import { useGameDeleteNotifications } from './useGameDeleteNotifications';
 import { formatError } from '../utils/errors';
@@ -62,10 +64,12 @@ export function useGamePageController(gameId: string | undefined) {
     syncNpcTokensFromMap,
     applyMapFromServer,
     applyMapTokenFromServer,
+    removeMapTokens,
   } = useGameMaps(gameId);
 
   const {
     characters,
+    setCharacters,
     selectedCharacter,
     setSelectedCharacter,
     characterAttackTargetById,
@@ -119,6 +123,49 @@ export function useGamePageController(gameId: string | undefined) {
 
   const onError = useCallback((message: string | null) => setError(message), []);
 
+  const applyGamePatch = useCallback(
+    (patch: GamePatch) => {
+      applyGamePatchReducer(patch, {
+        applyCharacterFromServer,
+        setCharacters,
+        setSelectedCharacter,
+        handleMonsterUpdated,
+        setMonsters,
+        setSelectedMonster,
+        setMaps,
+        setActiveMapId,
+        applyMapFromServer,
+        applyMapTokenFromServer,
+        removeMapTokens,
+        applyInitiative,
+        applyGameSettingsPatch,
+      });
+    },
+    [
+      applyCharacterFromServer,
+      setCharacters,
+      setSelectedCharacter,
+      handleMonsterUpdated,
+      setMonsters,
+      setSelectedMonster,
+      setMaps,
+      setActiveMapId,
+      applyMapFromServer,
+      applyMapTokenFromServer,
+      removeMapTokens,
+      applyInitiative,
+      applyGameSettingsPatch,
+    ],
+  );
+
+  const resyncAll = useCallback(() => {
+    void loadDetail().catch(() => {});
+    void loadDiceRolls().catch(() => {});
+    void loadCharacters().catch(() => {});
+    void loadMonsters().catch(() => {});
+    void loadMaps().catch(() => {});
+  }, [loadDetail, loadDiceRolls, loadCharacters, loadMonsters, loadMaps]);
+
   const characterActions = useCharacterActions({
     gameId,
     isDm,
@@ -127,7 +174,7 @@ export function useGamePageController(gameId: string | undefined) {
     characterAttackTargetById,
     setCharacterAttackTargetById,
     applyCharacterFromServer,
-    applyMapFromServer,
+    applyGamePatch,
     selectedCharacter,
     setSelectedCharacter,
     activeMapId,
@@ -146,9 +193,7 @@ export function useGamePageController(gameId: string | undefined) {
     diceTrayCounts,
     diceCharacterId,
     postDiceRoll,
-    applyCharacterFromServer,
-    handleMonsterUpdated,
-    applyMapFromServer,
+    applyGamePatch,
     applyInitiative,
     applyGameSettingsPatch,
     setMenuTab,
@@ -171,7 +216,7 @@ export function useGamePageController(gameId: string | undefined) {
     setMonsterTargetById,
     handleMonsterUpdated,
     applyInitiative,
-    applyMapFromServer,
+    applyGamePatch,
     loadCharacters,
     postDiceRoll,
     onError,
@@ -272,6 +317,8 @@ export function useGamePageController(gameId: string | undefined) {
     loadMonsters,
     loadMaps,
     applyMapTokenFromServer,
+    applyGamePatch,
+    resyncAll,
     applyInitiative,
     applyGameSettingsPatch,
     appendRollLog,

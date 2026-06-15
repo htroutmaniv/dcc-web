@@ -31,6 +31,7 @@ export interface GameSocketHandlers {
     targetName: string;
     actorUserId?: string;
   }) => void;
+  onGamePatch?: (payload: { patch: import('@dcc-web/shared').GamePatch; actorUserId?: string }) => void;
   onTokenUpdated?: (payload: { token?: unknown; actorUserId?: string }) => void;
   onTokenMoved?: (payload: { token?: unknown; actorUserId?: string }) => void;
   onMapUpdated?: (actorUserId?: string) => void;
@@ -92,6 +93,13 @@ export function useGameSocket(
     socket.on('damage:applied', (payload) => {
       handlersRef.current.onDamageApplied?.(payload);
     });
+
+    socket.on(
+      'game:patch',
+      (payload: { patch: import('@dcc-web/shared').GamePatch; actorUserId?: string }) => {
+        if (payload?.patch) handlersRef.current.onGamePatch?.(payload);
+      },
+    );
 
     socket.on('token:updated', (payload: { token?: unknown; actorUserId?: string }) => {
       if (payload?.token) handlersRef.current.onTokenUpdated?.(payload);
@@ -163,6 +171,7 @@ export function useGameSocket(
       socket.off('initiative:updated');
       socket.off('monsters:changed');
       socket.off('damage:applied');
+      socket.off('game:patch');
       socket.off('token:updated');
       socket.off('map:updated');
       socket.off('map:token_moved');

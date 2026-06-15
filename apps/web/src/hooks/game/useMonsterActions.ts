@@ -6,6 +6,7 @@ import {
   getTargetAc,
   parseMonsterSheet,
   type GameInitiativeState,
+  type GamePatch,
 } from '@dcc-web/shared';
 import type { DiceRollLogEntry } from '../../types/dice-roll-log';
 import type { MonsterCombatRollKind } from '../../components/MonsterQuickMenu';
@@ -26,7 +27,7 @@ export type MonsterActionsDeps = {
   setMonsterTargetById: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   handleMonsterUpdated: (monster: GameMonsterInstance) => void;
   applyInitiative: (next: GameInitiativeState | null) => void;
-  applyMapFromServer: (map: TacticalGameMap) => void;
+  applyGamePatch: (patch: GamePatch) => void;
   loadCharacters: () => Promise<unknown>;
   postDiceRoll: (params: {
     notation: string;
@@ -49,7 +50,7 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
     setMonsterTargetById,
     handleMonsterUpdated,
     applyInitiative,
-    applyMapFromServer,
+    applyGamePatch,
     loadCharacters,
     postDiceRoll,
     onError,
@@ -153,6 +154,7 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
       const data = await api<{
         monster: GameMonsterInstance;
         initiative: GameInitiativeState | null;
+        patch?: GamePatch;
         map?: TacticalGameMap;
       }>(`/games/${gameId}/monsters/${monster.id}`, {
         method: 'PATCH',
@@ -161,9 +163,12 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
           stats: buildMonsterKilledStats(monster.stats, true),
         }),
       });
-      handleMonsterUpdated(data.monster);
-      if (data.initiative) applyInitiative(data.initiative);
-      if (data.map) applyMapFromServer(data.map);
+      if (data.patch) applyGamePatch(data.patch);
+      else {
+        handleMonsterUpdated(data.monster);
+        if (data.initiative) applyInitiative(data.initiative);
+        if (data.map) applyGamePatch({ map: data.map });
+      }
       onError(null);
     } catch (e) {
       onError(formatError(e));
@@ -178,6 +183,7 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
     try {
       const data = await api<{
         initiative: GameInitiativeState | null;
+        patch?: GamePatch;
         map?: TacticalGameMap;
       }>(
         `/games/${gameId}/monsters/${monsterId}`,
@@ -185,8 +191,11 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
       );
       setMonsters((prev) => prev.filter((m) => m.id !== monsterId));
       if (selectedMonster?.id === monsterId) setSelectedMonster(null);
-      applyInitiative(data.initiative);
-      if (data.map) applyMapFromServer(data.map);
+      if (data.patch) applyGamePatch(data.patch);
+      else {
+        applyInitiative(data.initiative);
+        if (data.map) applyGamePatch({ map: data.map });
+      }
     } catch (e) {
       onError(formatError(e));
     } finally {
