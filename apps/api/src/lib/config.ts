@@ -79,6 +79,10 @@ export const config = {
   },
   sessionCookieName: process.env.SESSION_COOKIE_NAME ?? 'dcc_session',
   storagePath: process.env.STORAGE_PATH ?? './uploads',
+  /** Max dice roll rows retained per game (older rows pruned by retention job). */
+  diceRollRetentionPerGame: Number(process.env.DICE_ROLL_RETENTION_PER_GAME ?? 500),
+  /** How often to run DB / upload retention (default 24h). */
+  dataRetentionIntervalMs: Number(process.env.DATA_RETENTION_INTERVAL_MS ?? 86_400_000),
   /** Separate DM/player dev accounts; disabled in production unless ENABLE_DEV_LOGIN=true */
   enableDevLogin:
     !isProduction || process.env.ENABLE_DEV_LOGIN === 'true',

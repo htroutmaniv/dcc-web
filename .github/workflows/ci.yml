@@ -47,8 +47,10 @@ jobs:
           bun run --filter @dcc-web/shared build
           bun run --filter @dcc-web/shared test
 
-      - name: API — build
-        run: bun run --filter @dcc-web/api build
+      - name: API — build & test
+        run: |
+          bun run --filter @dcc-web/api build
+          bun run --filter @dcc-web/api test
 
       - name: Web — typecheck & build
         run: |

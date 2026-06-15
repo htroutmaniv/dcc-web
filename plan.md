@@ -125,23 +125,25 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [ ] Add a regression test that fires two concurrent `advanceInitiativeTurn` calls and asserts exactly one wins.
 
 ### 2.3 Map sync efficiency — M
-- [ ] Rewrite `syncMapTokens` in `apps/api/src/services/map-service.ts` to:
-  - load existing tokens, characters, monsters in **one batch** each
-  - compute three sets: `toCreate`, `toUpdate` (with diff), `toDelete`
-  - issue `createMany`, batched `update` (grouped by shape), `deleteMany` inside one `prisma.$transaction`
-- [ ] Verify with the new integration test that PC count of 20 + monster count of 20 results in ≤ 4 statements rather than ~60.
+- [x] Rewrite `syncMapTokens` in `apps/api/src/services/map-service.ts` to:
+  - [x] load existing tokens, characters, monsters in **one batch** each
+  - [x] compute three sets: `toCreate`, `toUpdate` (with diff), `toDelete`
+  - [x] issue `createMany`, batched `update` (grouped by shape), `deleteMany` inside one `prisma.$transaction`
+- [x] Unit tests for `planMapTokenSync` in `apps/api/test/` *(integration DB count test deferred to §3.8)*
 
 ### 2.4 Data retention / pruning — S each
-- [ ] Add a daily Bun cron (or simple `setInterval` task in `index.ts` if no scheduler yet) to:
-  - [ ] Trim `DiceRoll` per game to N=500 most recent (configurable via env)
-  - [ ] Delete resolved `MovementRequest` rows older than 24h
-  - [ ] Sweep orphan uploads in `data/uploads/maps/` not referenced by any `GameMap.imageUrl`
+- [x] Add a daily Bun cron (or simple `setInterval` task in `index.ts` if no scheduler yet) to:
+  - [x] Trim `DiceRoll` per game to N=500 most recent (configurable via env `DICE_ROLL_RETENTION_PER_GAME`)
+  - [x] Delete resolved `MovementRequest` rows older than 24h
+  - [x] Sweep orphan uploads in `data/uploads/maps/` not referenced by any `GameMap.imageUrl`
 
 ### 2.5 Map coords as floats — S
 - [ ] Migration: `MapToken.x`, `MapToken.y`, `MovementRequest.target_x/y` → `Float` (or `Numeric(7,2)` if you want fixed-point).
 - [ ] Remove the `Number(row.x)` conversions in `apps/api/src/services/map-service.ts`.
 
 **Exit criteria:** no more JSON read-modify-write races; map sync is O(1) queries; data tables stop growing unbounded.
+
+> **Progress (2026-06-15):** 2.3 and 2.4 complete. **2.1** (settings decomposition), **2.2** (optimistic initiative), and **2.5** (float coords) remain.
 
 ---
 

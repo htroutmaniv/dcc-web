@@ -13,7 +13,8 @@
     "db:migrate:dev": "bun ../../scripts/prisma-env.ts migrate dev",
     "db:push": "bun ../../scripts/prisma-env.ts db push",
     "db:studio": "bun ../../scripts/prisma-env.ts studio",
-    "db:seed": "bun ../../scripts/prisma-env.ts db seed"
+    "db:seed": "bun ../../scripts/prisma-env.ts db seed",
+    "test": "bun test"
   },
   "dependencies": {
     "@dcc-web/shared": "*",

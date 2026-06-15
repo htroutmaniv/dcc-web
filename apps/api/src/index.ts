@@ -11,6 +11,7 @@ import {
   trackGameLeave,
 } from './lib/game-presence.js';
 import { getUserIdFromSocketCookie } from './lib/game-socket.js';
+import { scheduleDataRetention } from './services/data-retention.js';
 
 const app = await buildApp();
 
@@ -87,3 +88,5 @@ io.on('connection', (socket) => {
 });
 
 app.log.info(`API listening on ${config.host}:${config.port}`);
+
+scheduleDataRetention(app.log);

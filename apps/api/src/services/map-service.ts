@@ -321,27 +321,177 @@ export async function deleteGameMap(
 
 const PC_COLORS = ['#4a90d9', '#50c878', '#e8a838', '#b57edc', '#e85d5d', '#5bc0be'];
 
-async function pruneOrphanMapTokens(
+type CharacterRow = {
+  id: string;
+  status: string;
+  name: string;
+  stats: unknown;
+};
+
+type MonsterRow = {
+  id: string;
+  name: string;
+  stats: unknown;
+};
+
+type ExistingToken = {
+  id: string;
+  kind: string;
+  characterId: string | null;
+  monsterId: string | null;
+  label: string;
+  zone: string;
+};
+
+export type MapTokenSyncPlan = {
+  toCreate: Prisma.MapTokenCreateManyInput[];
+  toUpdate: { id: string; data: Prisma.MapTokenUpdateInput }[];
+  toDeleteIds: string[];
+};
+
+/** Pure sync plan from loaded rows — used by syncMapTokens. */
+export function planMapTokenSync(
   mapId: string,
-  _gameId: string,
-  characters: { id: string; status: string }[],
-  monsters: { id: string }[],
-): Promise<void> {
-  const charById = new Map(characters.map((c) => [c.id, c.status]));
+  allCharacters: CharacterRow[],
+  monsters: MonsterRow[],
+  existing: ExistingToken[],
+): MapTokenSyncPlan {
+  const toCreate: Prisma.MapTokenCreateManyInput[] = [];
+  const toUpdate: { id: string; data: Prisma.MapTokenUpdateInput }[] = [];
+  const toDeleteIds = new Set<string>();
+
+  const charById = new Map(allCharacters.map((c) => [c.id, c]));
   const monsterIds = new Set(monsters.map((m) => m.id));
-  const tokens = await prisma.mapToken.findMany({ where: { mapId } });
-  for (const token of tokens) {
+
+  let pcIndex = 0;
+  const alive = allCharacters.filter((c) => c.status === 'alive');
+  for (const c of alive) {
+    const token = existing.find((t) => t.characterId === c.id);
+    const visible = isCharacterMapTokenVisible({
+      stats: c.stats as { custom?: Record<string, unknown> },
+    });
+    if (!visible) {
+      if (token) toDeleteIds.add(token.id);
+      continue;
+    }
+    if (!token) {
+      toCreate.push({
+        mapId,
+        kind: 'pc',
+        characterId: c.id,
+        label: c.name,
+        x: 2 + pcIndex,
+        y: 2,
+        zone: 'map',
+        color: PC_COLORS[pcIndex % PC_COLORS.length]!,
+      });
+    } else if (token.label !== c.name) {
+      toUpdate.push({ id: token.id, data: { label: c.name } });
+    }
+    pcIndex += 1;
+  }
+
+  const dead = allCharacters.filter((c) => c.status === 'dead');
+  for (const c of dead) {
+    const token = existing.find((t) => t.characterId === c.id);
+    const visible = isCharacterMapTokenVisible({
+      stats: c.stats as { custom?: Record<string, unknown> },
+    });
+    if (!visible) {
+      if (token) toDeleteIds.add(token.id);
+      continue;
+    }
+    if (token) {
+      if (token.label !== c.name) {
+        toUpdate.push({ id: token.id, data: { label: c.name } });
+      }
+      continue;
+    }
+    toCreate.push({
+      mapId,
+      kind: 'pc',
+      characterId: c.id,
+      label: c.name,
+      x: 2 + pcIndex,
+      y: 2,
+      zone: 'map',
+      color: '#4a4a4a',
+    });
+    pcIndex += 1;
+  }
+
+  let monsterIndex = 0;
+  for (const m of monsters) {
+    const stats = m.stats as MonsterStatsJson | undefined;
+    const killed = isMonsterKilled({ stats });
+    const inPlay = isMonsterInPlay({ stats });
+    const token = existing.find((t) => t.monsterId === m.id);
+
+    if (!killed && !inPlay) {
+      if (token) toDeleteIds.add(token.id);
+      continue;
+    }
+
+    if (!token) {
+      toCreate.push({
+        mapId,
+        kind: 'monster',
+        monsterId: m.id,
+        label: m.name,
+        x: 8 + monsterIndex,
+        y: 2,
+        zone: 'map',
+        color: killed ? '#4a4a4a' : '#8b2635',
+      });
+      monsterIndex += 1;
+      continue;
+    }
+
+    const updates: Prisma.MapTokenUpdateInput = {};
+    if (token.label !== m.name) updates.label = m.name;
+    if (token.zone !== 'map') updates.zone = 'map';
+    if (Object.keys(updates).length > 0) {
+      toUpdate.push({ id: token.id, data: updates });
+    }
+    monsterIndex += 1;
+  }
+
+  for (const token of existing) {
+    if (toDeleteIds.has(token.id)) continue;
     if (token.characterId) {
-      const status = charById.get(token.characterId);
-      if (!status || status === 'archived') {
-        await prisma.mapToken.delete({ where: { id: token.id } });
+      const ch = charById.get(token.characterId);
+      if (!ch || ch.status === 'archived') {
+        toDeleteIds.add(token.id);
       }
       continue;
     }
     if (token.kind === 'monster' && (!token.monsterId || !monsterIds.has(token.monsterId))) {
-      await prisma.mapToken.delete({ where: { id: token.id } });
+      toDeleteIds.add(token.id);
     }
   }
+
+  return { toCreate, toUpdate, toDeleteIds: [...toDeleteIds] };
+}
+
+async function applyMapTokenSyncPlan(plan: MapTokenSyncPlan): Promise<void> {
+  const { toCreate, toUpdate, toDeleteIds } = plan;
+  if (toDeleteIds.length === 0 && toCreate.length === 0 && toUpdate.length === 0) {
+    return;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (toDeleteIds.length > 0) {
+      await tx.mapToken.deleteMany({ where: { id: { in: toDeleteIds } } });
+    }
+    if (toCreate.length > 0) {
+      await tx.mapToken.createMany({ data: toCreate });
+    }
+    if (toUpdate.length > 0) {
+      await Promise.all(
+        toUpdate.map((row) => tx.mapToken.update({ where: { id: row.id }, data: row.data })),
+      );
+    }
+  });
 }
 
 export async function ensureCharacterMapToken(
@@ -383,123 +533,33 @@ export async function ensureCharacterMapToken(
 
 export async function syncMapTokens(gameId: string, mapId: string): Promise<GameMapDto> {
   await prisma.gameMap.findFirstOrThrow({ where: { id: mapId, gameId } });
-  const allCharacters = await prisma.character.findMany({
-    where: { gameId },
-    select: { id: true, status: true, name: true, stats: true },
-    orderBy: { name: 'asc' },
-  });
-  const characters = allCharacters.filter((c) => c.status === 'alive');
-  const monsters = await prisma.gameMonster.findMany({
-    where: { gameId },
-    orderBy: { sortOrder: 'asc' },
-  });
 
-  const existing = await prisma.mapToken.findMany({ where: { mapId } });
-  let pcIndex = 0;
-
-  for (const c of characters) {
-    const token = existing.find((t) => t.characterId === c.id);
-    if (!isCharacterMapTokenVisible({ stats: c.stats as { custom?: Record<string, unknown> } })) {
-      if (token) await prisma.mapToken.delete({ where: { id: token.id } });
-      continue;
-    }
-    if (!token) {
-      const created = await prisma.mapToken.create({
-        data: {
-          mapId,
-          kind: 'pc',
-          characterId: c.id,
-          label: c.name,
-          x: 2 + pcIndex,
-          y: 2,
-          zone: 'map',
-          color: PC_COLORS[pcIndex % PC_COLORS.length]!,
-        },
-      });
-      existing.push(created);
-    } else if (token.label !== c.name) {
-      await prisma.mapToken.update({
-        where: { id: token.id },
-        data: { label: c.name },
-      });
-    }
-    pcIndex += 1;
-  }
-
-  for (const c of allCharacters.filter((ch) => ch.status === 'dead')) {
-    const token = existing.find((t) => t.characterId === c.id);
-    const visible = isCharacterMapTokenVisible({
-      stats: c.stats as { custom?: Record<string, unknown> },
-    });
-    if (!visible) {
-      if (token) await prisma.mapToken.delete({ where: { id: token.id } });
-      continue;
-    }
-    if (token) {
-      if (token.label !== c.name) {
-        await prisma.mapToken.update({
-          where: { id: token.id },
-          data: { label: c.name },
-        });
-      }
-      continue;
-    }
-    const created = await prisma.mapToken.create({
-      data: {
-        mapId,
-        kind: 'pc',
-        characterId: c.id,
-        label: c.name,
-        x: 2 + pcIndex,
-        y: 2,
-        zone: 'map',
-        color: '#4a4a4a',
+  const [allCharacters, monsters, existing] = await Promise.all([
+    prisma.character.findMany({
+      where: { gameId },
+      select: { id: true, status: true, name: true, stats: true },
+      orderBy: { name: 'asc' },
+    }),
+    prisma.gameMonster.findMany({
+      where: { gameId },
+      select: { id: true, name: true, stats: true },
+      orderBy: { sortOrder: 'asc' },
+    }),
+    prisma.mapToken.findMany({
+      where: { mapId },
+      select: {
+        id: true,
+        kind: true,
+        characterId: true,
+        monsterId: true,
+        label: true,
+        zone: true,
       },
-    });
-    existing.push(created);
-    pcIndex += 1;
-  }
+    }),
+  ]);
 
-  let monsterIndex = 0;
-  for (const m of monsters) {
-    const stats = m.stats as MonsterStatsJson | undefined;
-    const killed = isMonsterKilled({ stats });
-    const inPlay = isMonsterInPlay({ stats });
-    const token = existing.find((t) => t.monsterId === m.id);
-
-    if (!killed && !inPlay) {
-      if (token) await prisma.mapToken.delete({ where: { id: token.id } });
-      continue;
-    }
-
-    if (!token) {
-      const created = await prisma.mapToken.create({
-        data: {
-          mapId,
-          kind: 'monster',
-          monsterId: m.id,
-          label: m.name,
-          x: 8 + monsterIndex,
-          y: 2,
-          zone: 'map',
-          color: killed ? '#4a4a4a' : '#8b2635',
-        },
-      });
-      existing.push(created);
-      monsterIndex += 1;
-      continue;
-    }
-
-    const updates: Prisma.MapTokenUpdateInput = {};
-    if (token.label !== m.name) updates.label = m.name;
-    if (token.zone !== 'map') updates.zone = 'map';
-    if (Object.keys(updates).length > 0) {
-      await prisma.mapToken.update({ where: { id: token.id }, data: updates });
-    }
-    monsterIndex += 1;
-  }
-
-  await pruneOrphanMapTokens(mapId, gameId, allCharacters, monsters);
+  const plan = planMapTokenSync(mapId, allCharacters, monsters, existing);
+  await applyMapTokenSyncPlan(plan);
   return loadMapDto(mapId);
 }
 
