@@ -60,7 +60,7 @@ All commands run from the repo root unless noted.
 
 | Script | Description |
 |--------|-------------|
-| `bun run setup` | First-time setup: ensure env files, install deps, generate Prisma client, start dev nginx stack, migrate DB, seed reference data (occupations, names, catalog). |
+| `bun run setup` | First-time setup: ensure env files, install deps, generate Prisma client, start Docker **Postgres + nginx**, migrate DB, seed reference data (occupations, names, catalog). |
 | `bun run build` | Production build: compile `shared` → `api` → `web`. |
 | `bun run build:shared` | Compile `@dcc-web/shared` only (API server auto-builds shared on `bun server`). |
 | `bun run typecheck` | Type-check all workspaces (`shared` + `api` build, then `web` tsc). |
@@ -84,11 +84,11 @@ All commands run from the repo root unless noted.
 
 | Script | Description |
 |--------|-------------|
-| `bun run prod` | Full production startup (production profile): stop prior prod processes, build all packages, run prod migrations, recreate nginx with TLS, start compiled API + Vite preview. |
+| `bun run prod` | Full production startup (production profile): stop prior prod processes, build all packages, start **Postgres** (wait for healthy), run prod migrations, recreate **nginx** with TLS, start compiled API + Vite preview. |
 | `bun run start` | Alias for `bun run prod`. |
 | `bun run start:server` | Run compiled API only (`bun dist/index.js`) — normally invoked by `prod`. |
 | `bun run start:bundler` | Run Vite preview server (`:5173`) — normally invoked by `prod`. |
-| `bun run stack:prod` | Recreate nginx container for production (TLS / `:443`) without the full prod pipeline. |
+| `bun run stack:prod` | Start Postgres + recreate nginx for production (TLS / `:443`) without building or starting API/web. |
 | `bun run stop:prod` | Stop production API and preview processes. |
 
 Production deployment guide: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)

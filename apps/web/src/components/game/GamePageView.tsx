@@ -158,39 +158,25 @@ export function GamePageView({ vm }: GamePageViewProps) {
             overflow: 'hidden',
           }}
         >
-          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
-            {selectedCharacter ? (
-              <Suspense fallback={<CircularProgress sx={{ m: 'auto' }} />}>
-                <CharacterSheetView
-                  character={selectedCharacter}
-                  gameId={gameId}
-                  partyCharacters={characters}
-                  partyMonsters={monsters}
-                  isDm={isDm}
-                  players={players}
-                  dmUserId={detail.game.dmUserId}
-                  onClose={() => setSelectedCharacter(null)}
-                  onCharacterUpdated={applyCharacterFromServer}
-                  onMonsterUpdated={handleMonsterUpdated}
-                  onInventoryTransferred={handleInventoryTransferred}
-                  onMarkDead={characterActions.markDead}
-                  onRevive={characterActions.reviveCharacter}
-                  onArchive={characterActions.archiveCharacter}
-                />
-              </Suspense>
-            ) : selectedMonster && isDm ? (
-              <Suspense fallback={<CircularProgress sx={{ m: 'auto' }} />}>
-                <MonsterSheetView
-                  gameId={gameId}
-                  monster={selectedMonster}
-                  partyCharacters={characters}
-                  partyMonsters={monsters}
-                  onClose={() => setSelectedMonster(null)}
-                  onMonsterUpdated={handleMonsterUpdated}
-                  onInventoryTransferred={handleInventoryTransferred}
-                />
-              </Suspense>
-            ) : (
+          <Box
+            sx={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              minWidth: 0,
+              minHeight: 0,
+              position: 'relative',
+            }}
+          >
+            <Box
+              sx={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0,
+              }}
+            >
               <GameStage
                 gameId={gameId}
                 isDm={isDm}
@@ -275,6 +261,63 @@ export function GamePageView({ vm }: GamePageViewProps) {
                   isDm ? (roll) => combatActions.setApplyDamageRoll(roll) : undefined
                 }
               />
+            </Box>
+            {selectedCharacter && (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  inset: 0,
+                  zIndex: 2,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  bgcolor: 'background.default',
+                  overflow: 'auto',
+                }}
+              >
+                <Suspense fallback={<CircularProgress sx={{ m: 'auto' }} />}>
+                  <CharacterSheetView
+                    character={selectedCharacter}
+                    gameId={gameId}
+                    partyCharacters={characters}
+                    partyMonsters={monsters}
+                    isDm={isDm}
+                    players={players}
+                    dmUserId={detail.game.dmUserId}
+                    onClose={() => setSelectedCharacter(null)}
+                    onCharacterUpdated={applyCharacterFromServer}
+                    onMonsterUpdated={handleMonsterUpdated}
+                    onInventoryTransferred={handleInventoryTransferred}
+                    onMarkDead={characterActions.markDead}
+                    onRevive={characterActions.reviveCharacter}
+                    onArchive={characterActions.archiveCharacter}
+                  />
+                </Suspense>
+              </Box>
+            )}
+            {selectedMonster && isDm && !selectedCharacter && (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  inset: 0,
+                  zIndex: 2,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  bgcolor: 'background.default',
+                  overflow: 'auto',
+                }}
+              >
+                <Suspense fallback={<CircularProgress sx={{ m: 'auto' }} />}>
+                  <MonsterSheetView
+                    gameId={gameId}
+                    monster={selectedMonster}
+                    partyCharacters={characters}
+                    partyMonsters={monsters}
+                    onClose={() => setSelectedMonster(null)}
+                    onMonsterUpdated={handleMonsterUpdated}
+                    onInventoryTransferred={handleInventoryTransferred}
+                  />
+                </Suspense>
+              </Box>
             )}
           </Box>
           <GameSidebar

@@ -63,6 +63,11 @@ export function useGameDetail(gameId: string | undefined) {
     return data;
   }, [gameId]);
 
+  const isAccessError = useCallback(
+    (e: unknown) => e instanceof ApiError && (e.status === 403 || e.status === 404),
+    [],
+  );
+
   return {
     detail,
     setDetail,
@@ -76,7 +81,7 @@ export function useGameDetail(gameId: string | undefined) {
     applyInitiative,
     applyGameSettingsPatch,
     formatLoadError: formatError,
-    isAccessError: (e: unknown) => e instanceof ApiError && (e.status === 403 || e.status === 404),
+    isAccessError,
   };
 }
 

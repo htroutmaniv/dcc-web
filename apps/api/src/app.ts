@@ -32,6 +32,7 @@ declare module 'fastify' {
 export async function buildApp() {
   const app = Fastify({
     logger: true,
+    trustProxy: true,
     genReqId: (req) => (req.headers['x-request-id'] as string | undefined) ?? randomUUID(),
     requestIdHeader: 'x-request-id',
     requestIdLogLabel: 'reqId',

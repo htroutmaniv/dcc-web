@@ -120,10 +120,6 @@ export function useTacticalMapViewport({
   }, [mapId, gridPreset, fitToView]);
 
   useEffect(() => {
-    fitToView();
-  }, [gridW, gridH, fitToView]);
-
-  useEffect(() => {
     const { scale: s, position: p } = viewRef.current;
     const clamped = clampViewport(s, p, viewport.width, viewport.height, gridW, gridH);
     if (clamped.scale !== s || clamped.pos.x !== p.x || clamped.pos.y !== p.y) {

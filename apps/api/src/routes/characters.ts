@@ -3,6 +3,7 @@ import {
   patchCharacterSchema,
   replaceCharacterItemsSchema,
   warnUnknownCharacterStatsCustomKeys,
+  MAP_TOKEN_VISIBLE_KEY,
 } from '@dcc-web/shared';
 import type { CharacterStats } from '@dcc-web/shared';
 import type { Prisma } from '@prisma/client';
@@ -64,12 +65,30 @@ export async function characterRoutes(app: FastifyInstance) {
         gameId: string;
         ownerUserId?: string;
         status?: 'alive' | 'dead' | 'archived' | { in: ('alive' | 'dead')[] };
+        OR?: Array<
+          | { ownerUserId: string; status: 'alive' }
+          | { status: 'dead' }
+        >;
       } = { gameId };
-      if (!access.isDm) where.ownerUserId = access.userId;
+
       if (status === 'alive' || status === 'dead' || status === 'archived') {
-        where.status = status;
+        if (!access.isDm) {
+          if (status === 'dead') {
+            where.status = 'dead';
+          } else {
+            where.ownerUserId = access.userId;
+            where.status = status;
+          }
+        } else {
+          where.status = status;
+        }
       } else if (includeDead === 'true' && access.isDm) {
         where.status = { in: ['alive', 'dead'] };
+      } else if (!access.isDm) {
+        where.OR = [
+          { ownerUserId: access.userId, status: 'alive' },
+          { status: 'dead' },
+        ];
       } else {
         where.status = 'alive';
       }
@@ -213,6 +232,14 @@ export async function characterRoutes(app: FastifyInstance) {
           ? parsed.data.ownerUserId
           : undefined;
 
+      const existingCustom = (
+        existing.stats as { custom?: Record<string, unknown> } | null | undefined
+      )?.custom;
+      const nextMapTokenVisible = parsed.data.stats?.custom?.[MAP_TOKEN_VISIBLE_KEY];
+      const mapTokenVisibilityChanged =
+        nextMapTokenVisible !== undefined &&
+        Boolean(nextMapTokenVisible) !== Boolean(existingCustom?.[MAP_TOKEN_VISIBLE_KEY]);
+
       if (ownerChange !== undefined) {
         try {
           await assertValidCharacterOwner(
@@ -327,7 +354,8 @@ export async function characterRoutes(app: FastifyInstance) {
       } else if (
         statusChange === 'dead' ||
         statusChange === 'alive' ||
-        hpMarkDead
+        hpMarkDead ||
+        mapTokenVisibilityChanged
       ) {
         await syncActiveMapTokens(existing.gameId);
         publish(request.server.io, existing.gameId, {

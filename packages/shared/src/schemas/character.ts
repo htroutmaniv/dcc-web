@@ -37,7 +37,7 @@ export const characterStatsCustomSchema = z
     attackTargetRef: z.string().max(128).optional(),
     occupation: z.string().max(120).optional(),
     race: z.string().max(64).optional(),
-    startingFunds: z.number().optional(),
+    startingFunds: z.string().max(32).optional(),
     luckySign: z.string().max(200).optional(),
     languages: z.union([z.string(), z.array(z.string())]).optional(),
   })

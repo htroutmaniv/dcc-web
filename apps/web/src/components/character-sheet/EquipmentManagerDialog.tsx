@@ -105,13 +105,26 @@ export function EquipmentManagerDialog({
     setError(null);
     try {
       const body = {
-        items: items.map((item) => ({
-          category: item.category,
-          name: item.name,
-          quantity: item.quantity,
-          notes: item.notes,
-          properties: item.properties,
-        })),
+        items: items.map((item) => {
+          const row: {
+            id?: string;
+            category: string;
+            name: string;
+            quantity: number;
+            notes: string;
+            properties: Record<string, unknown>;
+          } = {
+            category: item.category,
+            name: item.name,
+            quantity: item.quantity,
+            notes: item.notes,
+            properties: item.properties,
+          };
+          if (item.id && !item.id.startsWith('new-')) {
+            row.id = item.id;
+          }
+          return row;
+        }),
       };
       const res = await api<{ character: Character }>(
         `/characters/${character.id}/items`,

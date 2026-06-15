@@ -21,10 +21,7 @@ export function useCharacters(
       `/games/${gameId}/characters${q}`,
     );
     setCharacters(data.characters);
-    setCharacterAttackTargetById((prev) => ({
-      ...readCharacterAttackTargetMap(data.characters),
-      ...prev,
-    }));
+    setCharacterAttackTargetById(readCharacterAttackTargetMap(data.characters));
     setSelectedCharacter((prev) => {
       if (!prev) return null;
       return data.characters.find((c) => c.id === prev.id) ?? null;
@@ -34,11 +31,14 @@ export function useCharacters(
 
   const applyCharacterFromServer = useCallback(
     (updated: Character) => {
+      const isPartyDead =
+        updated.status === 'dead' && updated.ownerUserId !== userId;
       if (
         !isDm &&
         updated.ownerUserId &&
         userId &&
-        updated.ownerUserId !== userId
+        updated.ownerUserId !== userId &&
+        !isPartyDead
       ) {
         return;
       }
@@ -51,7 +51,10 @@ export function useCharacters(
         if (idx >= 0) {
           return prev.map((c) => (c.id === updated.id ? updated : c));
         }
-        return [...prev, updated];
+        if (isPartyDead || isDm) {
+          return [...prev, updated];
+        }
+        return prev;
       });
     },
     [isDm, userId],

@@ -72,7 +72,7 @@ bun scripts/ensure-env.ts   # creates missing files from *.example templates
 | `JWT_SECRET`, `DATABASE_URL`, `RESEND_API_KEY` | `.env` |
 | `PUBLIC_URL`, `CORS_ORIGIN`, `NGINX_TLS`, `LETSENCRYPT_DIR` | `.env.production` |
 
-`bun run prod` loads both files and recreates nginx with the production profile. You do **not** need to flip flags in a single `.env` when switching back to dev — use `bun run stack` (development profile) instead.
+`bun run prod` loads both files, starts Postgres + nginx, runs migrations, and launches API + web. You do **not** need to flip flags in a single `.env` when switching back to dev — use `bun run stack` (development profile) instead.
 
 Leave `ENABLE_DEV_LOGIN` unset in production so dev accounts are disabled.
 
@@ -141,11 +141,13 @@ Postgres is bound to **127.0.0.1:5432** only (not exposed on all interfaces).
 
 ## 6. Build and run
 
-**Option A — one command** (builds once, starts API + web together):
+**Option A — one command** (builds once, starts Postgres + nginx + API + web):
 
 ```bash
 bun run prod
 ```
+
+Starts Docker **Postgres** (waits for healthy), applies migrations, then recreates **nginx** and launches API + web on the host.
 
 (No need to set `NODE_ENV` manually — the production profile sets it.)
 
@@ -224,6 +226,7 @@ See previous sections for `dcc-api.service` and `dcc-web.service` units pointing
 | Port 443 already in use | Another nginx/IIS service — stop it or use one stack only |
 | 502 Bad Gateway | API or vite preview not running on host |
 | `DATABASE_URL must be set in production` | Add `DATABASE_URL` to `.env` (localhost/127.0.0.1 is fine — Postgres runs on the host loopback in this layout) |
+| Game page slow / many `429 Rate limit exceeded` in API logs | Rebuild and restart API after proxy/rate-limit fixes. nginx must send `X-Forwarded-For`; API uses `trustProxy` and per-user buckets for logged-in traffic. |
 | Socket.IO fails / sync drops | Rebuild nginx after template changes (`docker compose build nginx && docker compose up -d nginx`). Check browser console for `[game socket]` messages. API logs show `socket connected` / `socket disconnected`. |
 | Session cookie not set | Use HTTPS; check `NODE_ENV=production` |
 | Verification emails not sent | Resend domain + `RESEND_API_KEY` / `MAIL_FROM` |

@@ -8,6 +8,7 @@ import { resolveGameMemberAccess } from '../lib/game-access.js';
 import { publish } from '../lib/game-events.js';
 import { prisma } from '../lib/prisma.js';
 import { applyDamageToTarget, listGameDiceRolls, rollAndPersist } from '../services/dice.js';
+import { syncActiveMapTokens } from '../services/map-service.js';
 import {
   addCharacterToInitiativeFromRoll,
   reconcileInitiativeAfterCharacterDeath,
@@ -125,6 +126,11 @@ export async function diceRoutes(app: FastifyInstance) {
                 actorUserId: request.userId,
               });
             }
+            await syncActiveMapTokens(gameId);
+            publish(request.server.io, gameId, {
+              type: 'map:updated',
+              actorUserId: request.userId,
+            });
           }
         }
       }

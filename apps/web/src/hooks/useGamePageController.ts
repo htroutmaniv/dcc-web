@@ -22,6 +22,7 @@ import {
 } from './game';
 import { useGameDeleteNotifications } from './useGameDeleteNotifications';
 import { formatError } from '../utils/errors';
+import { findStaleAttackTargetCharacterIds } from '../utils/character-attack-target';
 
 export function useGamePageController(gameId: string | undefined) {
   const navigate = useNavigate();
@@ -125,7 +126,6 @@ export function useGamePageController(gameId: string | undefined) {
     characterAttackTargetById,
     setCharacterAttackTargetById,
     applyCharacterFromServer,
-    loadCharacters,
     loadMaps,
     selectedCharacter,
     setSelectedCharacter,
@@ -201,32 +201,36 @@ export function useGamePageController(gameId: string | undefined) {
     corpseLootRef,
   });
 
-  const refreshGame = useCallback(async () => {
-    const data = await loadDetail();
-    if (data?.game.settings?.activeMapId) {
-      setActiveMapId(data.game.settings.activeMapId);
-    }
-    await loadMaps();
-  }, [loadDetail, loadMaps, setActiveMapId]);
+  const lastGameFetchRef = useRef(0);
+  const detailLoaded = detail !== null;
 
   useEffect(() => {
     if (!gameId) return;
     setLoading(true);
-    void Promise.all([refreshGame(), loadDiceRolls()])
-      .catch((e) => {
+    void (async () => {
+      try {
+        const data = await loadDetail();
+        lastGameFetchRef.current = Date.now();
+        if (data?.game.settings?.activeMapId) {
+          setActiveMapId(data.game.settings.activeMapId);
+        }
+        await Promise.all([loadMaps(), loadDiceRolls()]);
+      } catch (e) {
         setError(formatError(e));
         if (isAccessError(e)) {
           navigate('/');
         }
-      })
-      .finally(() => setLoading(false));
-  }, [gameId, refreshGame, loadDiceRolls, navigate, setLoading, isAccessError]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [gameId, loadDetail, loadMaps, loadDiceRolls, navigate, setLoading, isAccessError]);
 
   useEffect(() => {
-    if (!detail) return;
+    if (!gameId || !detailLoaded) return;
     void loadCharacters().catch((e) => setError(formatError(e)));
-    void loadMonsters().catch(() => {});
-  }, [detail, loadCharacters, loadMonsters]);
+    if (isDm) void loadMonsters().catch(() => {});
+  }, [gameId, detailLoaded, isDm, loadCharacters, loadMonsters]);
 
   useEffect(() => {
     if (initiativeActive && corpseLootOpen) {
@@ -235,8 +239,32 @@ export function useGamePageController(gameId: string | undefined) {
     }
   }, [initiativeActive, corpseLootOpen]);
 
-  useGameRealtimeSync(gameId, Boolean(gameId && detail), user?.id, detailRef, {
-    loadDetail: refreshGame,
+  const clearingAttackTargetsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    const stale = findStaleAttackTargetCharacterIds(
+      characters,
+      monsters,
+      npcTokens,
+      characterAttackTargetById,
+    );
+    for (const characterId of stale) {
+      if (clearingAttackTargetsRef.current.has(characterId)) continue;
+      clearingAttackTargetsRef.current.add(characterId);
+      void characterActions.setCharacterAttackTarget(characterId, null).finally(() => {
+        clearingAttackTargetsRef.current.delete(characterId);
+      });
+    }
+  }, [
+    characters,
+    monsters,
+    npcTokens,
+    characterAttackTargetById,
+    characterActions.setCharacterAttackTarget,
+  ]);
+
+  useGameRealtimeSync(gameId, Boolean(gameId && detail), user?.id, detailRef, lastGameFetchRef, {
+    loadDetail,
     loadDiceRolls,
     loadCharacters,
     loadMonsters,
@@ -246,6 +274,12 @@ export function useGamePageController(gameId: string | undefined) {
     appendRollLog,
     setCombatRollByCharacter: combatActions.setCombatRollByCharacter,
     setPresenceUsers,
+    onCharacterUpsert: (character) => {
+      applyCharacterFromServer(character);
+      if (character.status === 'dead') {
+        void loadMaps();
+      }
+    },
   });
 
   useGameDeleteNotifications({ gameId });

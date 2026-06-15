@@ -66,7 +66,7 @@ Then restart `bun server` once after shared exports change (or leave `shared` wa
 | Command | What |
 |---------|------|
 | `bun run stack` | Postgres + nginx (**development** profile, port 8080) |
-| `bun run stack:prod` | Recreate nginx with **production** profile (TLS / 443) |
+| `bun run stack:prod` | Postgres + recreate nginx with **production** profile (TLS / 443) |
 | `bun server` | API with `bun --watch` (development profile) |
 | `bun bundler` | Vite dev server (development profile) |
 | `bun run shared` | `tsc --watch` on shared package |

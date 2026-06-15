@@ -1,15 +1,38 @@
 import rateLimit from '@fastify/rate-limit';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { getUserIdFromRequest, normalizeEmailForRateLimit } from '../lib/request-user.js';
+
+/** Per-client bucket: authenticated users get their own limit; guests use IP. */
+export function rateLimitClientKey(app: FastifyInstance, request: FastifyRequest): string {
+  const userId = getUserIdFromRequest(app, request);
+  if (userId) return `user:${userId}`;
+  return `ip:${request.ip}`;
+}
+
+/**
+ * Paths excluded from the global bucket. Liveness probes and static map images
+ * (one fetch per map, cacheable) are exempt; everything else keeps a safety net.
+ */
+export function shouldSkipGlobalRateLimit(
+  _app: FastifyInstance,
+  request: FastifyRequest,
+): boolean {
+  const path = request.url.split('?')[0] ?? request.url;
+  if (path === '/health' || path === '/ready') return true;
+  if (path.startsWith('/uploads/maps/')) return true;
+  return false;
+}
 
 export async function registerRateLimit(app: FastifyInstance) {
   await app.register(rateLimit, {
     global: true,
-    max: 300,
+    // Generous per-user cap: a game page load is ~5-10 requests; this leaves
+    // ample headroom for active play while still throttling runaway loops.
+    max: 600,
     timeWindow: '1 minute',
     hook: 'onRequest',
-    keyGenerator: (request) => request.ip,
-    allowList: (request) => request.url === '/health',
+    keyGenerator: (request) => rateLimitClientKey(app, request),
+    allowList: (request) => shouldSkipGlobalRateLimit(app, request),
   });
 }
 

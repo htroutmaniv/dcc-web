@@ -5,6 +5,9 @@ import type { Character, GameDetail, GamePresenceUser } from '../../types/game';
 import type { DiceRollLogEntry } from '../../types/dice-roll-log';
 import { parseRollLogEntry } from '../../utils/roll-log';
 
+const ROOM_RESYNC_COOLDOWN_MS = 3000;
+const MAP_RELOAD_DEBOUNCE_MS = 250;
+
 type SyncCallbacks = {
   loadDetail: () => Promise<unknown>;
   loadDiceRolls: () => Promise<unknown>;
@@ -30,15 +33,27 @@ export function useGameRealtimeSync(
   enabled: boolean,
   userId: string | undefined,
   detailRef: React.RefObject<GameDetail | null>,
+  lastGameFetchRef: React.RefObject<number>,
   callbacks: SyncCallbacks,
 ) {
   const callbacksRef = useRef(callbacks);
   callbacksRef.current = callbacks;
+  const mapReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleLoadMaps = useCallback(() => {
+    if (mapReloadTimerRef.current) clearTimeout(mapReloadTimerRef.current);
+    mapReloadTimerRef.current = setTimeout(() => {
+      void callbacksRef.current.loadMaps().catch(() => {});
+    }, MAP_RELOAD_DEBOUNCE_MS);
+  }, []);
 
   const onConnected = useCallback(() => {
+    const lastFetch = lastGameFetchRef.current ?? 0;
+    if (Date.now() - lastFetch < ROOM_RESYNC_COOLDOWN_MS) return;
+    lastGameFetchRef.current = Date.now();
     void callbacksRef.current.loadDetail().catch(() => {});
     void callbacksRef.current.loadDiceRolls().catch(() => {});
-  }, []);
+  }, [lastGameFetchRef]);
 
   useGameSocket(
     gameId,
@@ -49,7 +64,6 @@ export function useGameRealtimeSync(
         void callbacksRef.current.loadMonsters().catch(() => {});
       },
       onCharacterUpsert: (character, actorUserId) => {
-        if (actorUserId && actorUserId === userId) return;
         if (callbacksRef.current.onCharacterUpsert) {
           callbacksRef.current.onCharacterUpsert(character, actorUserId);
           return;
@@ -97,12 +111,15 @@ export function useGameRealtimeSync(
         void callbacksRef.current.loadCharacters().catch(() => {});
         void callbacksRef.current.loadMonsters().catch(() => {});
         void callbacksRef.current.loadDetail().catch(() => {});
+        scheduleLoadMaps();
       },
-      onTokenUpdated: () => {
-        void callbacksRef.current.loadMaps().catch(() => {});
+      onTokenUpdated: ({ actorUserId }) => {
+        if (actorUserId && actorUserId === userId) return;
+        scheduleLoadMaps();
       },
-      onMapUpdated: () => {
-        void callbacksRef.current.loadMaps().catch(() => {});
+      onMapUpdated: (actorUserId) => {
+        if (actorUserId && actorUserId === userId) return;
+        scheduleLoadMaps();
       },
       onPresenceUpdated: (users) => {
         callbacksRef.current.setPresenceUsers(users);

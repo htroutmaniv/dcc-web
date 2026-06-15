@@ -29,7 +29,6 @@ export type CharacterActionsDeps = {
   characterAttackTargetById: Record<string, string>;
   setCharacterAttackTargetById: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   applyCharacterFromServer: (character: Character) => void;
-  loadCharacters: () => Promise<unknown>;
   loadMaps: () => Promise<unknown>;
   selectedCharacter: Character | null;
   setSelectedCharacter: React.Dispatch<React.SetStateAction<Character | null>>;
@@ -49,7 +48,6 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
     characterAttackTargetById,
     setCharacterAttackTargetById,
     applyCharacterFromServer,
-    loadCharacters,
     loadMaps,
     selectedCharacter,
     setSelectedCharacter,
@@ -82,7 +80,8 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
         `/games/${gameId}/characters`,
         { method: 'POST', body: JSON.stringify(payload) },
       );
-      await loadCharacters();
+      applyCharacterFromServer(character);
+      await loadMaps();
       setSelectedCharacter(character);
       setMenuTab('characters');
       setCreateDialogOpen(false);
@@ -208,7 +207,7 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
           custom: {
             ...prevCustom,
             ...(patch.equippedId !== undefined && {
-              [ACTIVE_LIGHT_ITEM_ID_KEY]: patch.equippedId ?? '',
+              [ACTIVE_LIGHT_ITEM_ID_KEY]: patch.equippedId,
             }),
             ...(patch.lit !== undefined && { [USING_LIGHT_SOURCE_KEY]: patch.lit }),
           },
@@ -368,14 +367,16 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
     status: 'alive' | 'dead' | 'archived',
   ) => {
     try {
-      await api(`/characters/${characterId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status }),
-      });
+      const updated = parseCharacterResponse(
+        await api<{ character: Character } | Character>(`/characters/${characterId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status }),
+        }),
+      );
+      if (updated) applyCharacterFromServer(updated);
       if (status === 'archived' && selectedCharacter?.id === characterId) {
         setSelectedCharacter(null);
       }
-      await loadCharacters();
       await loadMaps();
       onError(null);
     } catch (e) {
@@ -399,25 +400,20 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
     try {
       const prevStats = character.stats ?? {};
       const prevCustom = (prevStats.custom ?? {}) as Record<string, unknown>;
-      await api(`/characters/${character.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          stats: {
-            ...prevStats,
-            custom: { ...prevCustom, [MAP_TOKEN_VISIBLE_KEY]: visible },
-          },
+      const updated = parseCharacterResponse(
+        await api<{ character: Character } | Character>(`/characters/${character.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            stats: {
+              ...prevStats,
+              custom: { ...prevCustom, [MAP_TOKEN_VISIBLE_KEY]: visible },
+            },
+          }),
         }),
-      });
-      const existing = activeMapTokens.find((t) => t.characterId === character.id);
-      if (visible) {
-        await api(`/games/${gameId}/maps/${activeMapId}/characters/${character.id}/token`, {
-          method: 'POST',
-        });
-      } else if (existing) {
-        await api(`/tokens/${existing.id}`, { method: 'DELETE' });
-      }
+      );
+      if (updated) applyCharacterFromServer(updated);
+      await api(`/games/${gameId}/maps/${activeMapId}/sync-tokens`, { method: 'POST' });
       await loadMaps();
-      await loadCharacters();
       onError(null);
     } catch (e) {
       onError(formatError(e));

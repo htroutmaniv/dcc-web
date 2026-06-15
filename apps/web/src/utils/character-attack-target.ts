@@ -1,3 +1,9 @@
+import type { GameMonsterInstance } from '@dcc-web/shared';
+import {
+  isMonsterActive,
+  isMonsterInPlay,
+  isMonsterKilled,
+} from '@dcc-web/shared';
 import type { Character } from '../types/game';
 
 /** Value format: `monster:<uuid>` or `npc:<uuid>`. */
@@ -25,4 +31,36 @@ export function parseAttackTargetRef(
     return { type, id };
   }
   return null;
+}
+
+export function isAttackTargetRefValid(
+  ref: string,
+  monsters: GameMonsterInstance[],
+  npcTokens: { id: string }[],
+): boolean {
+  const parsed = parseAttackTargetRef(ref);
+  if (!parsed) return false;
+  if (parsed.type === 'npc') {
+    return npcTokens.some((t) => t.id === parsed.id);
+  }
+  const monster = monsters.find((m) => m.id === parsed.id);
+  if (!monster) return false;
+  return !isMonsterKilled(monster) && isMonsterActive(monster) && isMonsterInPlay(monster);
+}
+
+export function findStaleAttackTargetCharacterIds(
+  characters: Character[],
+  monsters: GameMonsterInstance[],
+  npcTokens: { id: string }[],
+  targetById: Record<string, string>,
+): string[] {
+  const stale: string[] = [];
+  for (const c of characters) {
+    const ref = targetById[c.id] ?? readCharacterAttackTargetMap([c])[c.id];
+    if (!ref) continue;
+    if (!isAttackTargetRefValid(ref, monsters, npcTokens)) {
+      stale.push(c.id);
+    }
+  }
+  return stale;
 }

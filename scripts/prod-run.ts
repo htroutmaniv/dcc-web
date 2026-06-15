@@ -3,6 +3,7 @@
  */
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { ensureNginx, ensurePostgres } from './docker-stack.js';
 
 const root = resolve(import.meta.dirname, '..');
 
@@ -55,8 +56,9 @@ process.on('SIGTERM', () => shutdown(0));
 
 run('bun', ['scripts/stop-prod.ts']);
 run('bun', ['run', 'build']);
+ensurePostgres();
 run('bun', ['run', 'db:migrate:prod']);
-run('docker', ['compose', 'up', '-d', '--force-recreate', 'nginx']);
+ensureNginx(true);
 
 children.push(spawnService('api', 'bun', ['run', 'start:server']));
 children.push(spawnService('web', 'bun', ['run', 'start:bundler']));
