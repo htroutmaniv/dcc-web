@@ -194,7 +194,7 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [x] Wire `bun run --filter @dcc-web/api test` into CI (replace build-only step).
 - [x] Add regression tests for Phase 2–3 work: optimistic initiative retry, batched `syncMapTokens`, decorator auth paths.
 
-> **Progress (2026-06-15):** Phase 4 in progress — `GamePage` is a 9-LOC orchestrator; controller + view split; web unit tests added; 4.4–4.6 landed.
+> **Progress (2026-06-15):** Phase 4 complete (4.1–4.6). All planned `.tsx` files ≤400 LOC. 4.2 deferred pending TanStack Query ADR.
 
 ---
 
@@ -232,14 +232,14 @@ Goal: from 1948 LOC + 79 hooks down to a ≤300-LOC orchestrator.
 - [ ] Strangler-fig migration: do `characters` first, validate, then do the rest.
 
 ### 4.3 Component file-size budget — M
-- [ ] Target ≤ 400 LOC per `.tsx` file. Files to split:
-  - [ ] `EquipmentManagerDialog.tsx` (934)
-  - [ ] `TacticalMapCanvas.tsx` (838) — already has `TokenRangeOverlay` + `MapTokenChip` internally; promote to siblings
-  - [ ] `Level0CharacterSheet.tsx` (802) — split by sheet section
-  - [ ] `CharacterSheetView.tsx` (617)
-  - [ ] `CharacterListItem.tsx` (557)
-  - [ ] `MonsterPanel.tsx` (532)
-  - [x] `ApplyDamageDialog.tsx` (512 → 138) — target lists in `ApplyDamageTargetLists.tsx`; tab/label logic in `utils/apply-damage-dialog.ts`
+- [x] Target ≤ 400 LOC per `.tsx` file. Original splits:
+  - [x] `EquipmentManagerDialog.tsx` (934 → 353) — `equipment-types.tsx`, `EquipmentItemFormDialog.tsx`, `EquipmentItemCategoryFields.tsx`
+  - [x] `TacticalMapCanvas.tsx` (838 → 285) — `MapTokenChip`, `TokenRangeOverlay`, `MapSceneLayer`, `useTacticalMapViewport`, `useMapDrawingInteraction`, `map-viewport-math.ts`
+  - [x] `Level0CharacterSheet.tsx` (802 → 86) — `level0/*` section components + `sheet-primitives.tsx`
+  - [x] `CharacterSheetView.tsx` (617 → 153) — `useCharacterSheetView.ts`, `CharacterSheetToolbar.tsx`
+  - [x] `MonsterPanel.tsx` (532 → 35) — `monster-panel/` spawn form, spawned list, state hook
+  - [x] `CharacterListItem.tsx` (557 → 171) — `character-list/*` siblings; `buildCombatTargetOptions` → `utils/combat-target-options.ts`
+  - [x] `ApplyDamageDialog.tsx` (512 → 138) — `ApplyDamageTargetLists.tsx`; tab/label logic in `utils/apply-damage-dialog.ts`
 
 ### 4.4 Code-splitting & bundle — S
 - [x] `React.lazy` for `GamePage`, `BestiaryPage` in `App.tsx`; wrap routes in `Suspense` with a small loading fallback.

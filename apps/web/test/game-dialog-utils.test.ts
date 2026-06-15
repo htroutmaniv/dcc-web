@@ -56,9 +56,15 @@ describe('apply-damage dialog helpers', () => {
       typeof resolveDefaultTargetLabel
     >[3];
 
-    expect(resolveDefaultTargetLabel({ type: 'character', id: 'c1' }, characters, monsters, npcTokens)).toBe('Alice');
-    expect(resolveDefaultTargetLabel({ type: 'monster', id: 'm1' }, characters, monsters, npcTokens)).toBe('Goblin');
-    expect(resolveDefaultTargetLabel({ type: 'npc', id: 'n1' }, characters, monsters, npcTokens)).toBe('Guard');
+    expect(
+      resolveDefaultTargetLabel({ type: 'character', id: 'c1' }, characters, monsters, npcTokens),
+    ).toBe('Alice');
+    expect(
+      resolveDefaultTargetLabel({ type: 'monster', id: 'm1' }, characters, monsters, npcTokens),
+    ).toBe('Goblin');
+    expect(
+      resolveDefaultTargetLabel({ type: 'npc', id: 'n1' }, characters, monsters, npcTokens),
+    ).toBe('Guard');
     expect(resolveDefaultTargetLabel(null, characters, monsters, npcTokens)).toBeNull();
   });
 });

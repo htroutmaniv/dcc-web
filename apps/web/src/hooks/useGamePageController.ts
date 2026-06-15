@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { buildCombatTargetOptions } from '../components/CharacterListItem';
+import { buildCombatTargetOptions } from '../utils/combat-target-options';
 import type { GameMenuTab } from '../components/GameSideMenu';
 import type { TransferInventoryResult } from '../components/inventory/TransferItemDialog';
 import { useAuth } from '../context/AuthContext';
