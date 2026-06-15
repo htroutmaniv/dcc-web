@@ -62,8 +62,8 @@ type MapTokenRow = {
   label: string;
   characterId: string | null;
   monsterId: string | null;
-  x: Prisma.Decimal;
-  y: Prisma.Decimal;
+  x: number;
+  y: number;
   zone: string;
   color: string;
   hpMax: number | null;
@@ -93,8 +93,8 @@ function toTokenDto(row: MapTokenRow): MapTokenDto {
     label: row.label,
     characterId: row.characterId,
     monsterId: row.monsterId,
-    x: Number(row.x),
-    y: Number(row.y),
+    x: row.x,
+    y: row.y,
     zone: row.zone,
     color: row.color,
     hpMax: row.hpMax,

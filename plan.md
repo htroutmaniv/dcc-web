@@ -116,13 +116,9 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [x] Decompose `Game.settings` JSON into typed columns; API composes `game.settings` at read time via `serializeGameForClient` / `composeGameSettingsFromRecord` (strict — no legacy JSON parser).
 
 ### 2.2 Optimistic concurrency on initiative writes — M
-- [ ] All `saveInitiative` callers now do:
-  - read `state` + `version`
-  - compute next state
-  - `update where { gameId, version }` data `{ state, version: { increment: 1 } }`
-  - on `RecordNotFound` → reload, reapply, retry once (max 3)
-- [ ] Wrap in a `withOptimisticRetry()` helper in `apps/api/src/lib/optimistic.ts`.
-- [ ] Add a regression test that fires two concurrent `advanceInitiativeTurn` calls and asserts exactly one wins.
+- [x] All initiative writes use `mutateInitiative`: read `state` + `version`, compute next, `update where { gameId, version }`, retry up to 3 on conflict.
+- [x] Wrap in a `withOptimisticRetry()` helper in `apps/api/src/lib/optimistic.ts`.
+- [x] Add a regression test that fires two concurrent `advanceInitiativeTurn` calls and asserts both apply sequentially (`apps/api/test/optimistic-initiative.test.ts`).
 
 ### 2.3 Map sync efficiency — M
 - [x] Rewrite `syncMapTokens` in `apps/api/src/services/map-service.ts` to:
@@ -138,12 +134,12 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
   - [x] Sweep orphan uploads in `data/uploads/maps/` not referenced by any `GameMap.imageUrl`
 
 ### 2.5 Map coords as floats — S
-- [ ] Migration: `MapToken.x`, `MapToken.y`, `MovementRequest.target_x/y` → `Float` (or `Numeric(7,2)` if you want fixed-point).
-- [ ] Remove the `Number(row.x)` conversions in `apps/api/src/services/map-service.ts`.
+- [x] Migration: `MapToken.x`, `MapToken.y`, `MovementRequest.target_x/y` → `DOUBLE PRECISION` (Prisma `Float`).
+- [x] Remove the `Number(row.x)` conversions in `apps/api/src/services/map-service.ts`.
 
 **Exit criteria:** no more JSON read-modify-write races; map sync is O(1) queries; data tables stop growing unbounded.
 
-> **Progress (2026-06-15):** 2.1, 2.3, and 2.4 complete. **2.2** (optimistic initiative) and **2.5** (float coords) remain.
+> **Progress (2026-06-15):** Phase 2 complete (2.1–2.5). Run `bun run db:migrate` to apply float-coords migration.
 
 ---
 
@@ -157,8 +153,8 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [ ] Add a 30-second LRU keyed by `userId:gameId` (configurable, off in test) to cut DB hits on socket-heavy games.
 
 ### 3.2 Break map ↔ monster service cycle — S
-- [ ] Create `apps/api/src/services/game-state.ts` to own cross-entity effects (e.g., `onMonsterDeleted(gameId, monsterId)` calls both `deleteTokensForMonster` and `syncMonsterGroupInitiative`).
-- [ ] Remove the dynamic `await import('./map-service.js')` from `monster-service.ts:421`.
+- [x] Create `apps/api/src/services/game-state.ts` to own cross-entity effects (`onMonsterDeleted` deletes map tokens, removes monster row, syncs initiative).
+- [x] Remove the dynamic `await import('./map-service.js')` from `monster-service.ts`.
 
 ### 3.3 Domain event facade — M
 - [ ] Add `apps/api/src/lib/game-events.ts` exposing `publish(gameId, event)` and `publishMany`.

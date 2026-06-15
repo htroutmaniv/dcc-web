@@ -5,6 +5,7 @@ import {
   type GameSettings,
 } from '@dcc-web/shared';
 import type { Prisma } from '@prisma/client';
+import { OptimisticLockConflict, withOptimisticRetry } from '../lib/optimistic.js';
 import { prisma } from '../lib/prisma.js';
 
 export const gameWithSettingsInclude = {
@@ -56,27 +57,82 @@ export async function loadInitiativeState(
   return parseGameInitiativeState(row?.state ?? null);
 }
 
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code: string }).code === 'P2002'
+  );
+}
+
+export type InitiativeMutator = (
+  current: GameInitiativeState | null,
+) => GameInitiativeState | null | Promise<GameInitiativeState | null>;
+
+/** Read-modify-write initiative with version-checked updates and automatic retry. */
+export async function mutateInitiative(
+  gameId: string,
+  mutate: InitiativeMutator,
+): Promise<{ settings: GameSettings; initiative: GameInitiativeState | null }> {
+  return withOptimisticRetry(async () => {
+    const row = await prisma.gameInitiative.findUnique({
+      where: { gameId },
+      select: { state: true, version: true },
+    });
+    const current = row ? parseGameInitiativeState(row.state) : null;
+    const next = await mutate(current);
+
+    if (!next?.active) {
+      if (row) {
+        const deleted = await prisma.gameInitiative.deleteMany({
+          where: { gameId, version: row.version },
+        });
+        if (deleted.count === 0) {
+          throw new OptimisticLockConflict(`Initiative delete lost race for game ${gameId}`);
+        }
+      }
+      return { settings: await loadGameSettings(gameId), initiative: null };
+    }
+
+    if (!row) {
+      try {
+        await prisma.gameInitiative.create({
+          data: {
+            gameId,
+            state: next as unknown as Prisma.InputJsonValue,
+            version: 1,
+          },
+        });
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          throw new OptimisticLockConflict(`Initiative create lost race for game ${gameId}`);
+        }
+        throw error;
+      }
+    } else {
+      const updated = await prisma.gameInitiative.updateMany({
+        where: { gameId, version: row.version },
+        data: {
+          state: next as unknown as Prisma.InputJsonValue,
+          version: { increment: 1 },
+        },
+      });
+      if (updated.count === 0) {
+        throw new OptimisticLockConflict(`Initiative update lost race for game ${gameId}`);
+      }
+    }
+
+    return { settings: await loadGameSettings(gameId), initiative: next };
+  });
+}
+
 export async function saveInitiative(
   gameId: string,
   initiative: GameInitiativeState | null,
 ): Promise<GameSettings> {
-  if (!initiative?.active) {
-    await prisma.gameInitiative.deleteMany({ where: { gameId } });
-  } else {
-    await prisma.gameInitiative.upsert({
-      where: { gameId },
-      create: {
-        gameId,
-        state: initiative as unknown as Prisma.InputJsonValue,
-        version: 1,
-      },
-      update: {
-        state: initiative as unknown as Prisma.InputJsonValue,
-        version: { increment: 1 },
-      },
-    });
-  }
-  return loadGameSettings(gameId);
+  const { settings } = await mutateInitiative(gameId, () => initiative);
+  return settings;
 }
 
 export async function patchGameSettingsColumns(

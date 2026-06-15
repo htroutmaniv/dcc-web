@@ -23,11 +23,12 @@ import type { Prisma } from '@prisma/client';
 import type { z } from 'zod';
 import { secureRandomInt } from '../lib/rng.js';
 import { prisma } from '../lib/prisma.js';
+import { onMonsterDeleted } from './game-state.js';
 import {
   loadGameWithSettings,
   loadInitiativeState,
+  mutateInitiative,
   readGameSettings,
-  saveInitiative,
 } from './game-settings-service.js';
 
 type SpawnInput = z.infer<typeof spawnMonstersSchema>;
@@ -400,11 +401,7 @@ export async function deleteGameMonster(
   gameId: string,
   monsterId: string,
 ): Promise<{ initiative: GameInitiativeState | null }> {
-  const { deleteTokensForMonster } = await import('./map-service.js');
-  await deleteTokensForMonster(monsterId);
-  await prisma.gameMonster.delete({ where: { id: monsterId, gameId } });
-  const initiative = await syncMonsterGroupInitiative(gameId);
-  return { initiative };
+  return onMonsterDeleted(gameId, monsterId);
 }
 
 /** Ensure monster initiative entries match current game settings and in-play monsters. */
@@ -413,15 +410,17 @@ export async function syncMonsterGroupInitiative(
 ): Promise<GameInitiativeState | null> {
   const game = await loadGameWithSettings(gameId);
   const gameSettings = readGameSettings(game);
-  const state = await loadInitiativeState(gameId);
 
-  if (gameSettings.sharedMonsterInitiative) {
-    return syncSharedMonsterGroupInitiative(gameId, state);
-  }
-  return syncIndividualMonsterInitiative(gameId, state);
+  const { initiative } = await mutateInitiative(gameId, async (state) => {
+    if (gameSettings.sharedMonsterInitiative) {
+      return computeSharedMonsterGroupInitiative(gameId, state);
+    }
+    return computeIndividualMonsterInitiative(gameId, state);
+  });
+  return initiative;
 }
 
-async function syncSharedMonsterGroupInitiative(
+async function computeSharedMonsterGroupInitiative(
   gameId: string,
   state: GameInitiativeState | null,
 ): Promise<GameInitiativeState | null> {
@@ -446,7 +445,6 @@ async function syncSharedMonsterGroupInitiative(
       active: order.length > 0,
       turnIndex: Math.min(state.turnIndex, Math.max(0, order.length - 1)),
     };
-    await saveInitiative(gameId, next.active ? next : null);
     return next.active ? next : null;
   }
 
@@ -484,11 +482,10 @@ async function syncSharedMonsterGroupInitiative(
     turnIndex: state?.turnIndex ?? 0,
     order,
   };
-  await saveInitiative(gameId, next);
   return next;
 }
 
-async function syncIndividualMonsterInitiative(
+async function computeIndividualMonsterInitiative(
   gameId: string,
   state: GameInitiativeState | null,
 ): Promise<GameInitiativeState | null> {
@@ -550,7 +547,6 @@ async function syncIndividualMonsterInitiative(
     active: order.length > 0,
     turnIndex: Math.min(state.turnIndex, Math.max(0, order.length - 1)),
   };
-  await saveInitiative(gameId, next.active ? next : null);
   return next.active ? next : null;
 }
 

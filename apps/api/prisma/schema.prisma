@@ -368,8 +368,8 @@ model MapToken {
   characterId  String?   @map("character_id") @db.Uuid
   monsterId    String?   @map("monster_id") @db.Uuid
   label        String
-  x            Decimal   @db.Decimal(12, 4)
-  y            Decimal   @db.Decimal(12, 4)
+  x            Float
+  y            Float
   zone         TokenZone @default(holding)
   color        String    @default("#c9a227")
   iconUrl      String?   @map("icon_url")
@@ -412,8 +412,8 @@ model MovementRequest {
   gameId         String                @map("game_id") @db.Uuid
   tokenId        String                @map("token_id") @db.Uuid
   requesterId    String                @map("requester_id") @db.Uuid
-  targetX        Decimal               @map("target_x") @db.Decimal(12, 4)
-  targetY        Decimal               @map("target_y") @db.Decimal(12, 4)
+  targetX        Float                 @map("target_x")
+  targetY        Float                 @map("target_y")
   targetZone     TokenZone             @map("target_zone")
   status         MovementRequestStatus @default(pending)
   createdAt      DateTime              @default(now()) @map("created_at")

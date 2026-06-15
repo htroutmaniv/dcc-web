@@ -15,6 +15,7 @@ import { secureRandomInt } from '../lib/rng.js';
 import { prisma } from '../lib/prisma.js';
 import {
   loadInitiativeState,
+  mutateInitiative,
   readInitiativeFromGame,
   saveInitiative,
 } from './game-settings-service.js';
@@ -47,22 +48,29 @@ async function finalizeInitiativeTurn(
   const shouldSkip = await buildCharacterSkipFn(gameId);
   const normalized = normalizeInitiativeTurnIndex(state, shouldSkip);
   if (
-    normalized.turnIndex !== state.turnIndex ||
-    normalized.round !== state.round
+    normalized.turnIndex === state.turnIndex &&
+    normalized.round === state.round
   ) {
-    await saveInitiative(gameId, normalized);
-    return normalized;
+    return state;
   }
-  return state;
+  const { initiative } = await mutateInitiative(gameId, async (current) => {
+    if (!current?.active) return null;
+    const skip = await buildCharacterSkipFn(gameId);
+    return normalizeInitiativeTurnIndex(current, skip);
+  });
+  return initiative ?? normalized;
 }
 
 /** Skip past a killed PC when initiative would land on them (keeps them in the order list). */
 export async function reconcileInitiativeAfterCharacterDeath(
   gameId: string,
 ): Promise<GameInitiativeState | null> {
-  const state = await loadInitiativeState(gameId);
-  if (!state?.active) return null;
-  return finalizeInitiativeTurn(gameId, state);
+  const { initiative } = await mutateInitiative(gameId, async (state) => {
+    if (!state?.active) return null;
+    const shouldSkip = await buildCharacterSkipFn(gameId);
+    return normalizeInitiativeTurnIndex(state, shouldSkip);
+  });
+  return initiative;
 }
 
 function rollInitiativeForMod(mod: number) {
@@ -121,17 +129,20 @@ export async function startGameInitiative(gameId: string): Promise<GameInitiativ
 export async function advanceGameInitiative(
   gameId: string,
 ): Promise<{ initiative: GameInitiativeState | null; mortalityUpdates: string[] }> {
-  const state = await loadInitiativeState(gameId);
-  if (!state?.active) return { initiative: null, mortalityUpdates: [] };
-
-  const shouldSkip = await buildCharacterSkipFn(gameId);
-  const next = advanceInitiativeTurn(state, shouldSkip);
   let mortalityUpdates: string[] = [];
-  if (next.round > state.round) {
-    mortalityUpdates = await tickDyingCharactersForNewRound(gameId);
-  }
-  await saveInitiative(gameId, next);
-  const initiative = await finalizeInitiativeTurn(gameId, next);
+  const { initiative: saved } = await mutateInitiative(gameId, async (state) => {
+    if (!state?.active) return null;
+    const shouldSkip = await buildCharacterSkipFn(gameId);
+    const next = advanceInitiativeTurn(state, shouldSkip);
+    if (next.round > state.round) {
+      mortalityUpdates = await tickDyingCharactersForNewRound(gameId);
+    }
+    return next;
+  });
+
+  if (!saved?.active) return { initiative: null, mortalityUpdates };
+
+  const initiative = await finalizeInitiativeTurn(gameId, saved);
   return { initiative, mortalityUpdates };
 }
 
@@ -147,29 +158,32 @@ export async function addCharacterToInitiativeFromRoll(params: {
   d20Roll: number;
   modifier: number;
 }): Promise<GameInitiativeState | null> {
-  const state = await loadInitiativeState(params.gameId);
-  if (!state?.active) return null;
-  if (isCharacterInInitiative(state, params.characterId)) return null;
+  const { initiative } = await mutateInitiative(params.gameId, async (state) => {
+    if (!state?.active) return null;
+    if (isCharacterInInitiative(state, params.characterId)) return state;
 
-  const character = await prisma.character.findFirst({
-    where: { id: params.characterId, gameId: params.gameId },
-    select: { id: true, name: true, status: true },
+    const character = await prisma.character.findFirst({
+      where: { id: params.characterId, gameId: params.gameId },
+      select: { id: true, name: true, status: true },
+    });
+    if (!character || character.status !== 'alive') return state;
+
+    const entry: InitiativeEntry = {
+      entryId: character.id,
+      kind: 'character',
+      characterId: character.id,
+      name: character.name,
+      initiative: params.initiative,
+      d20Roll: params.d20Roll,
+      modifier: params.modifier,
+    };
+    const order = sortInitiativeEntries([...state.order, entry]);
+    return { ...state, order };
   });
-  if (!character || character.status !== 'alive') return null;
 
-  const entry: InitiativeEntry = {
-    entryId: character.id,
-    kind: 'character',
-    characterId: character.id,
-    name: character.name,
-    initiative: params.initiative,
-    d20Roll: params.d20Roll,
-    modifier: params.modifier,
-  };
-  const order = sortInitiativeEntries([...state.order, entry]);
-  const next: GameInitiativeState = { ...state, order };
-  await saveInitiative(params.gameId, next);
-  return next;
+  if (!initiative?.active) return null;
+  if (!isCharacterInInitiative(initiative, params.characterId)) return null;
+  return initiative;
 }
 
 export async function endCharacterTurn(params: {
@@ -178,33 +192,37 @@ export async function endCharacterTurn(params: {
   isDm: boolean;
   characterId?: string;
 }): Promise<{ initiative: GameInitiativeState | null; mortalityUpdates: string[] }> {
-  const state = await loadInitiativeState(params.gameId);
-  if (!state?.active) return { initiative: null, mortalityUpdates: [] };
-
-  const shouldSkip = await buildCharacterSkipFn(params.gameId);
-
-  if (!params.isDm) {
-    if (!params.characterId) {
-      throw new Error('characterId required');
-    }
-    if (!isCharacterTurn(state, params.characterId, shouldSkip)) {
-      throw new Error('Not this character\'s turn');
-    }
-    const character = await prisma.character.findUnique({
-      where: { id: params.characterId },
-    });
-    if (!character || character.ownerUserId !== params.userId) {
-      throw new Error('Not your character');
-    }
-  }
-
-  const next = advanceInitiativeTurn(state, shouldSkip);
   let mortalityUpdates: string[] = [];
-  if (next.round > state.round) {
-    mortalityUpdates = await tickDyingCharactersForNewRound(params.gameId);
-  }
-  await saveInitiative(params.gameId, next);
-  const initiative = await finalizeInitiativeTurn(params.gameId, next);
+  const { initiative: saved } = await mutateInitiative(params.gameId, async (state) => {
+    if (!state?.active) return null;
+
+    const shouldSkip = await buildCharacterSkipFn(params.gameId);
+
+    if (!params.isDm) {
+      if (!params.characterId) {
+        throw new Error('characterId required');
+      }
+      if (!isCharacterTurn(state, params.characterId, shouldSkip)) {
+        throw new Error('Not this character\'s turn');
+      }
+      const character = await prisma.character.findUnique({
+        where: { id: params.characterId },
+      });
+      if (!character || character.ownerUserId !== params.userId) {
+        throw new Error('Not your character');
+      }
+    }
+
+    const next = advanceInitiativeTurn(state, shouldSkip);
+    if (next.round > state.round) {
+      mortalityUpdates = await tickDyingCharactersForNewRound(params.gameId);
+    }
+    return next;
+  });
+
+  if (!saved?.active) return { initiative: null, mortalityUpdates };
+
+  const initiative = await finalizeInitiativeTurn(params.gameId, saved);
   return { initiative, mortalityUpdates };
 }
 
