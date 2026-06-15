@@ -13,6 +13,18 @@ const allowedHosts = ['localhost', '127.0.0.1', 'hat3d.com', 'www.hat3d.com'];
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('@mui') || id.includes('@emotion')) return 'mui';
+          if (id.includes('konva') || id.includes('react-konva')) return 'konva';
+          if (id.includes('socket.io-client')) return 'socket';
+        },
+      },
+    },
+  },
   server: {
     host: '0.0.0.0',
     port,

@@ -194,6 +194,8 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [x] Wire `bun run --filter @dcc-web/api test` into CI (replace build-only step).
 - [x] Add regression tests for Phase 2–3 work: optimistic initiative retry, batched `syncMapTokens`, decorator auth paths.
 
+> **Progress (2026-06-15):** Phase 4 started — hooks extracted, UI split begun; 4.4–4.6 landed.
+
 ---
 
 ## Phase 4 — Frontend decomposition
@@ -201,24 +203,24 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 ### 4.1 Split `GamePage.tsx` — L
 Goal: from 1948 LOC + 79 hooks down to a ≤300-LOC orchestrator.
 
-- [ ] Extract data layer hooks (one per file in `apps/web/src/hooks/game/`):
-  - [ ] `useGameDetail(gameId)` — replaces `loadDetail`, returns `{ detail, isDm, refresh, settings }`
-  - [ ] `useCharacters(gameId, isDm)` — replaces `loadCharacters` + character socket handler
-  - [ ] `useMonsters(gameId, isDm)`
-  - [ ] `useInitiative(gameId, isDm)`
-  - [ ] `useGameMaps(gameId, isDm)`
-  - [ ] `useDiceTray(gameId, characterId)`
-  - [ ] `useRollLog(gameId)`
-  - [ ] `usePresence(gameId)`
-- [ ] Extract action layer (mutations) into the same hooks where they belong.
-- [ ] Split the UI into:
-  - [ ] `GameSidebar` (characters, monsters, presence)
-  - [ ] `GameStage` (map + initiative overlay + drawing toolbar)
-  - [ ] `GameDialogs` (apply damage, consume resource, create character, corpse loot, DM control panel)
-- [ ] After the split, run all Phase-0 tests; add component tests for at least the dialog interactions.
+- [x] Extract data layer hooks (one per file in `apps/web/src/hooks/game/`):
+  - [x] `useGameDetail(gameId)` — replaces `loadDetail`, returns `{ detail, isDm, refresh, settings }`
+  - [x] `useCharacters(gameId, isDm)` — replaces `loadCharacters` + character socket handler
+  - [x] `useMonsters(gameId, isDm)`
+  - [x] `useInitiative(gameId, isDm)` — folded into `useGameDetail` (initiative state + `applyInitiative`)
+  - [x] `useGameMaps(gameId, isDm)`
+  - [x] `useDiceTray(gameId, characterId)`
+  - [x] `useRollLog(gameId)`
+  - [x] `usePresence(gameId)`
+- [~] Extract action layer (mutations) into the same hooks where they belong. *(Dice roll actions in `useRollLog`; character/monster/map mutations still in `GamePage`.)*
+- [~] Split the UI into:
+  - [~] `GameSidebar` (characters, monsters, presence) — `GameSideMenu` unchanged; wrap/rename TBD
+  - [x] `GameStage` (map + initiative overlay + drawing toolbar)
+  - [x] `GameDialogs` (apply damage, consume resource, create character, corpse loot, DM control panel)
+- [ ] After the split, run all Phase-0 tests; add component tests for at least the dialog interactions. *(GamePage ~1670 LOC — mutations still to extract.)*
 
 ### 4.2 Adopt TanStack Query — M
-- [ ] Already recommended in `docs/ARCHITECTURE.md`. Decide via ADR (Phase 6).
+- [-] Already recommended in `docs/ARCHITECTURE.md`. Decide via ADR (Phase 6).
 - [ ] If adopted: replace each `loadX` + state-tuple with `useQuery`; replace `setX(prev => ...)` writes after socket events with `queryClient.setQueryData(...)`.
 - [ ] Strangler-fig migration: do `characters` first, validate, then do the rest.
 
@@ -233,23 +235,23 @@ Goal: from 1948 LOC + 79 hooks down to a ≤300-LOC orchestrator.
   - [ ] `ApplyDamageDialog.tsx` (512)
 
 ### 4.4 Code-splitting & bundle — S
-- [ ] `React.lazy` for `GamePage`, `BestiaryPage` in `App.tsx`; wrap routes in `Suspense` with a small loading fallback.
-- [ ] `React.lazy` for `EquipmentManagerDialog`, `MonsterSheetView`, `CharacterSheetView`, `CorpseLootSheet`.
-- [ ] `vite.config.ts` → add `build.rollupOptions.output.manualChunks`:
+- [x] `React.lazy` for `GamePage`, `BestiaryPage` in `App.tsx`; wrap routes in `Suspense` with a small loading fallback.
+- [x] `React.lazy` for `EquipmentManagerDialog`, `MonsterSheetView`, `CharacterSheetView`, `CorpseLootSheet`.
+- [x] `vite.config.ts` → add `build.rollupOptions.output.manualChunks`:
   - `mui` → `@mui/*`, `@emotion/*`
   - `konva` → `konva`, `react-konva`
   - `socket` → `socket.io-client`
 - [ ] Verify gzip bundle goal: initial chunk < 200 KB gzip, total deferred < 400 KB gzip.
 
 ### 4.5 Re-enable WebSocket transport in prod — S
-- [ ] `apps/web/src/lib/game-socket-client.ts:19-23` currently forces `polling` in prod. Switch back to `['websocket', 'polling']`. nginx is already configured for upgrade.
-- [ ] Add a feature-flag env var if you want a kill switch.
+- [x] `apps/web/src/lib/game-socket-client.ts:19-23` currently forces `polling` in prod. Switch back to `['websocket', 'polling']`. nginx is already configured for upgrade.
+- [x] Add a feature-flag env var if you want a kill switch (`VITE_SOCKET_POLLING_ONLY=true`).
 
 ### 4.6 API client cleanup — S
-- [ ] In `apps/web/src/api/client.ts`:
-  - [ ] Return `undefined` for `204`
-  - [ ] Branch on `Content-Type` before `res.json()`
-  - [ ] Surface validation errors (Zod flatten output) in a structured way
+- [x] In `apps/web/src/api/client.ts`:
+  - [x] Return `undefined` for `204`
+  - [x] Branch on `Content-Type` before `res.json()`
+  - [x] Surface validation errors (Zod flatten output) in a structured way
 
 **Exit criteria:** initial bundle slim; `GamePage` testable; no file > 400 LOC except generated.
 

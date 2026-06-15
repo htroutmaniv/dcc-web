@@ -1,17 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
 import { Alert, Box, Button, Chip, CircularProgress, Link } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { api, apiFormData, ApiError } from '../api/client';
+import { api, apiFormData } from '../api/client';
 import { AppShell } from '../components/AppShell';
-import {
-  CreateCharacterDialog,
-  type CreateCharacterPayload,
-} from '../components/CreateCharacterDialog';
+import type { CreateCharacterPayload } from '../components/CreateCharacterDialog';
 import { GameSideMenu, type GameMenuTab } from '../components/GameSideMenu';
-import { CharacterSheetView } from '../components/character-sheet/CharacterSheetView';
-import { MonsterSheetView } from '../components/monster-sheet/MonsterSheetView';
-import { TacticalMap } from '../components/TacticalMap';
+import { GameDialogs } from '../components/game/GameDialogs';
+import { GameStage } from '../components/game/GameStage';
 import { useAuth } from '../context/AuthContext';
 import {
   ACTIVE_IN_PLAY_KEY,
@@ -24,17 +20,13 @@ import {
   MONSTER_IN_PLAY_KEY,
   movementRangeFromStats,
   parseMonsterSheet,
-  emptyDiceTray,
   getActiveLightItemId,
   isCharacterTurn,
   isUsingLightSource,
   resolveActiveLightItemId,
-  type GameSettings,
-  USING_LIGHT_SOURCE_KEY,
-  type DiceTrayCounts,
   attackRollHits,
   getTargetAc,
-  type DiceRollKind,
+  USING_LIGHT_SOURCE_KEY,
   type GameInitiativeState,
   fitImageToGrid,
   type MapDrawTool,
@@ -42,21 +34,10 @@ import {
   buildMonsterKilledStats,
   MAP_TOKEN_VISIBLE_KEY,
 } from '@dcc-web/shared';
-import { ApplyDamageDialog, type MapTokenTarget } from '../components/ApplyDamageDialog';
-import { ConsumeResourceDialog } from '../components/ConsumeResourceDialog';
-import {
-  CorpseLootSheet,
-  type CorpseLootTarget,
-} from '../components/inventory/CorpseLootSheet';
-import { DmControlPanel } from '../components/DmControlPanel';
 import type { MonsterCombatRollKind } from '../components/MonsterQuickMenu';
-import { InitiativeOrderPanel } from '../components/InitiativeOrderPanel';
 import type {
   Character,
-  DiceResult,
-  GameDetail,
   GameMonsterInstance,
-  GamePresenceUser,
 } from '../types/game';
 import {
   buildItemsAfterActivateLight,
@@ -68,48 +49,123 @@ import {
   type CharacterRollKind,
   type CombatRollKind,
 } from '../utils/character-rolls';
-import { characterRollKindToDiceKind, parseRollLogEntry } from '../utils/roll-log';
+import { characterRollKindToDiceKind } from '../utils/roll-log';
 import {
   CHARACTER_ATTACK_TARGET_KEY,
   parseAttackTargetRef,
-  readCharacterAttackTargetMap,
 } from '../utils/character-attack-target';
-import { MONSTER_ATTACK_TARGET_KEY, readMonsterTargetMap } from '../utils/monster-targets';
+import { MONSTER_ATTACK_TARGET_KEY } from '../utils/monster-targets';
 import { buildCombatTargetOptions } from '../components/CharacterListItem';
 import type { TransferInventoryResult } from '../components/inventory/TransferItemDialog';
 import type { DiceRollLogEntry } from '../types/dice-roll-log';
 import type { TokenMapOverlay } from '../types/token-overlay';
 import type { TacticalGameMap, TacticalMapToken } from '../types/map';
 import type { CharacterStats as SharedCharacterStats } from '@dcc-web/shared';
-import { useGameSocket } from '../hooks/useGameSocket';
+import type { CorpseLootTarget } from '../components/inventory/CorpseLootSheet';
+import {
+  useCharacters,
+  useDiceRollActions,
+  useDiceTray,
+  useGameDetail,
+  useGameMaps,
+  useGameRealtimeSync,
+  useMonsters,
+  usePresence,
+  useRollLog,
+} from '../hooks/game';
 import { useGameDeleteNotifications } from '../hooks/useGameDeleteNotifications';
 import { formatError } from '../utils/errors';
+
+const CharacterSheetView = lazy(() =>
+  import('../components/character-sheet/CharacterSheetView').then((m) => ({
+    default: m.CharacterSheetView,
+  })),
+);
+const MonsterSheetView = lazy(() =>
+  import('../components/monster-sheet/MonsterSheetView').then((m) => ({
+    default: m.MonsterSheetView,
+  })),
+);
 
 export default function GamePage() {
   const { gameId } = useParams<{ gameId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [detail, setDetail] = useState<GameDetail | null>(null);
-  const [characters, setCharacters] = useState<Character[]>([]);
-  const [lastRoll, setLastRoll] = useState<DiceResult | null>(null);
   const [menuTab, setMenuTab] = useState<GameMenuTab>('characters');
-  const [presenceUsers, setPresenceUsers] = useState<GamePresenceUser[]>([]);
+
+  const {
+    detail,
+    loading,
+    setLoading,
+    initiative,
+    isDm,
+    gameSettings,
+    loadDetail,
+    applyInitiative,
+    applyGameSettingsPatch,
+    isAccessError,
+  } = useGameDetail(gameId);
+
+  const {
+    maps,
+    setMaps,
+    activeMapId,
+    setActiveMapId,
+    mapBusy,
+    setMapBusy,
+    npcTokens,
+    activeMap,
+    loadMaps,
+    syncNpcTokensFromMap,
+    applyMapFromServer,
+  } = useGameMaps(gameId);
+
+  const {
+    characters,
+    selectedCharacter,
+    setSelectedCharacter,
+    characterAttackTargetById,
+    setCharacterAttackTargetById,
+    loadCharacters,
+    applyCharacterFromServer,
+  } = useCharacters(gameId, isDm, user?.id);
+
+  const {
+    monsters,
+    setMonsters,
+    selectedMonster,
+    setSelectedMonster,
+    monsterTargetById,
+    setMonsterTargetById,
+    loadMonsters,
+    handleMonsterUpdated,
+  } = useMonsters(gameId, isDm);
+
+  const { rollLog, setRollLog, lastRoll, loadDiceRolls, appendRollLog } = useRollLog(gameId);
+  const { postDiceRoll } = useDiceRollActions(gameId, appendRollLog, applyInitiative);
+
+  const {
+    diceTrayCounts,
+    setDiceTrayCounts,
+    diceRolling,
+    setDiceRolling,
+    diceCharacterId,
+    setDiceCharacterId,
+    diceQuickRollKind,
+    setDiceQuickRollKind,
+    resetDiceTray,
+  } = useDiceTray(characters, selectedCharacter?.id);
+
+  const { presenceUsers, setPresenceUsers } = usePresence(gameId);
+
   const detailRef = useRef(detail);
   detailRef.current = detail;
-  const [diceTrayCounts, setDiceTrayCounts] = useState<DiceTrayCounts>(emptyDiceTray);
-  const [diceRolling, setDiceRolling] = useState(false);
-  const [diceCharacterId, setDiceCharacterId] = useState<string | null>(null);
-  const [diceQuickRollKind, setDiceQuickRollKind] = useState<CharacterRollKind | null>(null);
-  const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
+
   const [rollingCharacterId, setRollingCharacterId] = useState<string | null>(null);
   const [rollingKind, setRollingKind] = useState<CombatRollKind | null>(null);
   const [combatRollByCharacter, setCombatRollByCharacter] = useState<
     Record<string, DiceRollLogEntry>
-  >({});
-  const [characterAttackTargetById, setCharacterAttackTargetById] = useState<
-    Record<string, string>
   >({});
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [creatingCharacter, setCreatingCharacter] = useState(false);
@@ -119,25 +175,16 @@ export default function GamePage() {
     character: Character;
     kind: 'food' | 'drink';
   } | null>(null);
-  const [initiative, setInitiative] = useState<GameInitiativeState | null>(null);
   const [initiativeBusy, setInitiativeBusy] = useState(false);
   const [endTurnCharacterId, setEndTurnCharacterId] = useState<string | null>(null);
-  const [monsters, setMonsters] = useState<GameMonsterInstance[]>([]);
-  const [selectedMonster, setSelectedMonster] = useState<GameMonsterInstance | null>(null);
-  const [monsterTargetById, setMonsterTargetById] = useState<Record<string, string>>({});
   const [lastMonsterAttackSummary, setLastMonsterAttackSummary] = useState<string | null>(null);
   const [monsterBusy, setMonsterBusy] = useState(false);
   const [monsterRollingId, setMonsterRollingId] = useState<string | null>(null);
   const [monsterRollingKind, setMonsterRollingKind] = useState<MonsterCombatRollKind | null>(
     null,
   );
-  const [rollLog, setRollLog] = useState<DiceRollLogEntry[]>([]);
   const [applyDamageRoll, setApplyDamageRoll] = useState<DiceRollLogEntry | null>(null);
   const [applyingDamage, setApplyingDamage] = useState(false);
-  const [npcTokens, setNpcTokens] = useState<MapTokenTarget[]>([]);
-  const [maps, setMaps] = useState<TacticalGameMap[]>([]);
-  const [activeMapId, setActiveMapId] = useState<string | null>(null);
-  const [mapBusy, setMapBusy] = useState(false);
   const [drawTool, setDrawTool] = useState<MapDrawTool>('select');
   const [drawColor, setDrawColor] = useState('#c9a227');
   const [drawStrokeWidth, setDrawStrokeWidth] = useState(2);
@@ -148,16 +195,6 @@ export default function GamePage() {
   const [corpseLootOpen, setCorpseLootOpen] = useState(false);
   const [mapTokenBusyId, setMapTokenBusyId] = useState<string | null>(null);
 
-  /** DM = game creator only (server sets isDm from dm_user_id). */
-  const isDm = detail?.isDm === true;
-
-  const gameSettings = useMemo((): GameSettings | null => {
-    if (!detail) return null;
-    if (!detail.game.settings) {
-      throw new Error('Game detail missing settings from API');
-    }
-    return detail.game.settings;
-  }, [detail]);
   const monstersVisibleOnMap = gameSettings?.monstersVisibleOnMap === true;
   const sharedMonsterInitiative = gameSettings?.sharedMonsterInitiative === true;
   const hideMonsterAcInRollLog = gameSettings?.hideMonsterAcInRollLog === true;
@@ -202,169 +239,26 @@ export default function GamePage() {
     return monster ? { kind: 'monster', monster } : null;
   }, [corpseLootRef, characters, monsters]);
 
-  const applyInitiative = useCallback((next: GameInitiativeState | null) => {
-    setInitiative(next);
-    setDetail((prev) => {
-      if (!prev?.game.settings) return prev;
-      return {
-        ...prev,
-        game: {
-          ...prev.game,
-          settings: { ...prev.game.settings, initiative: next },
-        },
-      };
-    });
-  }, []);
-
-  const applyGameSettingsPatch = useCallback(
-    (patch: {
-      monstersVisibleOnMap?: boolean;
-      sharedMonsterInitiative?: boolean;
-      hideMonsterAcInRollLog?: boolean;
-    }) => {
-      setDetail((prev) => {
-        if (!prev?.game.settings) return prev;
-        return {
-          ...prev,
-          game: {
-            ...prev.game,
-            settings: { ...prev.game.settings, ...patch },
-          },
-        };
-      });
-    },
-    [],
-  );
-
-  const syncNpcTokensFromMap = useCallback((map: TacticalGameMap | null) => {
-    setNpcTokens(
-      (map?.tokens ?? [])
-        .filter((t) => t.kind === 'npc')
-        .map((t) => ({
-          id: t.id,
-          label: t.label,
-          kind: t.kind,
-          hpCurrent: t.hpCurrent,
-          hpMax: t.hpMax,
-        })),
-    );
-  }, []);
-
-  const loadMaps = useCallback(async () => {
-    if (!gameId) return;
-    const data = await api<{ maps: TacticalGameMap[]; activeMapId: string | null }>(
-      `/games/${gameId}/maps`,
-    );
-    setMaps(data.maps);
-    setActiveMapId(data.activeMapId);
-    const active = data.maps.find((m) => m.id === data.activeMapId) ?? data.maps[0] ?? null;
-    syncNpcTokensFromMap(active);
-  }, [gameId, syncNpcTokensFromMap]);
-
-  const loadDetail = useCallback(async () => {
-    if (!gameId) return;
-    const data = await api<GameDetail>(`/games/${gameId}`);
-    if (!data.game.settings) {
-      throw new Error('Game API response missing game.settings');
+  const refreshGame = useCallback(async () => {
+    const data = await loadDetail();
+    if (data?.game.settings?.activeMapId) {
+      setActiveMapId(data.game.settings.activeMapId);
     }
-    setDetail(data);
-    setInitiative(data.game.settings.initiative);
-    if (data.game.settings.activeMapId) setActiveMapId(data.game.settings.activeMapId);
     await loadMaps();
-  }, [gameId, loadMaps]);
-
-  const loadDiceRolls = useCallback(async () => {
-    if (!gameId) return;
-    const data = await api<{ rolls: DiceRollLogEntry[] }>(
-      `/games/${gameId}/dice-rolls?limit=80`,
-    );
-    setRollLog(data.rolls);
-  }, [gameId]);
-
-  const appendRollLog = useCallback((entry: DiceRollLogEntry) => {
-    setRollLog((prev) => {
-      if (prev.some((r) => r.id === entry.id)) return prev;
-      return [...prev, entry].slice(-100);
-    });
-    setLastRoll(entry);
-  }, []);
-
-  const postDiceRoll = useCallback(
-    async (params: {
-      notation: string;
-      reason?: string;
-      rollKind?: DiceRollKind;
-      characterId?: string;
-      targetType?: 'character' | 'monster' | 'npc';
-      targetId?: string;
-    }) => {
-      if (!gameId) throw new Error('No game');
-      const { result, initiative: initiativeUpdate } = await api<{
-        result: DiceRollLogEntry;
-        initiative?: GameInitiativeState | null;
-      }>('/dice/roll', {
-        method: 'POST',
-        body: JSON.stringify({
-          gameId,
-          notation: params.notation,
-          reason: params.reason,
-          rollKind: params.rollKind,
-          characterId: params.characterId,
-          targetType: params.targetType,
-          targetId: params.targetId,
-        }),
-      });
-      const entry = parseRollLogEntry(result) ?? (result as DiceRollLogEntry);
-      appendRollLog(entry);
-      if (initiativeUpdate) applyInitiative(initiativeUpdate);
-      return entry;
-    },
-    [gameId, appendRollLog, applyInitiative],
-  );
-
-  const loadMonsters = useCallback(async () => {
-    if (!gameId || !detail) return;
-    const data = await api<{ monsters: GameMonsterInstance[] }>(
-      `/games/${gameId}/monsters`,
-    );
-    setMonsters(data.monsters);
-    if (detail.isDm) {
-      setMonsterTargetById((prev) => ({
-        ...readMonsterTargetMap(data.monsters),
-        ...prev,
-      }));
-    }
-  }, [gameId, detail]);
-
-  const loadCharacters = useCallback(async () => {
-    if (!gameId || !detail) return;
-    const q = detail.isDm ? '?includeDead=true' : '';
-    const data = await api<{ characters: Character[] }>(
-      `/games/${gameId}/characters${q}`,
-    );
-    setCharacters(data.characters);
-    setCharacterAttackTargetById((prev) => ({
-      ...readCharacterAttackTargetMap(data.characters),
-      ...prev,
-    }));
-    setSelectedCharacter((prev) => {
-      if (!prev) return null;
-      return data.characters.find((c) => c.id === prev.id) ?? null;
-    });
-  }, [gameId, detail]);
+  }, [loadDetail, loadMaps, setActiveMapId]);
 
   useEffect(() => {
     if (!gameId) return;
     setLoading(true);
-    void Promise.all([loadDetail(), loadDiceRolls()])
+    void Promise.all([refreshGame(), loadDiceRolls()])
       .catch((e) => {
         setError(formatError(e));
-        if (e instanceof ApiError && (e.status === 403 || e.status === 404)) {
+        if (isAccessError(e)) {
           navigate('/');
         }
       })
       .finally(() => setLoading(false));
-  }, [gameId, loadDetail, loadDiceRolls, navigate]);
+  }, [gameId, refreshGame, loadDiceRolls, navigate, setLoading, isAccessError]);
 
   useEffect(() => {
     if (!detail) return;
@@ -372,21 +266,29 @@ export default function GamePage() {
     void loadMonsters().catch(() => {});
   }, [detail, loadCharacters, loadMonsters]);
 
-  useEffect(() => {
-    if (characters.length === 0) {
-      setDiceCharacterId(null);
-      return;
-    }
-    setDiceCharacterId((prev) =>
-      prev && characters.some((c) => c.id === prev) ? prev : characters[0]!.id,
-    );
-  }, [characters]);
+  const handleCharacterUpdated = applyCharacterFromServer;
+
+  useGameRealtimeSync(gameId, Boolean(gameId && detail), user?.id, detailRef, {
+    loadDetail: refreshGame,
+    loadDiceRolls,
+    loadCharacters,
+    loadMonsters,
+    loadMaps,
+    applyInitiative,
+    applyGameSettingsPatch,
+    appendRollLog,
+    setCombatRollByCharacter,
+    setPresenceUsers,
+  });
 
   useEffect(() => {
-    if (selectedCharacter) {
-      setDiceCharacterId(selectedCharacter.id);
+    if (initiativeActive && corpseLootOpen) {
+      setCorpseLootOpen(false);
+      setCorpseLootRef(null);
     }
-  }, [selectedCharacter?.id]);
+  }, [initiativeActive, corpseLootOpen]);
+
+  useGameDeleteNotifications({ gameId });
 
   const createCharacter = async (payload: CreateCharacterPayload) => {
     if (!gameId) return;
@@ -410,6 +312,16 @@ export default function GamePage() {
       setCreatingCharacter(false);
     }
   };
+
+  const handleInventoryTransferred = useCallback(
+    (result: TransferInventoryResult) => {
+      if (result.sourceCharacter) handleCharacterUpdated(result.sourceCharacter);
+      if (result.targetCharacter) handleCharacterUpdated(result.targetCharacter);
+      if (result.sourceMonster) handleMonsterUpdated(result.sourceMonster);
+      if (result.targetMonster) handleMonsterUpdated(result.targetMonster);
+    },
+    [handleCharacterUpdated, handleMonsterUpdated],
+  );
 
   const setCharacterWeapon = async (character: Character, weaponId: string) => {
     const weapon = (character.items ?? []).find(
@@ -538,10 +450,6 @@ export default function GamePage() {
     }
   };
 
-  const resetDiceTray = () => {
-    setDiceTrayCounts(emptyDiceTray());
-  };
-
   const rollCharacterQuickRoll = async (kind: CharacterRollKind) => {
     if (!gameId || !diceCharacterId) return;
     const character = characters.find((c) => c.id === diceCharacterId);
@@ -566,33 +474,6 @@ export default function GamePage() {
       setDiceQuickRollKind(null);
     }
   };
-
-  const applyCharacterFromServer = useCallback(
-    (updated: Character) => {
-      if (
-        !isDm &&
-        updated.ownerUserId &&
-        user?.id &&
-        updated.ownerUserId !== user.id
-      ) {
-        return;
-      }
-      setSelectedCharacter((prev) => (prev?.id === updated.id ? updated : prev));
-      setCharacters((prev) => {
-        if (updated.status === 'archived') {
-          return prev.filter((c) => c.id !== updated.id);
-        }
-        const idx = prev.findIndex((c) => c.id === updated.id);
-        if (idx >= 0) {
-          return prev.map((c) => (c.id === updated.id ? updated : c));
-        }
-        return [...prev, updated];
-      });
-    },
-    [isDm, user?.id],
-  );
-
-  const handleCharacterUpdated = applyCharacterFromServer;
 
   const patchCharacterHp = async (character: Character, hpCurrent: number) => {
     const hpMax =
@@ -628,113 +509,6 @@ export default function GamePage() {
       setHpAdjustingId(null);
     }
   };
-
-  useGameSocket(
-    gameId,
-    {
-      onConnected: () => {
-        // Full resync after (re)connect — catches anything missed while disconnected.
-        void loadDetail().catch(() => {});
-        void loadDiceRolls().catch(() => {});
-      },
-      onMonstersChanged: ({ actorUserId }) => {
-        if (actorUserId && actorUserId === user?.id) return;
-        void loadMonsters().catch(() => {});
-      },
-      onCharacterUpsert: (_character, actorUserId) => {
-        if (actorUserId && actorUserId === user?.id) return;
-        void loadCharacters().catch(() => {});
-      },
-      onInitiativeUpdated: (next) => {
-        applyInitiative(next);
-      },
-      onSettingsUpdated: (settings) => {
-        if (settings && typeof settings === 'object') {
-          const parsed = settings as {
-            monstersVisibleOnMap?: boolean;
-            sharedMonsterInitiative?: boolean;
-            hideMonsterAcInRollLog?: boolean;
-          };
-          if (typeof parsed.monstersVisibleOnMap === 'boolean') {
-            applyGameSettingsPatch({ monstersVisibleOnMap: parsed.monstersVisibleOnMap });
-          }
-          if (typeof parsed.sharedMonsterInitiative === 'boolean') {
-            applyGameSettingsPatch({
-              sharedMonsterInitiative: parsed.sharedMonsterInitiative,
-            });
-          }
-          if (typeof parsed.hideMonsterAcInRollLog === 'boolean') {
-            applyGameSettingsPatch({
-              hideMonsterAcInRollLog: parsed.hideMonsterAcInRollLog,
-            });
-          }
-        }
-      },
-      onDiceRolled: ({ result, characterId }) => {
-        const entry = parseRollLogEntry(result);
-        if (entry) appendRollLog(entry);
-        if (characterId && entry) {
-          setCombatRollByCharacter((prev) => ({ ...prev, [characterId]: entry }));
-        }
-      },
-      onDamageApplied: () => {
-        void loadCharacters().catch(() => {});
-        void loadMonsters().catch(() => {});
-        void loadDetail().catch(() => {});
-      },
-      onTokenUpdated: () => {
-        void loadMaps().catch(() => {});
-      },
-      onMapUpdated: () => {
-        void loadMaps().catch(() => {});
-      },
-      onPresenceUpdated: (users) => {
-        setPresenceUsers(users);
-        const d = detailRef.current;
-        if (!d) return;
-        const rosterIds = new Set<string>([
-          d.game.dmUserId,
-          ...(d.game.players?.map((p) => p.user.id) ?? []),
-        ]);
-        if (users.some((u) => !rosterIds.has(u.userId))) {
-          void loadDetail().catch(() => {});
-        }
-      },
-      onRosterChanged: (actorUserId) => {
-        if (actorUserId && actorUserId === user?.id) return;
-        void loadDetail().catch(() => {});
-      },
-    },
-    Boolean(gameId && detail),
-  );
-
-  useEffect(() => {
-    if (initiativeActive && corpseLootOpen) {
-      setCorpseLootOpen(false);
-      setCorpseLootRef(null);
-    }
-  }, [initiativeActive, corpseLootOpen]);
-
-  useGameDeleteNotifications({ gameId });
-
-  useEffect(() => {
-    setPresenceUsers([]);
-  }, [gameId]);
-
-  const handleMonsterUpdated = useCallback((m: GameMonsterInstance) => {
-    setMonsters((prev) => prev.map((x) => (x.id === m.id ? m : x)));
-    setSelectedMonster((prev) => (prev?.id === m.id ? m : prev));
-  }, []);
-
-  const handleInventoryTransferred = useCallback(
-    (result: TransferInventoryResult) => {
-      if (result.sourceCharacter) handleCharacterUpdated(result.sourceCharacter);
-      if (result.targetCharacter) handleCharacterUpdated(result.targetCharacter);
-      if (result.sourceMonster) handleMonsterUpdated(result.sourceMonster);
-      if (result.targetMonster) handleMonsterUpdated(result.targetMonster);
-    },
-    [handleCharacterUpdated, handleMonsterUpdated],
-  );
 
   const canLootToken = useCallback(
     (token: TacticalMapToken) => {
@@ -1356,11 +1130,6 @@ export default function GamePage() {
   const archiveCharacter = (characterId: string) =>
     patchCharacterStatus(characterId, 'archived');
 
-  const activeMap = useMemo(
-    () => maps.find((m) => m.id === activeMapId) ?? maps[0] ?? null,
-    [maps, activeMapId],
-  );
-
   const hasCharacterMapToken = useCallback(
     (characterId: string) =>
       activeMap?.tokens.some((t) => t.characterId === characterId) ?? false,
@@ -1552,14 +1321,6 @@ export default function GamePage() {
     img.src = URL.createObjectURL(file);
   };
 
-  const applyMapFromServer = useCallback(
-    (map: TacticalGameMap) => {
-      setMaps((prev) => prev.map((m) => (m.id === map.id ? map : m)));
-      if (map.id === activeMapId) syncNpcTokensFromMap(map);
-    },
-    [activeMapId, syncNpcTokensFromMap],
-  );
-
   const autoSyncMapTokens = useCallback(async () => {
     if (!gameId || !activeMapId || !isDm) return;
     try {
@@ -1711,146 +1472,115 @@ export default function GamePage() {
       >
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
           {selectedCharacter ? (
-            <CharacterSheetView
-              character={selectedCharacter}
-              gameId={gameId}
-              partyCharacters={characters}
-              partyMonsters={monsters}
-              isDm={isDm}
-              players={detail.game.players?.map((p) => p.user) ?? []}
-              dmUserId={detail.game.dmUserId}
-              onClose={() => setSelectedCharacter(null)}
-              onCharacterUpdated={handleCharacterUpdated}
-              onMonsterUpdated={handleMonsterUpdated}
-              onInventoryTransferred={handleInventoryTransferred}
-              onMarkDead={markDead}
-              onRevive={reviveCharacter}
-              onArchive={archiveCharacter}
-            />
+            <Suspense fallback={<CircularProgress sx={{ m: 'auto' }} />}>
+              <CharacterSheetView
+                character={selectedCharacter}
+                gameId={gameId}
+                partyCharacters={characters}
+                partyMonsters={monsters}
+                isDm={isDm}
+                players={detail.game.players?.map((p) => p.user) ?? []}
+                dmUserId={detail.game.dmUserId}
+                onClose={() => setSelectedCharacter(null)}
+                onCharacterUpdated={handleCharacterUpdated}
+                onMonsterUpdated={handleMonsterUpdated}
+                onInventoryTransferred={handleInventoryTransferred}
+                onMarkDead={markDead}
+                onRevive={reviveCharacter}
+                onArchive={archiveCharacter}
+              />
+            </Suspense>
           ) : selectedMonster && isDm ? (
-            <MonsterSheetView
-              gameId={gameId}
-              monster={selectedMonster}
-              partyCharacters={characters}
-              partyMonsters={monsters}
-              onClose={() => setSelectedMonster(null)}
-              onMonsterUpdated={handleMonsterUpdated}
-              onInventoryTransferred={handleInventoryTransferred}
-            />
+            <Suspense fallback={<CircularProgress sx={{ m: 'auto' }} />}>
+              <MonsterSheetView
+                gameId={gameId}
+                monster={selectedMonster}
+                partyCharacters={characters}
+                partyMonsters={monsters}
+                onClose={() => setSelectedMonster(null)}
+                onMonsterUpdated={handleMonsterUpdated}
+                onInventoryTransferred={handleInventoryTransferred}
+              />
+            </Suspense>
           ) : (
-            <Box
-              sx={{
-                flex: 1,
-                minHeight: 0,
-                display: 'flex',
-                flexDirection: 'row',
-                p: 2,
-                gap: 0,
-                overflow: 'hidden',
-              }}
-            >
-              {isDm && (
-                <DmControlPanel
-                  gameId={gameId}
-                  initiative={initiative}
-                  onStartInitiative={startInitiative}
-                  onAdvanceTurn={advanceInitiative}
-                  onEndInitiative={endInitiative}
-                  monstersVisibleOnMap={monstersVisibleOnMap}
-                  onToggleMonstersVisibleOnMap={() => void toggleMonstersVisibleOnMap()}
-                  sharedMonsterInitiative={sharedMonsterInitiative}
-                  onToggleSharedMonsterInitiative={() => void toggleSharedMonsterInitiative()}
-                  hideMonsterAcInRollLog={hideMonsterAcInRollLog}
-                  onToggleHideMonsterAcInRollLog={() => void toggleHideMonsterAcInRollLog()}
-                  busy={initiativeBusy || monsterBusy}
-                  monsters={monsters}
-                  characters={characters}
-                  monsterTargetById={monsterTargetById}
-                  sheetMonsterId={selectedMonster?.id ?? null}
-                  onMonsterTargetChange={setMonsterAttackTarget}
-                  onPatchMonsterHp={patchMonsterHp}
-                  onKillMonster={killMonster}
-                  onDeleteMonster={deleteMonsterQuick}
-                  onRollMonsterAttack={rollMonsterAttack}
-                  onMonsterCombatRoll={rollMonsterCombat}
-                  onToggleMonsterInPlay={toggleMonsterInPlay}
-                  rollingMonsterId={monsterRollingId}
-                  rollingMonsterKind={monsterRollingKind}
-                  onOpenMonsterSheet={openMonsterSheet}
-                  lastAttackSummary={lastMonsterAttackSummary}
-                  onMonstersChange={setMonsters}
-                  onMonsterInitiativeChange={applyInitiative}
-                  onMonsterPanelError={setError}
-                />
-              )}
-              <Box
-                sx={{
-                  flex: 1,
-                  minWidth: 0,
-                  position: 'relative',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
-              >
-                <TacticalMap
-                  gameId={gameId}
-                  isDm={isDm}
-                  maps={maps}
-                  activeMap={activeMap}
-                  activeMapId={activeMapId}
-                  initiativeActive={initiativeActive}
-                  monstersVisibleOnMap={monstersVisibleOnMap}
-                  mapBusy={mapBusy}
-                  drawTool={drawTool}
-                  drawColor={drawColor}
-                  drawStrokeWidth={drawStrokeWidth}
-                  onDrawToolChange={setDrawTool}
-                  onDrawColorChange={setDrawColor}
-                  onDrawStrokeWidthChange={setDrawStrokeWidth}
-                  onImageScaleChange={(imageScale) => void patchActiveMap({ imageScale })}
-                  onSelectMap={(id) => void setActiveMap(id)}
-                  onPrevMap={() => cycleMap(-1)}
-                  onNextMap={() => cycleMap(1)}
-                  onAddMap={() => void addMap()}
-                  onDeleteMap={() => void deleteActiveMap()}
-                  onToggleMapVisible={() =>
-                    activeMap && void patchActiveMap({ visible: !activeMap.visible })
-                  }
-                  onGridPresetChange={(preset) => void patchActiveMap({ gridPreset: preset })}
-                  onUploadImage={uploadMapImage}
-                  onRemoveImage={() => void patchActiveMap({ clearImage: true })}
-                  onRenameMap={(name) => void patchActiveMap({ name })}
-                  onResetPlayerTokens={resetPlayerMapTokens}
-                  onResetMonsterTokens={resetMonsterMapTokens}
-                  onClearDrawings={() => void patchActiveMap({ dmDrawings: [] })}
-                  onDrawingsChange={(drawings) => void patchActiveMap({ dmDrawings: drawings })}
-                  onTokenMove={(tokenId, x, y) => void moveMapToken(tokenId, x, y)}
-                  canDragToken={(t) =>
-                    isDm ||
-                    Boolean(
-                      t.characterId &&
-                        characters.find((c) => c.id === t.characterId)?.ownerUserId ===
-                          user?.id,
-                    )
-                  }
-                  canLootToken={canLootToken}
-                  isTokenInitiativeActive={isTokenInitiativeActive}
-                  getTokenOverlay={getTokenOverlay}
-                  onTokenClick={handleMapTokenClick}
-                  rollLog={rollLog}
-                  hideMonsterAcInRollLog={hideMonsterAcInRollLog}
-                  onClearRollLog={() => setRollLog([])}
-                  onApplyDamageFromRoll={
-                    isDm ? (roll) => setApplyDamageRoll(roll) : undefined
-                  }
-                />
-                <InitiativeOrderPanel
-                  initiative={initiative}
-                  characters={characters}
-                  monsters={monsters}
-                />
-              </Box>
-            </Box>
+            <GameStage
+              gameId={gameId}
+              isDm={isDm}
+              userId={user?.id}
+              initiative={initiative}
+              initiativeActive={initiativeActive}
+              initiativeBusy={initiativeBusy}
+              monstersVisibleOnMap={monstersVisibleOnMap}
+              hideMonsterAcInRollLog={hideMonsterAcInRollLog}
+              sharedMonsterInitiative={sharedMonsterInitiative}
+              onStartInitiative={startInitiative}
+              onAdvanceTurn={advanceInitiative}
+              onEndInitiative={endInitiative}
+              onToggleMonstersVisibleOnMap={() => void toggleMonstersVisibleOnMap()}
+              onToggleSharedMonsterInitiative={() => void toggleSharedMonsterInitiative()}
+              onToggleHideMonsterAcInRollLog={() => void toggleHideMonsterAcInRollLog()}
+              monsters={monsters}
+              characters={characters}
+              monsterTargetById={monsterTargetById}
+              selectedMonsterId={selectedMonster?.id ?? null}
+              onMonsterTargetChange={setMonsterAttackTarget}
+              onPatchMonsterHp={patchMonsterHp}
+              onKillMonster={killMonster}
+              onDeleteMonster={deleteMonsterQuick}
+              onRollMonsterAttack={rollMonsterAttack}
+              onMonsterCombatRoll={rollMonsterCombat}
+              onToggleMonsterInPlay={toggleMonsterInPlay}
+              monsterBusy={monsterBusy}
+              rollingMonsterId={monsterRollingId}
+              rollingMonsterKind={monsterRollingKind}
+              onOpenMonsterSheet={openMonsterSheet}
+              lastAttackSummary={lastMonsterAttackSummary}
+              onMonstersChange={setMonsters}
+              onMonsterInitiativeChange={applyInitiative}
+              onMonsterPanelError={setError}
+              maps={maps}
+              activeMap={activeMap}
+              activeMapId={activeMapId}
+              mapBusy={mapBusy}
+              drawTool={drawTool}
+              drawColor={drawColor}
+              drawStrokeWidth={drawStrokeWidth}
+              onDrawToolChange={setDrawTool}
+              onDrawColorChange={setDrawColor}
+              onDrawStrokeWidthChange={setDrawStrokeWidth}
+              onImageScaleChange={(imageScale) => void patchActiveMap({ imageScale })}
+              onSelectMap={(id) => void setActiveMap(id)}
+              onPrevMap={() => cycleMap(-1)}
+              onNextMap={() => cycleMap(1)}
+              onAddMap={() => void addMap()}
+              onDeleteMap={() => void deleteActiveMap()}
+              onToggleMapVisible={() =>
+                activeMap && void patchActiveMap({ visible: !activeMap.visible })
+              }
+              onGridPresetChange={(preset) => void patchActiveMap({ gridPreset: preset })}
+              onUploadImage={uploadMapImage}
+              onRemoveImage={() => void patchActiveMap({ clearImage: true })}
+              onRenameMap={(name) => void patchActiveMap({ name })}
+              onResetPlayerTokens={resetPlayerMapTokens}
+              onResetMonsterTokens={resetMonsterMapTokens}
+              onClearDrawings={() => void patchActiveMap({ dmDrawings: [] })}
+              onDrawingsChange={(drawings) => void patchActiveMap({ dmDrawings: drawings })}
+              onTokenMove={(tokenId, x, y) => void moveMapToken(tokenId, x, y)}
+              canDragToken={(t) =>
+                isDm ||
+                Boolean(
+                  t.characterId &&
+                    characters.find((c) => c.id === t.characterId)?.ownerUserId === user?.id,
+                )
+              }
+              canLootToken={canLootToken}
+              isTokenInitiativeActive={isTokenInitiativeActive}
+              getTokenOverlay={getTokenOverlay}
+              onTokenClick={handleMapTokenClick}
+              rollLog={rollLog}
+              onClearRollLog={() => setRollLog([])}
+              onApplyDamageFromRoll={isDm ? (roll) => setApplyDamageRoll(roll) : undefined}
+            />
           )}
         </Box>
         <GameSideMenu
@@ -1905,46 +1635,34 @@ export default function GamePage() {
         />
       </Box>
       </Box>
-      <CorpseLootSheet
-        open={corpseLootOpen && corpseLootTarget != null}
-        onClose={() => {
-          setCorpseLootOpen(false);
-          setCorpseLootRef(null);
-        }}
+      <GameDialogs
         gameId={gameId}
-        target={corpseLootTarget}
-        characters={characters}
-        monsters={monsters}
-        currentUserId={user?.id}
         isDm={isDm}
-        onTransferred={handleInventoryTransferred}
-      />
-      <CreateCharacterDialog
-        open={createDialogOpen}
-        onClose={() => setCreateDialogOpen(false)}
-        onSubmit={createCharacter}
-        submitting={creatingCharacter}
-        isDm={isDm}
-        players={detail?.game.players?.map((p) => p.user) ?? []}
-        dmUserId={detail?.game.dmUserId}
-      />
-      <ApplyDamageDialog
-        open={applyDamageRoll != null}
-        roll={applyDamageRoll}
+        dmUserId={detail.game.dmUserId}
+        players={detail.game.players?.map((p) => p.user) ?? []}
         characters={characters}
         monsters={monsters}
         npcTokens={npcTokens}
-        onClose={() => setApplyDamageRoll(null)}
-        onApply={applyDamageFromRoll}
-        applying={applyingDamage}
-      />
-      <ConsumeResourceDialog
-        open={consumeDialog != null}
-        character={consumeDialog?.character ?? null}
-        kind={consumeDialog?.kind ?? null}
-        busy={consumableAdjustingId != null}
-        onClose={() => setConsumeDialog(null)}
-        onConsume={(itemId) => void applyConsumeItem(itemId)}
+        currentUserId={user?.id}
+        createDialogOpen={createDialogOpen}
+        creatingCharacter={creatingCharacter}
+        onCloseCreateDialog={() => setCreateDialogOpen(false)}
+        onCreateCharacter={createCharacter}
+        applyDamageRoll={applyDamageRoll}
+        applyingDamage={applyingDamage}
+        onCloseApplyDamage={() => setApplyDamageRoll(null)}
+        onApplyDamage={applyDamageFromRoll}
+        consumeDialog={consumeDialog}
+        consumableAdjustingId={consumableAdjustingId}
+        onCloseConsumeDialog={() => setConsumeDialog(null)}
+        onConsumeItem={applyConsumeItem}
+        corpseLootOpen={corpseLootOpen}
+        corpseLootTarget={corpseLootTarget}
+        onCloseCorpseLoot={() => {
+          setCorpseLootOpen(false);
+          setCorpseLootRef(null);
+        }}
+        onInventoryTransferred={handleInventoryTransferred}
       />
     </AppShell>
   );

@@ -1,10 +1,21 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { Box, CircularProgress } from '@mui/material';
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import HomePage from './pages/HomePage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
-import GamePage from './pages/GamePage';
-import BestiaryPage from './pages/BestiaryPage';
+
+const GamePage = lazy(() => import('./pages/GamePage'));
+const BestiaryPage = lazy(() => import('./pages/BestiaryPage'));
+
+function RouteLoadingFallback() {
+  return (
+    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '40vh' }}>
+      <CircularProgress />
+    </Box>
+  );
+}
 
 export default function App() {
   return (
@@ -16,7 +27,9 @@ export default function App() {
           path="/bestiary"
           element={
             <ProtectedRoute>
-              <BestiaryPage />
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <BestiaryPage />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -24,7 +37,9 @@ export default function App() {
           path="/game/:gameId"
           element={
             <ProtectedRoute>
-              <GamePage />
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <GamePage />
+              </Suspense>
             </ProtectedRoute>
           }
         />

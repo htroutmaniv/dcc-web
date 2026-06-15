@@ -17,9 +17,10 @@ function notifyGameDeleted(payload: GameDeletedPayload): void {
 }
 
 function createSocket(): Socket {
-  const transports: ('polling' | 'websocket')[] = import.meta.env.PROD
+  const forcePolling = import.meta.env.VITE_SOCKET_POLLING_ONLY === 'true';
+  const transports: ('polling' | 'websocket')[] = forcePolling
     ? ['polling']
-    : ['polling', 'websocket'];
+    : ['websocket', 'polling'];
 
   const s = io(window.location.origin, {
     path: '/socket.io',
