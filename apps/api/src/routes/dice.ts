@@ -4,8 +4,7 @@ import {
   diceRollRequestSchema,
 } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
-import { assertGameDm } from '../lib/assert-game-dm.js';
-import { assertGameMember } from '../lib/game-access.js';
+import { resolveGameMemberAccess } from '../lib/game-access.js';
 import { emitToGame } from '../lib/game-socket.js';
 import { prisma } from '../lib/prisma.js';
 import { applyDamageToTarget, listGameDiceRolls, rollAndPersist } from '../services/dice.js';
@@ -17,16 +16,11 @@ import {
 export async function diceRoutes(app: FastifyInstance) {
   app.get(
     '/games/:gameId/dice-rolls',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireMember] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
       const parsed = diceRollQuerySchema.safeParse(request.query);
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
-
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
 
       const rolls = await listGameDiceRolls(gameId, parsed.data.limit);
       return { rolls };
@@ -40,7 +34,7 @@ export async function diceRoutes(app: FastifyInstance) {
     const parsed = diceRollRequestSchema.safeParse(request.body);
     if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
-    const access = await assertGameMember(request.userId!, parsed.data.gameId);
+    const access = await resolveGameMemberAccess(request.userId!, parsed.data.gameId);
     if (!access.ok) {
       throw app.httpErrors.createError(access.status, access.message);
     }
@@ -84,13 +78,9 @@ export async function diceRoutes(app: FastifyInstance) {
 
   app.post(
     '/games/:gameId/apply-damage',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameDm(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
 
       const parsed = applyDamageSchema.safeParse(request.body);
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);

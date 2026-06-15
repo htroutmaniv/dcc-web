@@ -9,7 +9,7 @@ import {
   serializeGameForClient,
   gameWithSettingsInclude,
 } from '../services/game-settings-service.js';
-import { assertGameMember, generateUniqueInviteCode, isGameDm } from '../lib/game-access.js';
+import { clearGameMembershipCache, generateUniqueInviteCode, isGameDm } from '../lib/game-access.js';
 import { emitToGame, emitToUsers } from '../lib/game-socket.js';
 import { prisma } from '../lib/prisma.js';
 
@@ -102,6 +102,7 @@ export async function gameRoutes(app: FastifyInstance) {
       await prisma.gamePlayer.create({
         data: { gameId: game.id, userId, role: 'player' },
       });
+      clearGameMembershipCache(game.id);
       emitToGame(app.io, game.id, 'game:roster_changed', { actorUserId: userId });
     }
     return { game: serializeGameForClient(
@@ -112,13 +113,12 @@ export async function gameRoutes(app: FastifyInstance) {
     ), role: 'player' as const };
   });
 
-  app.get('/games/:gameId', { onRequest: [app.authenticate] }, async (request) => {
+  app.get('/games/:gameId', {
+    onRequest: [app.authenticate],
+    preHandler: [app.requireMember],
+  }, async (request) => {
     const { gameId } = request.params as { gameId: string };
-    const userId = request.userId!;
-    const access = await assertGameMember(userId, gameId);
-    if (!access.ok) {
-      throw app.httpErrors.createError(access.status, access.message);
-    }
+    const userId = request.gameAccess!.userId;
     const game = await prisma.game.findUniqueOrThrow({
       where: { id: gameId },
       include: {
@@ -135,14 +135,13 @@ export async function gameRoutes(app: FastifyInstance) {
     };
   });
 
-  app.delete('/games/:gameId', { onRequest: [app.authenticate] }, async (request) => {
+  app.delete('/games/:gameId', {
+    onRequest: [app.authenticate],
+    preHandler: [app.requireDm],
+  }, async (request) => {
     const { gameId } = request.params as { gameId: string };
-    const userId = request.userId!;
-    const game = await prisma.game.findUnique({ where: { id: gameId } });
-    if (!game) return app.httpErrors.notFound('Game not found');
-    if (!isGameDm(game, userId)) {
-      return app.httpErrors.forbidden('Only the game creator can delete this game');
-    }
+    const userId = request.gameAccess!.userId;
+    const game = request.gameAccess!.game;
     const members = await prisma.gamePlayer.findMany({
       where: { gameId },
       select: { userId: true },
@@ -154,16 +153,11 @@ export async function gameRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  app.patch('/games/:gameId/settings', { onRequest: [app.authenticate] }, async (request) => {
+  app.patch('/games/:gameId/settings', {
+    onRequest: [app.authenticate],
+    preHandler: [app.requireDm],
+  }, async (request) => {
     const { gameId } = request.params as { gameId: string };
-    const access = await assertGameMember(request.userId!, gameId);
-    if (!access.ok) {
-      throw app.httpErrors.createError(access.status, access.message);
-    }
-    if (!access.isDm) {
-      return app.httpErrors.forbidden('Only the DM can change game settings');
-    }
-
     const parsed = patchGameSettingsSchema.safeParse(request.body);
     if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
     if (Object.keys(parsed.data).length === 0) {

@@ -139,18 +139,18 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 
 **Exit criteria:** no more JSON read-modify-write races; map sync is O(1) queries; data tables stop growing unbounded.
 
-> **Progress (2026-06-15):** Phase 2 complete (2.1–2.5). Run `bun run db:migrate` to apply float-coords migration.
+> **Progress (2026-06-15):** Phase 3 started — 3.1 (decorators + membership cache), 3.2 (game-state), 3.5 (storage paths) complete. Next: 3.3 event facade, 3.6 deprecated path removal.
 
 ---
 
 ## Phase 3 — Backend cleanup & efficiency
 
 ### 3.1 Membership + DM Fastify decorators — M
-- [ ] Add a plugin that resolves `:gameId` from the route, caches the result on `request.gameAccess`, and exposes:
-  - [ ] `requireMember` preHandler
-  - [ ] `requireDm` preHandler
-- [ ] Replace the ~30 inline `assertGameMember` blocks across `routes/{characters,games,maps,monsters,initiative,dice}.ts`.
-- [ ] Add a 30-second LRU keyed by `userId:gameId` (configurable, off in test) to cut DB hits on socket-heavy games.
+- [x] Add a plugin that resolves `:gameId` from the route, caches the result on `request.gameAccess`, and exposes:
+  - [x] `requireMember` preHandler
+  - [x] `requireDm` preHandler
+- [x] Replace inline `assertGameMember` blocks across `routes/{characters,games,maps,monsters,initiative,dice}.ts` (token/movement routes still resolve gameId from entity).
+- [x] Add a 30-second LRU keyed by `userId:gameId` via `resolveGameMemberAccess` (`GAME_MEMBERSHIP_CACHE_TTL_MS`, off in test).
 
 ### 3.2 Break map ↔ monster service cycle — S
 - [x] Create `apps/api/src/services/game-state.ts` to own cross-entity effects (`onMonsterDeleted` deletes map tokens, removes monster row, syncs initiative).
@@ -170,7 +170,8 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [ ] Filename = `${mapId}-${sha256}.{ext}`; switch old file out atomically.
 
 ### 3.5 Storage path consistency — S
-- [ ] `apps/api/src/services/map-service.ts:19` and `apps/api/src/routes/maps.ts:28` both hardcode `process.cwd()/data/uploads/maps`. Read from `config.storagePath` once and reuse.
+- [x] Centralize map upload paths in `apps/api/src/lib/storage-paths.ts`; read from `config.storagePath` (default `./data/uploads`).
+- [x] Reuse in `map-service.ts`, `routes/maps.ts`, and `data-retention.ts`.
 
 ### 3.6 Remove deprecated paths — S
 - [ ] Delete `POST /games/:gameId/characters/generate` (`apps/api/src/routes/characters.ts:182-213`).

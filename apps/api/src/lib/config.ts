@@ -78,7 +78,12 @@ export const config = {
     from: process.env.MAIL_FROM ?? '',
   },
   sessionCookieName: process.env.SESSION_COOKIE_NAME ?? 'dcc_session',
-  storagePath: process.env.STORAGE_PATH ?? './uploads',
+  storagePath: process.env.STORAGE_PATH ?? './data/uploads',
+  /** Membership lookup cache TTL (ms). Disabled when 0 or in test. */
+  gameMembershipCacheTtlMs:
+    process.env.NODE_ENV === 'test'
+      ? 0
+      : Number(process.env.GAME_MEMBERSHIP_CACHE_TTL_MS ?? 30_000),
   /** Max dice roll rows retained per game (older rows pruned by retention job). */
   diceRollRetentionPerGame: Number(process.env.DICE_ROLL_RETENTION_PER_GAME ?? 500),
   /** How often to run DB / upload retention (default 24h). */

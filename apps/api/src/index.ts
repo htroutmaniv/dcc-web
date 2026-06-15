@@ -2,7 +2,7 @@ import './load-env.js';
 import { Server } from 'socket.io';
 import { config } from './lib/config.js';
 import { buildApp } from './app.js';
-import { assertGameMember } from './lib/game-access.js';
+import { resolveGameMemberAccess } from './lib/game-access.js';
 import {
   addGamePresence,
   removeGamePresence,
@@ -49,7 +49,7 @@ io.on('connection', (socket) => {
       const gameId = payload?.gameId;
       const userId = socket.data.userId as string | undefined;
       if (!gameId || !userId) return;
-      const access = await assertGameMember(userId, gameId);
+      const access = await resolveGameMemberAccess(userId, gameId);
       if (!access.ok) {
         socket.emit('game:error', { message: access.message });
         return;

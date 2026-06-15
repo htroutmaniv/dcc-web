@@ -1,9 +1,9 @@
 import { readdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../lib/config.js';
+import { mapUploadDir, MAP_UPLOAD_URL_PREFIX } from '../lib/storage-paths.js';
 import { prisma } from '../lib/prisma.js';
 
-const MAP_UPLOAD_DIR = path.join(process.cwd(), 'data', 'uploads', 'maps');
 const MOVEMENT_REQUEST_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Keep only the N most recent dice rolls per game. */
@@ -43,13 +43,13 @@ export async function sweepOrphanMapUploads(): Promise<number> {
   let removed = 0;
   let files: string[];
   try {
-    files = await readdir(MAP_UPLOAD_DIR);
+    files = await readdir(mapUploadDir());
   } catch {
     return 0;
   }
 
   const maps = await prisma.gameMap.findMany({
-    where: { imageUrl: { startsWith: '/uploads/maps/' } },
+    where: { imageUrl: { startsWith: MAP_UPLOAD_URL_PREFIX } },
     select: { imageUrl: true },
   });
   const referenced = new Set(
@@ -62,7 +62,7 @@ export async function sweepOrphanMapUploads(): Promise<number> {
   for (const file of files) {
     if (referenced.has(file)) continue;
     try {
-      await unlink(path.join(MAP_UPLOAD_DIR, file));
+      await unlink(path.join(mapUploadDir(), file));
       removed += 1;
     } catch {
       // ignore missing / locked files

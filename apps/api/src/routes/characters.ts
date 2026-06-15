@@ -8,7 +8,7 @@ import {
 import type { CharacterStats } from '@dcc-web/shared';
 import type { Prisma } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
-import { assertGameMember } from '../lib/game-access.js';
+import { resolveGameMemberAccess } from '../lib/game-access.js';
 import { prisma } from '../lib/prisma.js';
 import {
   createManualCharacterData,
@@ -50,22 +50,21 @@ async function assertValidCharacterOwner(
 export async function characterRoutes(app: FastifyInstance) {
   app.get(
     '/games/:gameId/characters',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireMember] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
+      const access = request.gameAccess!;
       const { status, includeDead } = request.query as {
         status?: string;
         includeDead?: string;
       };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
 
       const where: {
         gameId: string;
         ownerUserId?: string;
         status?: 'alive' | 'dead' | 'archived' | { in: ('alive' | 'dead')[] };
       } = { gameId };
-      if (!access.isDm) where.ownerUserId = request.userId!;
+      if (!access.isDm) where.ownerUserId = access.userId;
       if (status === 'alive' || status === 'dead' || status === 'archived') {
         where.status = status;
       } else if (includeDead === 'true' && access.isDm) {
@@ -120,12 +119,10 @@ export async function characterRoutes(app: FastifyInstance) {
 
   app.post(
     '/games/:gameId/characters',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireMember] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
-
+      const access = request.gameAccess!;
       const parsed = createCharacterSchema.safeParse(request.body ?? {});
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
@@ -183,12 +180,10 @@ export async function characterRoutes(app: FastifyInstance) {
   /** @deprecated Prefer POST /games/:gameId/characters with mode "random" */
   app.post(
     '/games/:gameId/characters/generate',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireMember] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
-
+      const access = request.gameAccess!;
       const parsed = generateCharacterSchema.safeParse(request.body ?? {});
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
@@ -229,7 +224,7 @@ export async function characterRoutes(app: FastifyInstance) {
       const existing = await prisma.character.findUniqueOrThrow({
         where: { id: characterId },
       });
-      const access = await assertGameMember(request.userId!, existing.gameId);
+      const access = await resolveGameMemberAccess(request.userId!, existing.gameId);
       if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
       if (!access.isDm && existing.ownerUserId !== request.userId!) {
         throw app.httpErrors.forbidden('Cannot edit another player\'s character');
@@ -394,7 +389,7 @@ export async function characterRoutes(app: FastifyInstance) {
       const existing = await prisma.character.findUniqueOrThrow({
         where: { id: characterId },
       });
-      const access = await assertGameMember(request.userId!, existing.gameId);
+      const access = await resolveGameMemberAccess(request.userId!, existing.gameId);
       if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
       if (!access.isDm && existing.ownerUserId !== request.userId!) {
         throw app.httpErrors.forbidden('Cannot edit another player\'s character');
@@ -457,7 +452,7 @@ export async function characterRoutes(app: FastifyInstance) {
         where: { id: characterId },
         include: { game: { include: gameWithSettingsInclude } },
       });
-      const access = await assertGameMember(request.userId!, character.gameId);
+      const access = await resolveGameMemberAccess(request.userId!, character.gameId);
       if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
       if (!access.isDm && character.ownerUserId !== request.userId!) {
         throw app.httpErrors.forbidden();

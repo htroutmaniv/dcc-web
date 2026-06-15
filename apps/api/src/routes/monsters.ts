@@ -9,8 +9,6 @@ import {
   upsertMonsterCatalogSchema,
 } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
-import { assertGameDm } from '../lib/assert-game-dm.js';
-import { assertGameMember } from '../lib/game-access.js';
 import { emitToGame } from '../lib/game-socket.js';
 import { syncActiveMapTokens } from '../services/map-service.js';
 import { prisma } from '../lib/prisma.js';
@@ -208,13 +206,9 @@ export async function monsterRoutes(app: FastifyInstance) {
 
   app.get(
     '/games/:gameId/monsters',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireMember] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
       const monsters = await listGameMonsters(gameId);
       return { monsters };
     },
@@ -222,13 +216,9 @@ export async function monsterRoutes(app: FastifyInstance) {
 
   app.get(
     '/games/:gameId/monsters/:monsterId',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireMember] },
     async (request) => {
       const { gameId, monsterId } = request.params as { gameId: string; monsterId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
       const monster = await getGameMonster(gameId, monsterId);
       return { monster };
     },
@@ -236,13 +226,9 @@ export async function monsterRoutes(app: FastifyInstance) {
 
   app.post(
     '/games/:gameId/monsters/spawn',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameDm(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
       const parsed = spawnMonstersSchema.safeParse(request.body);
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
@@ -259,13 +245,9 @@ export async function monsterRoutes(app: FastifyInstance) {
 
   app.post(
     '/games/:gameId/monsters/add-to-initiative',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameDm(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
       const parsed = addMonstersToInitiativeSchema.safeParse(request.body ?? {});
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
@@ -277,16 +259,12 @@ export async function monsterRoutes(app: FastifyInstance) {
 
   app.patch(
     '/games/:gameId/monsters/:monsterId',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId, monsterId } = request.params as {
         gameId: string;
         monsterId: string;
       };
-      const access = await assertGameDm(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
       const parsed = patchGameMonsterSchema.safeParse(request.body);
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
@@ -303,16 +281,12 @@ export async function monsterRoutes(app: FastifyInstance) {
 
   app.put(
     '/games/:gameId/monsters/:monsterId/items',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId, monsterId } = request.params as {
         gameId: string;
         monsterId: string;
       };
-      const access = await assertGameDm(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
       const parsed = replaceMonsterItemsSchema.safeParse(request.body);
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
@@ -324,20 +298,17 @@ export async function monsterRoutes(app: FastifyInstance) {
 
   app.post(
     '/games/:gameId/transfer-item',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireMember] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
+      const access = request.gameAccess!;
       const parsed = transferInventoryItemSchema.safeParse(request.body);
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 
       try {
         await assertTransferInventoryAllowed({
           gameId,
-          userId: request.userId!,
+          userId: access.userId,
           isDm: access.isDm,
           gameSettings: await loadGameSettings(gameId),
           input: parsed.data,
@@ -368,16 +339,12 @@ export async function monsterRoutes(app: FastifyInstance) {
 
   app.delete(
     '/games/:gameId/monsters/:monsterId',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId, monsterId } = request.params as {
         gameId: string;
         monsterId: string;
       };
-      const access = await assertGameDm(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
       const { initiative } = await deleteGameMonster(gameId, monsterId);
       await syncActiveMapTokens(gameId);
       emitMonstersChanged(app, gameId, request.userId);

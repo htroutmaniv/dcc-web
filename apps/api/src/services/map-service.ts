@@ -14,13 +14,12 @@ import type { Prisma } from '@prisma/client';
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '../lib/prisma.js';
+import { mapUploadDir, mapUploadPathFromUrl, MAP_UPLOAD_URL_PREFIX } from '../lib/storage-paths.js';
 import {
   loadGameWithSettings,
   readGameSettings,
   setGameActiveMapId,
 } from './game-settings-service.js';
-
-const UPLOAD_DIR = path.join(process.cwd(), 'data', 'uploads', 'maps');
 
 export type MapTokenDto = {
   id: string;
@@ -230,12 +229,12 @@ async function saveMapImage(mapId: string, dataUrl: string): Promise<{
   const ext = m[1]!.toLowerCase() === 'jpeg' ? 'jpg' : m[1]!.toLowerCase();
   const buf = Buffer.from(m[2]!, 'base64');
   if (buf.length > 4_000_000) throw new Error('Image too large (max 4MB)');
-  await mkdir(UPLOAD_DIR, { recursive: true });
+  await mkdir(mapUploadDir(), { recursive: true });
   const filename = `${mapId}.${ext}`;
-  const filePath = path.join(UPLOAD_DIR, filename);
+  const filePath = path.join(mapUploadDir(), filename);
   await writeFile(filePath, buf);
   return {
-    imageUrl: `/uploads/maps/${filename}`,
+    imageUrl: `${MAP_UPLOAD_URL_PREFIX}${filename}`,
     widthPx: 0,
     heightPx: 0,
   };
@@ -276,9 +275,9 @@ export async function patchGameMap(
     (data as Prisma.GameMapUpdateInput & { imageScale?: number }).imageScale = patch.imageScale;
   }
   if (patch.clearImage) {
-    if (existing.imageUrl?.startsWith('/uploads/maps/')) {
-      const file = path.join(UPLOAD_DIR, path.basename(existing.imageUrl));
-      await unlink(file).catch(() => {});
+    const existingFile = mapUploadPathFromUrl(existing.imageUrl);
+    if (existingFile) {
+      await unlink(existingFile).catch(() => {});
     }
     data.imageUrl = null;
     data.widthPx = 0;
@@ -303,9 +302,9 @@ export async function deleteGameMap(
   const count = await prisma.gameMap.count({ where: { gameId } });
   if (count <= 1) throw new Error('Cannot delete the only map');
   const existing = await prisma.gameMap.findFirstOrThrow({ where: { id: mapId, gameId } });
-  if (existing.imageUrl?.startsWith('/uploads/maps/')) {
-    const file = path.join(UPLOAD_DIR, path.basename(existing.imageUrl));
-    await unlink(file).catch(() => {});
+  const existingFile = mapUploadPathFromUrl(existing.imageUrl);
+  if (existingFile) {
+    await unlink(existingFile).catch(() => {});
   }
   await prisma.gameMap.delete({ where: { id: mapId } });
   const { maps, activeMapId } = await listGameMaps(gameId);

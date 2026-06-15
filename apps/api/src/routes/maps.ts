@@ -6,9 +6,10 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { createReadStream, existsSync } from 'node:fs';
 import path from 'node:path';
-import { assertGameMember } from '../lib/game-access.js';
+import { resolveGameMemberAccess } from '../lib/game-access.js';
 import { emitToGame } from '../lib/game-socket.js';
 import { parseLayoutTokensBody } from '../lib/parse-layout-tokens.js';
+import { mapUploadFilePath } from '../lib/storage-paths.js';
 import { prisma } from '../lib/prisma.js';
 import { gameWithSettingsInclude, readGameSettings } from '../services/game-settings-service.js';
 import {
@@ -25,7 +26,6 @@ import {
 
 const HOLDING_X = -1;
 const HOLDING_Y_BASE = 0;
-const UPLOAD_DIR = path.join(process.cwd(), 'data', 'uploads', 'maps');
 
 function emitMapState(app: FastifyInstance, gameId: string, actorUserId?: string) {
   emitToGame(app.io, gameId, 'map:updated', { actorUserId });
@@ -37,7 +37,7 @@ export async function mapRoutes(app: FastifyInstance) {
     if (!/^[\w.-]+\.(png|jpg|jpeg|webp)$/i.test(filename)) {
       return reply.status(400).send({ error: 'Invalid filename' });
     }
-    const filePath = path.join(UPLOAD_DIR, filename);
+    const filePath = mapUploadFilePath(filename);
     if (!existsSync(filePath)) return reply.status(404).send({ error: 'Not found' });
     const stream = createReadStream(filePath);
     const ext = path.extname(filename).toLowerCase();
@@ -52,23 +52,18 @@ export async function mapRoutes(app: FastifyInstance) {
 
   app.get(
     '/games/:gameId/maps',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireMember] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
       return listGameMaps(gameId);
     },
   );
 
   app.post(
     '/games/:gameId/maps',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
-      if (!access.isDm) throw app.httpErrors.forbidden('DM only');
       const parsed = createGameMapSchema.safeParse(request.body ?? {});
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
       const map = await createGameMap(gameId, parsed.data);
@@ -79,11 +74,9 @@ export async function mapRoutes(app: FastifyInstance) {
 
   app.patch(
     '/games/:gameId/maps/active',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireMember] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
       const parsed = setActiveMapSchema.safeParse(request.body);
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
       const activeMapId = await setActiveMapId(gameId, parsed.data.mapId);
@@ -94,12 +87,9 @@ export async function mapRoutes(app: FastifyInstance) {
 
   app.patch(
     '/games/:gameId/maps/:mapId',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId, mapId } = request.params as { gameId: string; mapId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
-      if (!access.isDm) throw app.httpErrors.forbidden('DM only');
       const parsed = patchGameMapSchema.safeParse(request.body);
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
       const map = await patchGameMap(gameId, mapId, {
@@ -113,12 +103,9 @@ export async function mapRoutes(app: FastifyInstance) {
 
   app.delete(
     '/games/:gameId/maps/:mapId',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId, mapId } = request.params as { gameId: string; mapId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
-      if (!access.isDm) throw app.httpErrors.forbidden('DM only');
       try {
         const { activeMapId } = await deleteGameMap(gameId, mapId);
         emitMapState(app, gameId, request.userId);
@@ -132,12 +119,9 @@ export async function mapRoutes(app: FastifyInstance) {
 
   app.post(
     '/games/:gameId/maps/:mapId/sync-tokens',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId, mapId } = request.params as { gameId: string; mapId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
-      if (!access.isDm) throw app.httpErrors.forbidden('DM only');
       const map = await syncMapTokens(gameId, mapId);
       emitMapState(app, gameId, request.userId);
       return { map };
@@ -146,12 +130,9 @@ export async function mapRoutes(app: FastifyInstance) {
 
   app.post(
     '/games/:gameId/maps/:mapId/layout-tokens',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId, mapId } = request.params as { gameId: string; mapId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
-      if (!access.isDm) throw app.httpErrors.forbidden('DM only');
       const map = await layoutMapTokens(
         gameId,
         mapId,
@@ -164,12 +145,9 @@ export async function mapRoutes(app: FastifyInstance) {
 
   app.post(
     '/games/:gameId/map/reset-tokens',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
-      if (!access.isDm) throw app.httpErrors.forbidden('DM only');
 
       const { activeMapId } = await listGameMaps(gameId);
       if (!activeMapId) return { tokens: [] };
@@ -191,13 +169,10 @@ export async function mapRoutes(app: FastifyInstance) {
 
   app.post(
     '/games/:gameId/map/clear',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
       const body = (request.body ?? {}) as { clearImage?: boolean };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
-      if (!access.isDm) throw app.httpErrors.forbidden('DM only');
 
       const { activeMapId } = await listGameMaps(gameId);
       if (!activeMapId) return { map: null, tokens: [] };
@@ -217,16 +192,13 @@ export async function mapRoutes(app: FastifyInstance) {
 
   app.post(
     '/games/:gameId/maps/:mapId/characters/:characterId/token',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId, mapId, characterId } = request.params as {
         gameId: string;
         mapId: string;
         characterId: string;
       };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
-      if (!access.isDm) throw app.httpErrors.forbidden('DM only');
       const token = await ensureCharacterMapToken(gameId, mapId, characterId);
       emitMapState(app, gameId, request.userId);
       return { token };
@@ -248,7 +220,7 @@ export async function mapRoutes(app: FastifyInstance) {
         },
       });
       const gameId = token.map.gameId;
-      const access = await assertGameMember(request.userId!, gameId);
+      const access = await resolveGameMemberAccess(request.userId!, gameId);
       if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
 
       const settings = readGameSettings(token.map.game);
@@ -297,7 +269,7 @@ export async function mapRoutes(app: FastifyInstance) {
         include: { map: true },
       });
       const gameId = token.map.gameId;
-      const access = await assertGameMember(request.userId!, gameId);
+      const access = await resolveGameMemberAccess(request.userId!, gameId);
       if (!access.ok) throw app.httpErrors.createError(access.status, access.message);
       if (!access.isDm) throw app.httpErrors.forbidden('DM only');
 
@@ -317,8 +289,8 @@ export async function mapRoutes(app: FastifyInstance) {
       const movement = await prisma.movementRequest.findUniqueOrThrow({
         where: { id },
       });
-      const gameAccess = await assertGameMember(request.userId!, movement.gameId);
-      if (!gameAccess.ok || !gameAccess.isDm) {
+      const access = await resolveGameMemberAccess(request.userId!, movement.gameId);
+      if (!access.ok || !access.isDm) {
         throw app.httpErrors.forbidden('DM only');
       }
 

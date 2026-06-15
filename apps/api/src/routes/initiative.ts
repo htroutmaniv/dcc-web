@@ -1,7 +1,5 @@
 import { initiativeEndTurnSchema } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
-import { assertGameDm } from '../lib/assert-game-dm.js';
-import { assertGameMember } from '../lib/game-access.js';
 import { prisma } from '../lib/prisma.js';
 import {
   advanceGameInitiative,
@@ -41,24 +39,20 @@ function emitInitiativeUpdate(
 }
 
 export async function initiativeRoutes(app: FastifyInstance) {
-  app.get('/games/:gameId/initiative', { onRequest: [app.authenticate] }, async (request) => {
-    const { gameId } = request.params as { gameId: string };
-    const access = await assertGameMember(request.userId!, gameId);
-    if (!access.ok) {
-      throw app.httpErrors.createError(access.status, access.message);
-    }
-    return { initiative: await getInitiativeForGame(gameId) };
-  });
+  app.get(
+    '/games/:gameId/initiative',
+    { onRequest: [app.authenticate], preHandler: [app.requireMember] },
+    async (request) => {
+      const { gameId } = request.params as { gameId: string };
+      return { initiative: await getInitiativeForGame(gameId) };
+    },
+  );
 
   app.post(
     '/games/:gameId/initiative/start',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameDm(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
       const initiative = await startGameInitiative(gameId);
       await syncActiveMapTokens(gameId);
       emitInitiativeUpdate(app, gameId, initiative, request.userId);
@@ -69,13 +63,9 @@ export async function initiativeRoutes(app: FastifyInstance) {
 
   app.post(
     '/games/:gameId/initiative/advance',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameDm(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
       const { initiative, mortalityUpdates } = await advanceGameInitiative(gameId);
       emitInitiativeUpdate(app, gameId, initiative, request.userId);
       await broadcastMortalityUpdates(app, gameId, mortalityUpdates, request.userId);
@@ -85,13 +75,9 @@ export async function initiativeRoutes(app: FastifyInstance) {
 
   app.post(
     '/games/:gameId/initiative/end',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireDm] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameDm(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
       await endGameInitiative(gameId);
       emitInitiativeUpdate(app, gameId, null, request.userId);
       return { initiative: null };
@@ -100,13 +86,10 @@ export async function initiativeRoutes(app: FastifyInstance) {
 
   app.post(
     '/games/:gameId/initiative/end-turn',
-    { onRequest: [app.authenticate] },
+    { onRequest: [app.authenticate], preHandler: [app.requireMember] },
     async (request) => {
       const { gameId } = request.params as { gameId: string };
-      const access = await assertGameMember(request.userId!, gameId);
-      if (!access.ok) {
-        throw app.httpErrors.createError(access.status, access.message);
-      }
+      const access = request.gameAccess!;
       const parsed = initiativeEndTurnSchema.safeParse(request.body ?? {});
       if (!parsed.success) {
         return app.httpErrors.badRequest(parsed.error.message);
@@ -114,7 +97,7 @@ export async function initiativeRoutes(app: FastifyInstance) {
       try {
         const { initiative, mortalityUpdates } = await endCharacterTurn({
           gameId,
-          userId: request.userId!,
+          userId: access.userId,
           isDm: access.isDm,
           characterId: parsed.data.characterId,
         });
