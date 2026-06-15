@@ -7,13 +7,8 @@ export function getUserIdFromSocketCookie(
   cookieHeader: string | undefined,
 ): string | undefined {
   if (!cookieHeader) return undefined;
-  const name = `${config.sessionCookieName}=`;
-  const part = cookieHeader
-    .split(';')
-    .map((c) => c.trim())
-    .find((c) => c.startsWith(name));
-  if (!part) return undefined;
-  const token = decodeURIComponent(part.slice(name.length));
+  const cookies = app.parseCookie(cookieHeader);
+  const token = cookies[config.sessionCookieName];
   if (!token) return undefined;
   try {
     const decoded = app.jwt.verify<{ sub: string }>(token);

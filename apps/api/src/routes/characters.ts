@@ -3,6 +3,7 @@ import {
   generateCharacterSchema,
   patchCharacterSchema,
   replaceCharacterItemsSchema,
+  warnUnknownCharacterStatsCustomKeys,
 } from '@dcc-web/shared';
 import type { CharacterStats } from '@dcc-web/shared';
 import type { Prisma } from '@prisma/client';
@@ -219,6 +220,10 @@ export async function characterRoutes(app: FastifyInstance) {
       const { characterId } = request.params as { characterId: string };
       const parsed = patchCharacterSchema.safeParse(request.body);
       if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
+      warnUnknownCharacterStatsCustomKeys(
+        parsed.data.stats?.custom as Record<string, unknown> | undefined,
+        request.log,
+      );
 
       const existing = await prisma.character.findUniqueOrThrow({
         where: { id: characterId },

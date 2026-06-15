@@ -33,7 +33,10 @@ export async function diceRoutes(app: FastifyInstance) {
     },
   );
 
-  app.post('/dice/roll', { onRequest: [app.authenticate] }, async (request) => {
+  app.post('/dice/roll', {
+    onRequest: [app.authenticate],
+    config: app.routeRateLimits.diceRoll,
+  }, async (request) => {
     const parsed = diceRollRequestSchema.safeParse(request.body);
     if (!parsed.success) return app.httpErrors.badRequest(parsed.error.message);
 

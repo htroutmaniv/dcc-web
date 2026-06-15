@@ -31,6 +31,7 @@ interface AuthContextValue {
   }) => Promise<{ message: string }>;
   login: (params: { email: string; password: string }) => Promise<void>;
   resendVerification: (email: string) => Promise<{ message: string }>;
+  forgotPassword: (email: string) => Promise<{ message: string }>;
   logout: () => Promise<void>;
 }
 
@@ -117,6 +118,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { message: data.message };
   }, []);
 
+  const forgotPassword = useCallback(async (email: string) => {
+    const data = await api<{ ok: boolean; message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+    return { message: data.message };
+  }, []);
+
   const logout = useCallback(async () => {
     disconnectAccountSocket();
     await api('/auth/logout', { method: 'POST' });
@@ -134,9 +143,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       register,
       login,
       resendVerification,
+      forgotPassword,
       logout,
     }),
-    [user, health, loading, authConfig, refresh, devLogin, register, login, resendVerification, logout],
+    [user, health, loading, authConfig, refresh, devLogin, register, login, resendVerification, forgotPassword, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

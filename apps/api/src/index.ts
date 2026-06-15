@@ -18,7 +18,7 @@ await app.listen({ port: config.port, host: config.host });
 
 const io = new Server(app.server, {
   cors: {
-    origin: config.corsOrigins === true ? true : config.corsOrigins,
+    origin: config.corsOrigins,
     credentials: true,
   },
   // Generous timeouts for clients behind TLS-terminating reverse proxies (nginx).

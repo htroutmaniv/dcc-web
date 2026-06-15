@@ -23,15 +23,17 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
   - [x] `consumables.ts` — light source presets, `getCharacterLightRadiusFeet`, `resolveActiveLightItemId`
   - [x] `map-token-layout.ts` — `computeUpperLeftTokenGrid` / `computeUpperRightTokenGrid`
 
-### 0.2 API integration test harness — M
-- [ ] Choose: testcontainers-postgres **or** a shared throwaway db with schema-per-test.
-- [ ] Add `apps/api/test/` with a `buildTestApp()` helper that boots `buildApp()` against the test db.
-- [ ] First five tests (smoke):
-  - [ ] `POST /auth/dev-login` + `GET /auth/me` round-trip
-  - [ ] `POST /games` then `POST /games/join/:invite` as a second user
-  - [ ] `PATCH /characters/:id` with `status: 'dead'` triggers initiative reconcile + map sync
-  - [ ] `POST /games/:id/transfer-item` rejects player-to-player while initiative active
-  - [ ] `POST /games/:id/initiative/start` + `/advance` cycles round and ticks mortality
+### 0.2 API integration test harness — M *(deferred — see sequencing)*
+- [-] Choose: testcontainers-postgres **or** a shared throwaway db with schema-per-test.
+- [-] Add `apps/api/test/` with a `buildTestApp()` helper that boots `buildApp()` against the test db.
+- [-] First five tests (smoke):
+  - [-] `POST /auth/dev-login` + `GET /auth/me` round-trip
+  - [-] `POST /games` then `POST /games/join/:invite` as a second user
+  - [-] `PATCH /characters/:id` with `status: 'dead'` triggers initiative reconcile + map sync
+  - [-] `POST /games/:id/transfer-item` rejects player-to-player while initiative active
+  - [-] `POST /games/:id/initiative/start` + `/advance` cycles round and ticks mortality
+
+**Why deferred:** Phases 1–3 will reshape auth (rate limits, CSRF), `Game.settings` storage, initiative writes, route decorators, and the event facade. Writing integration tests now would mean rewriting the harness and every smoke test as those land. **Target: start 0.2 after Phase 3** (or late Phase 2 if 3 slips). Shared unit tests + CI (0.1, 0.3, 0.4) cover refactors until then.
 
 ### 0.3 CI — S
 - [x] Add a workflow that runs on PR:
@@ -46,57 +48,59 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [x] Have `apps/api`, `apps/web`, `packages/shared` extend it; keep only env-specific overrides (target, module, jsx).
 - [x] Fix any lints surfaced (api currently lacks `noUnusedLocals` — expect cleanup). *(shared + api + web typecheck green as of 2026-06-15)*
 
-**Exit criteria:** PR pipeline green; every push runs the suite; refactors in later phases are guarded.
+**Exit criteria:** PR pipeline green on shared build + tests and app typecheck/build. API integration tests (0.2) are a follow-up after Phase 3, not a gate for starting Phases 1–4.
 
-> **Progress (2026-06-15):** 0.1, 0.3, and 0.4 complete. 43 shared unit tests passing. CI workflow added. **0.2 (API integration tests) remains** — Phase 0 not fully closed until that lands.
+> **Progress (2026-06-15):** 0.1, 0.3, and 0.4 complete. 43 shared unit tests passing. CI workflow added. **0.2 deferred** until after Phase 3 to avoid rewriting tests against APIs and schema that are still moving.
 
 ---
 
 ## Phase 1 — Security & hardening (do before any production traffic)
 
 ### 1.1 Fail-fast on missing prod secrets — S
-- [ ] In `apps/api/src/lib/config.ts`, throw at boot when `NODE_ENV === 'production'` and any of these are unset / placeholder:
-  - [ ] `JWT_SECRET` (and is not `'dev-only-change-in-production'`)
-  - [ ] `CORS_ORIGIN` (and isn't `*`)
-  - [ ] `DATABASE_URL` (no `localhost` fallback in prod)
-  - [ ] If email auth is enabled: `RESEND_API_KEY`, `MAIL_FROM`, `PUBLIC_URL`
-- [ ] Log a single, clear startup error and exit non-zero.
+- [x] In `apps/api/src/lib/config.ts`, throw at boot when `NODE_ENV === 'production'` and any of these are unset / placeholder:
+  - [x] `JWT_SECRET` (and is not `'dev-only-change-in-production'`)
+  - [x] `CORS_ORIGIN` (and isn't `*`)
+  - [x] `DATABASE_URL` (no `localhost` fallback in prod)
+  - [x] If email auth is enabled: `RESEND_API_KEY`, `MAIL_FROM`, `PUBLIC_URL`
+- [x] Log a single, clear startup error and exit non-zero.
 
 ### 1.2 Rate limiting — S
-- [ ] Add `@fastify/rate-limit`.
-- [ ] Per-IP global default (e.g., 300 req / min).
-- [ ] Tighter buckets:
-  - [ ] `POST /auth/login` — 5/min/IP, 20/hour/account
-  - [ ] `POST /auth/register` — 3/min/IP, 10/day/IP
-  - [ ] `POST /auth/resend-verification` — 1/min/email
-  - [ ] `POST /auth/dev-login` — 30/min/IP (still useful in dev, harmless if `ENABLE_DEV_LOGIN` is false)
-  - [ ] `POST /games/join/:inviteCode` — 10/min/IP
-  - [ ] `POST /dice/roll` — 60/min/user (cheap defence against spam)
+- [x] Add `@fastify/rate-limit`.
+- [x] Per-IP global default (e.g., 300 req / min).
+- [x] Tighter buckets:
+  - [x] `POST /auth/login` — 5/min/IP, 20/hour/account
+  - [x] `POST /auth/register` — 3/min/IP, 10/day/IP
+  - [x] `POST /auth/resend-verification` — 1/min/email
+  - [x] `POST /auth/dev-login` — 30/min/IP (still useful in dev, harmless if `ENABLE_DEV_LOGIN` is false)
+  - [x] `POST /games/join/:inviteCode` — 10/min/IP
+  - [x] `POST /dice/roll` — 60/min/user (cheap defence against spam)
 
 ### 1.3 CSRF posture — M
-- [ ] Decide via ADR (see Phase 6): double-submit token vs `SameSite=Strict` on the session cookie.
-- [ ] If staying with `Lax`: add `@fastify/csrf-protection`, mint a token on `GET /auth/me`, validate on every non-GET. Update `apps/web/src/api/client.ts` to attach `X-CSRF-Token` automatically.
-- [ ] Add a test covering "cross-site POST without token is rejected".
+- [-] Decide via ADR (see Phase 6): double-submit token vs `SameSite=Strict` on the session cookie. *(Deferred — needs ADR-002 before implementation.)*
+- [-] If staying with `Lax`: add `@fastify/csrf-protection`, mint a token on `GET /auth/me`, validate on every non-GET. Update `apps/web/src/api/client.ts` to attach `X-CSRF-Token` automatically.
+- [-] Add a test covering "cross-site POST without token is rejected".
 
 ### 1.4 CORS tightening — S
-- [ ] Remove the `'*' → true` branch in `parseCorsOrigins`. With `credentials: true`, wildcard is meaningless; reject the config explicitly.
-- [ ] Require a comma-separated allowlist in production.
+- [x] Remove the `'*' → true` branch in `parseCorsOrigins`. With `credentials: true`, wildcard is meaningless; reject the config explicitly.
+- [x] Require a comma-separated allowlist in production.
 
 ### 1.5 Invite code RNG — S
-- [ ] Replace `Math.random()` in `apps/api/src/lib/game-access.ts:23-30` with `secureRandomInt` (already used elsewhere).
-- [ ] While there: enforce uniqueness by retrying on the (unlikely) collision.
+- [x] Replace `Math.random()` in `apps/api/src/lib/game-access.ts:23-30` with `secureRandomInt` (already used elsewhere).
+- [x] While there: enforce uniqueness by retrying on the (unlikely) collision.
 
 ### 1.6 Validate `stats.custom` and `combat` shapes — M
-- [ ] Build a concrete Zod schema for `CharacterStatsCustom` in `packages/shared/src/schemas.ts` listing the keys that exist today:
-  - [ ] `activeInPlay`, `selectedWeaponId`, `selectedWeaponName`, `selectedArmorId`, `selectedShieldId`, `selectedArmorName`, `selectedShieldName`, `baseSpeed`, `usingLightSource`, `activeLightItemId`, `mapTokenVisible`, `attackTargetRef`, `occupation`, `race`, `startingFunds`, `luckySign`, `languages`
-- [ ] Same for `combat`: `ac`, `hpMax`, `hpCurrent`, `hpTemp`, `markedDead`, `lastDeathRound`, etc.
-- [ ] Use `.passthrough()` *initially* with a soft warn-log so we catch any field we forgot; flip to `.strict()` after a release.
-- [ ] Update `patchCharacterSchema` to use these instead of `z.record(z.unknown())`.
+- [x] Build a concrete Zod schema for `CharacterStatsCustom` in `packages/shared/src/schemas.ts` listing the keys that exist today:
+  - [x] `activeInPlay`, `selectedWeaponId`, `selectedWeaponName`, `selectedArmorId`, `selectedShieldId`, `selectedArmorName`, `selectedShieldName`, `baseSpeed`, `usingLightSource`, `activeLightItemId`, `mapTokenVisible`, `attackTargetRef`, `occupation`, `race`, `startingFunds`, `luckySign`, `languages`
+- [x] Same for `combat`: `ac`, `hpMax`, `hpCurrent`, `hpTemp`, `markedDead`, `lastDeathRound`, etc.
+- [x] Use `.passthrough()` *initially* with a soft warn-log so we catch any field we forgot; flip to `.strict()` after a release.
+- [x] Update `patchCharacterSchema` to use these instead of `z.record(z.unknown())`.
 
 ### 1.7 Cookie parsing reuse — S
-- [ ] Replace the custom parser in `apps/api/src/lib/game-socket.ts` with `app.parseCookie(cookieHeader)` from `@fastify/cookie`.
+- [x] Replace the custom parser in `apps/api/src/lib/game-socket.ts` with `app.parseCookie(cookieHeader)` from `@fastify/cookie`.
 
 **Exit criteria:** prod boot refuses to start with bad config; brute-force endpoints rate-limited; no path accepts arbitrary JSON payloads into player-controlled fields.
+
+> **Progress (2026-06-15):** 1.1–1.2, 1.4–1.7 complete. **1.3 deferred** pending ADR-002 (CSRF strategy).
 
 ---
 
@@ -182,6 +186,11 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [ ] Gate `prisma generate` in root `postinstall` on `SKIP_POSTINSTALL=1` so CI install is faster.
 
 **Exit criteria:** routes contain only domain logic; cross-cutting concerns (auth, events, uploads) live in plugins; deploy is reproducible.
+
+### 3.8 API integration test harness *(carried from 0.2)* — M
+- [ ] Un-defer 0.2: choose test DB strategy, add `buildTestApp()`, land the five smoke tests listed in §0.2.
+- [ ] Wire `bun run --filter @dcc-web/api test` into CI (replace build-only step).
+- [ ] Add regression tests for Phase 2–3 work: optimistic initiative retry, batched `syncMapTokens`, decorator auth paths.
 
 ---
 
@@ -310,15 +319,16 @@ Create `docs/adr/` and add:
 ## Sequencing & dependencies
 
 ```
-Phase 0 ──┬─→ Phase 1 ──┐
-          ├─→ Phase 2 ──┼─→ Phase 3 ──┬─→ Phase 4
-          └─────────────┘             └─→ Phase 5 ──→ Phase 6
+Phase 0 (0.1–0.4) ──┬─→ Phase 1 ──┐
+                    ├─→ Phase 2 ──┼─→ Phase 3 ──→ 0.2 / 3.8 ──┬─→ Phase 4
+                    └─────────────┘                           └─→ Phase 5 ──→ Phase 6
 ```
 
-- Phase 0 unblocks every later refactor. Do it first, do it fully.
+- Phase 0 (minus 0.2) unblocks every later refactor. Shared unit tests + CI are the safety net until API integration tests land.
+- **0.2 is intentionally deferred** until after Phase 3 so smoke tests are written once against stable routes, schema, and auth plugins.
 - Phases 1 and 2 are independent of each other; pick whichever risk feels hotter.
 - Phase 3 depends on Phase 2 (the decorator/event facade is much easier with first-class columns).
-- Phase 4 can begin in parallel with Phase 3 once Phase 0 is done, but the API client cleanup (4.6) is easier after the event facade (3.3).
+- Phase 4 can begin in parallel with Phase 3 once Phase 0 (0.1–0.4) is done; API client cleanup (4.6) is easier after the event facade (3.3).
 - Phase 5 needs Phase 3 (esp. event facade) to be sane.
 - Phase 6 is mostly documentation; the ADRs themselves should be drafted **before** the corresponding phases start, ratified during, and finalized after.
 

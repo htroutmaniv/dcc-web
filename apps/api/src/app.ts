@@ -5,6 +5,7 @@ import jwt from '@fastify/jwt';
 import sensible from '@fastify/sensible';
 import { config } from './lib/config.js';
 import { registerAuth } from './plugins/auth.js';
+import { createRouteRateLimits, registerRateLimit } from './plugins/rate-limit.js';
 import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './routes/auth.js';
 import { gameRoutes } from './routes/games.js';
@@ -20,6 +21,7 @@ import { ensureCharacterNamesLoaded } from './services/name-service.js';
 declare module 'fastify' {
   interface FastifyInstance {
     io: import('socket.io').Server | null;
+    routeRateLimits: ReturnType<typeof import('./plugins/rate-limit.js').createRouteRateLimits>;
   }
 }
 
@@ -40,6 +42,8 @@ export async function buildApp() {
       signed: false,
     },
   });
+  await registerRateLimit(app);
+  app.decorate('routeRateLimits', createRouteRateLimits(app));
   await registerAuth(app);
 
   await app.register(healthRoutes);

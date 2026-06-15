@@ -5,7 +5,7 @@ import {
 } from '@dcc-web/shared';
 import type { FastifyInstance } from 'fastify';
 import { syncMonsterGroupInitiative } from '../services/monster-service.js';
-import { assertGameMember, generateInviteCode, isGameDm } from '../lib/game-access.js';
+import { assertGameMember, generateUniqueInviteCode, isGameDm } from '../lib/game-access.js';
 import { emitToGame, emitToUsers } from '../lib/game-socket.js';
 import { prisma } from '../lib/prisma.js';
 
@@ -57,7 +57,7 @@ export async function gameRoutes(app: FastifyInstance) {
       data: {
         dmUserId: request.userId!,
         title: parsed.data.title,
-        inviteCode: generateInviteCode(),
+        inviteCode: await generateUniqueInviteCode(),
         maps: { create: { name: 'Main map' } },
       },
       include: { maps: true },
@@ -65,7 +65,10 @@ export async function gameRoutes(app: FastifyInstance) {
     return { game, role: 'dm' as const };
   });
 
-  app.post('/games/join/:inviteCode', { onRequest: [app.authenticate] }, async (request) => {
+  app.post('/games/join/:inviteCode', {
+    onRequest: [app.authenticate],
+    config: app.routeRateLimits.joinGame,
+  }, async (request) => {
     const { inviteCode } = request.params as { inviteCode: string };
     const userId = request.userId!;
     const game = await prisma.game.findUnique({ where: { inviteCode } });

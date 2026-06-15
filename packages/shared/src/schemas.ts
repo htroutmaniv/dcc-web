@@ -49,6 +49,103 @@ export const replaceCharacterItemsSchema = z.object({
   items: z.array(patchItemSchema).max(200),
 });
 
+const abilityScoreSchema = z.object({
+  score: z.number(),
+  modifier: z.number(),
+});
+
+/** Known keys on `character.stats.custom` — unknown keys allowed via passthrough until strict flip. */
+export const characterStatsCustomSchema = z
+  .object({
+    activeInPlay: z.boolean().optional(),
+    selectedWeaponId: z.string().max(64).optional(),
+    selectedWeaponName: z.string().max(200).optional(),
+    selectedArmorId: z.string().max(64).nullable().optional(),
+    selectedShieldId: z.string().max(64).nullable().optional(),
+    selectedArmorName: z.string().max(200).optional(),
+    selectedShieldName: z.string().max(200).optional(),
+    baseSpeed: z.number().optional(),
+    usingLightSource: z.boolean().optional(),
+    activeLightItemId: z.string().max(64).nullable().optional(),
+    mapTokenVisible: z.boolean().optional(),
+    /** Combat target ref (`monster:id`, `npc:id`, etc.) */
+    attackTarget: z.string().max(128).optional(),
+    attackTargetRef: z.string().max(128).optional(),
+    occupation: z.string().max(120).optional(),
+    race: z.string().max(64).optional(),
+    startingFunds: z.number().optional(),
+    luckySign: z.string().max(200).optional(),
+    languages: z.union([z.string(), z.array(z.string())]).optional(),
+  })
+  .passthrough();
+
+export const KNOWN_CHARACTER_STATS_CUSTOM_KEYS = [
+  'activeInPlay',
+  'selectedWeaponId',
+  'selectedWeaponName',
+  'selectedArmorId',
+  'selectedShieldId',
+  'selectedArmorName',
+  'selectedShieldName',
+  'baseSpeed',
+  'usingLightSource',
+  'activeLightItemId',
+  'mapTokenVisible',
+  'attackTarget',
+  'attackTargetRef',
+  'occupation',
+  'race',
+  'startingFunds',
+  'luckySign',
+  'languages',
+] as const;
+
+/** Soft warn for keys not yet in the strict schema (passthrough period). */
+export function warnUnknownCharacterStatsCustomKeys(
+  custom: Record<string, unknown> | undefined,
+  log: { warn: (obj: object, msg?: string) => void },
+): void {
+  if (!custom) return;
+  const known = new Set<string>(KNOWN_CHARACTER_STATS_CUSTOM_KEYS);
+  for (const key of Object.keys(custom)) {
+    if (!known.has(key)) {
+      log.warn({ key }, 'Unknown character.stats.custom key');
+    }
+  }
+}
+
+export const characterStatsPatchSchema = z
+  .object({
+    abilities: z.record(abilityScoreSchema).optional(),
+    saves: z.record(z.number()).optional(),
+    speed: z.number().optional(),
+    armorSpeedPenalty: z.number().optional(),
+    movementModifiers: z
+      .array(z.object({ label: z.string().max(120), feet: z.number() }))
+      .optional(),
+    initiative: z.number().optional(),
+    custom: characterStatsCustomSchema.optional(),
+  })
+  .passthrough();
+
+export const characterCombatCustomSchema = z
+  .object({
+    mortalRoundsRemaining: z.number().int().min(0).optional(),
+    markedDead: z.boolean().optional(),
+    lastDeathRound: z.number().int().optional(),
+  })
+  .passthrough();
+
+export const characterCombatPatchSchema = z
+  .object({
+    ac: z.number().int().optional(),
+    hpMax: z.number().int().min(0).optional(),
+    hpCurrent: z.number().int().optional(),
+    hpTemp: z.number().int().min(0).optional(),
+    custom: characterCombatCustomSchema.optional(),
+  })
+  .passthrough();
+
 export const patchCharacterSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   level: z.number().int().min(0).max(30).optional(),
@@ -56,8 +153,8 @@ export const patchCharacterSchema = z.object({
   alignment: z.string().max(32).optional(),
   status: z.enum(['alive', 'dead', 'archived']).optional(),
   ownerUserId: z.string().uuid().optional(),
-  stats: z.record(z.unknown()).optional(),
-  combat: z.record(z.unknown()).optional(),
+  stats: characterStatsPatchSchema.optional(),
+  combat: characterCombatPatchSchema.optional(),
   notes: z.string().max(10000).optional(),
   items: z.array(patchItemSchema).optional(),
 });
@@ -281,4 +378,13 @@ export const loginSchema = z.object({
 
 export const resendVerificationSchema = z.object({
   email: z.string().email().max(255),
+});
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().email().max(255),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(32).max(128),
+  password: z.string().min(8).max(128),
 });

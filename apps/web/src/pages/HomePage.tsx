@@ -30,7 +30,7 @@ import { DeleteGameDialog } from '../components/DeleteGameDialog';
 import { useAuth } from '../context/AuthContext';
 import { useGameDeleteNotifications } from '../hooks/useGameDeleteNotifications';
 import type { GameListEntry } from '../types/game';
-import { authErrorMessage } from '../utils/auth-errors';
+import { authErrorMessage, authSuccessMessage } from '../utils/auth-errors';
 import { formatError } from '../utils/errors';
 
 export default function HomePage() {
@@ -114,6 +114,23 @@ export default function HomePage() {
         },
         { replace: true },
       );
+    }
+    const successCode = searchParams.get('auth_success');
+    if (successCode && successCode !== '1') {
+      const message = authSuccessMessage(successCode);
+      if (message) {
+        setAuthBanner(null);
+        setInfoBanner(message);
+        void refresh();
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete('auth_success');
+            return next;
+          },
+          { replace: true },
+        );
+      }
     }
   }, [searchParams, refresh, setSearchParams]);
 

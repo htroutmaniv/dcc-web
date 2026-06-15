@@ -1,10 +1,18 @@
-import { loginSchema, registerSchema, resendVerificationSchema } from '@dcc-web/shared';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import {
+  forgotPasswordSchema,
+  loginSchema,
+  registerSchema,
+  resendVerificationSchema,
+  resetPasswordSchema,
+} from '@dcc-web/shared';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../lib/config.js';
-import { consumeAuthToken, issueAuthToken } from '../lib/auth-tokens.js';
-import { sendMail, verificationEmailHtml } from '../lib/mail.js';
+import { consumeAuthToken, isAuthTokenValid, issueAuthToken } from '../lib/auth-tokens.js';
+import { passwordResetEmailHtml, sendMail, verificationEmailHtml } from '../lib/mail.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { prisma } from '../lib/prisma.js';
+import { normalizeEmailForRateLimit } from '../lib/request-user.js';
+import { registerDualRateLimit } from '../plugins/rate-limit.js';
 import { clearSessionCookie, setSessionCookie } from '../lib/session-cookie.js';
 
 export const DEV_AUTH_ACCOUNTS = {
@@ -51,6 +59,19 @@ async function sendVerificationEmail(userId: string, email: string): Promise<voi
   });
 }
 
+async function sendPasswordResetEmail(userId: string, email: string): Promise<void> {
+  const token = await issueAuthToken(userId, 'password_reset');
+  const resetUrl = `${appOrigin()}/reset-password?token=${encodeURIComponent(token)}`;
+  await sendMail({
+    to: email,
+    subject: 'Reset your DCC Web password',
+    html: passwordResetEmailHtml(resetUrl),
+  });
+}
+
+const FORGOT_PASSWORD_MESSAGE =
+  'If an account exists for that email, we sent password reset instructions.';
+
 export async function authRoutes(app: FastifyInstance) {
   app.get('/auth/config', async () => ({
     devLogin: config.enableDevLogin,
@@ -58,87 +79,118 @@ export async function authRoutes(app: FastifyInstance) {
     publicUrl: config.publicUrl,
   }));
 
-  app.post('/auth/register', async (request, reply) => {
-    if (!emailAuthEnabled()) {
-      return reply.status(503).send({ error: 'Email sign-up is not configured' });
-    }
+  await registerDualRateLimit(
+    app,
+    [
+      { max: 3, timeWindow: '1 minute' },
+      { max: 10, timeWindow: '1 day' },
+    ],
+    async (scoped) => {
+      scoped.post('/auth/register', async (request, reply) => {
+        if (!emailAuthEnabled()) {
+          return reply.status(503).send({ error: 'Email sign-up is not configured' });
+        }
 
-    const parsed = registerSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.status(400).send({ error: parsed.error.flatten().fieldErrors });
-    }
+        const parsed = registerSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: parsed.error.flatten().fieldErrors });
+        }
 
-    const email = normalizeEmail(parsed.data.email);
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing?.emailVerifiedAt) {
-      return reply.status(409).send({ error: 'An account with this email already exists' });
-    }
+        const email = normalizeEmail(parsed.data.email);
+        const existing = await prisma.user.findUnique({ where: { email } });
+        if (existing?.emailVerifiedAt) {
+          return reply.status(409).send({ error: 'An account with this email already exists' });
+        }
 
-    const passwordHash = await hashPassword(parsed.data.password);
-    const displayName = defaultDisplayName(email, parsed.data.displayName);
+        const passwordHash = await hashPassword(parsed.data.password);
+        const displayName = defaultDisplayName(email, parsed.data.displayName);
 
-    const user = existing
-      ? await prisma.user.update({
-          where: { id: existing.id },
-          data: { passwordHash, displayName },
-        })
-      : await prisma.user.create({
-          data: { email, passwordHash, displayName },
-        });
+        const user = existing
+          ? await prisma.user.update({
+              where: { id: existing.id },
+              data: { passwordHash, displayName },
+            })
+          : await prisma.user.create({
+              data: { email, passwordHash, displayName },
+            });
 
-    try {
-      await sendVerificationEmail(user.id, email);
-    } catch (err) {
-      request.log.error({ err }, 'Failed to send verification email');
-      return reply.status(502).send({ error: 'Could not send verification email. Try again later.' });
-    }
+        try {
+          await sendVerificationEmail(user.id, email);
+        } catch (err) {
+          request.log.error({ err }, 'Failed to send verification email');
+          return reply
+            .status(502)
+            .send({ error: 'Could not send verification email. Try again later.' });
+        }
 
-    return {
-      ok: true,
-      message: 'Check your email for a verification link.',
-    };
-  });
-
-  app.post('/auth/login', async (request, reply) => {
-    if (!emailAuthEnabled()) {
-      return reply.status(503).send({ error: 'Email sign-in is not configured' });
-    }
-
-    const parsed = loginSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.status(400).send({ error: parsed.error.flatten().fieldErrors });
-    }
-
-    const email = normalizeEmail(parsed.data.email);
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user?.passwordHash) {
-      return reply.status(401).send({ error: 'Invalid email or password' });
-    }
-
-    const valid = await verifyPassword(parsed.data.password, user.passwordHash);
-    if (!valid) {
-      return reply.status(401).send({ error: 'Invalid email or password' });
-    }
-
-    if (!user.emailVerifiedAt) {
-      return reply.status(403).send({
-        error: 'Email not verified',
-        code: 'email_not_verified',
+        return {
+          ok: true,
+          message: 'Check your email for a verification link.',
+        };
       });
-    }
+    },
+  );
 
-    sessionForUser(app, reply, user.id);
-    return {
-      user: {
-        id: user.id,
-        displayName: user.displayName,
-        email: user.email,
-        emailVerified: true,
+  await registerDualRateLimit(
+    app,
+    [
+      { max: 5, timeWindow: '1 minute' },
+      {
+        max: 20,
+        timeWindow: '1 hour',
+        keyGenerator: (request: FastifyRequest) => {
+          const body = request.body as { email?: string };
+          const email = normalizeEmailForRateLimit(body?.email);
+          return email ? `login-account:${email}` : request.ip;
+        },
       },
-    };
-  });
+    ],
+    async (scoped) => {
+      scoped.post('/auth/login', async (request, reply) => {
+        if (!emailAuthEnabled()) {
+          return reply.status(503).send({ error: 'Email sign-in is not configured' });
+        }
 
-  app.post('/auth/resend-verification', async (request, reply) => {
+        const parsed = loginSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: parsed.error.flatten().fieldErrors });
+        }
+
+        const email = normalizeEmail(parsed.data.email);
+        const user = await prisma.user.findUnique({ where: { email } });
+        if (!user?.passwordHash) {
+          return reply.status(401).send({ error: 'Invalid email or password' });
+        }
+
+        const valid = await verifyPassword(parsed.data.password, user.passwordHash);
+        if (!valid) {
+          return reply.status(401).send({ error: 'Invalid email or password' });
+        }
+
+        if (!user.emailVerifiedAt) {
+          return reply.status(403).send({
+            error: 'Email not verified',
+            code: 'email_not_verified',
+          });
+        }
+
+        sessionForUser(app, reply, user.id);
+        return {
+          user: {
+            id: user.id,
+            displayName: user.displayName,
+            email: user.email,
+            emailVerified: true,
+          },
+        };
+      });
+    },
+  );
+
+  app.post(
+    '/auth/resend-verification',
+    { config: app.routeRateLimits.resendVerification },
+    async (request, reply) => {
     if (!emailAuthEnabled()) {
       return reply.status(503).send({ error: 'Email sign-up is not configured' });
     }
@@ -164,7 +216,98 @@ export async function authRoutes(app: FastifyInstance) {
     }
 
     return { ok: true, message: 'If that account is pending verification, we sent a new link.' };
+  },
+  );
+
+  await registerDualRateLimit(
+    app,
+    [
+      { max: 3, timeWindow: '1 minute' },
+      {
+        max: 1,
+        timeWindow: '1 minute',
+        keyGenerator: (request: FastifyRequest) => {
+          const body = request.body as { email?: string };
+          const email = normalizeEmailForRateLimit(body?.email);
+          return email ? `forgot:${email}` : request.ip;
+        },
+      },
+    ],
+    async (scoped) => {
+      scoped.post('/auth/forgot-password', async (request, reply) => {
+        if (!emailAuthEnabled()) {
+          return reply.status(503).send({ error: 'Email sign-in is not configured' });
+        }
+
+        const parsed = forgotPasswordSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: parsed.error.flatten().fieldErrors });
+        }
+
+        const email = normalizeEmail(parsed.data.email);
+        const user = await prisma.user.findUnique({ where: { email } });
+
+        if (user?.passwordHash && user.emailVerifiedAt) {
+          try {
+            await sendPasswordResetEmail(user.id, email);
+          } catch (err) {
+            request.log.error({ err }, 'Failed to send password reset email');
+            return reply
+              .status(502)
+              .send({ error: 'Could not send password reset email. Try again later.' });
+          }
+        }
+
+        return { ok: true, message: FORGOT_PASSWORD_MESSAGE };
+      });
+    },
+  );
+
+  app.get('/auth/reset-password', async (request, reply) => {
+    const token = (request.query as { token?: string }).token;
+    if (!token || !(await isAuthTokenValid(token, 'password_reset'))) {
+      return reply.status(400).send({ error: 'invalid_token' });
+    }
+    return { ok: true };
   });
+
+  app.post(
+    '/auth/reset-password',
+    { config: app.routeRateLimits.resetPassword },
+    async (request, reply) => {
+      if (!emailAuthEnabled()) {
+        return reply.status(503).send({ error: 'Email sign-in is not configured' });
+      }
+
+      const parsed = resetPasswordSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.flatten().fieldErrors });
+      }
+
+      const result = await consumeAuthToken(parsed.data.token, 'password_reset');
+      if (!result) {
+        return reply.status(400).send({ error: 'invalid_token' });
+      }
+
+      const passwordHash = await hashPassword(parsed.data.password);
+      const user = await prisma.user.update({
+        where: { id: result.userId },
+        data: { passwordHash },
+        select: { id: true, displayName: true, email: true, emailVerifiedAt: true },
+      });
+
+      sessionForUser(app, reply, user.id);
+      return {
+        ok: true,
+        user: {
+          id: user.id,
+          displayName: user.displayName,
+          email: user.email,
+          emailVerified: Boolean(user.emailVerifiedAt),
+        },
+      };
+    },
+  );
 
   app.get('/auth/verify-email', async (request, reply) => {
     const token = (request.query as { token?: string }).token;
@@ -186,7 +329,10 @@ export async function authRoutes(app: FastifyInstance) {
     return authRedirect(reply, '/?auth_success=1');
   });
 
-  app.post('/auth/dev-login', async (request, reply) => {
+  app.post(
+    '/auth/dev-login',
+    { config: app.routeRateLimits.devLogin },
+    async (request, reply) => {
     if (!config.enableDevLogin) {
       return reply.status(403).send({ error: 'Dev login is disabled' });
     }
@@ -208,7 +354,8 @@ export async function authRoutes(app: FastifyInstance) {
       user: { id: user.id, displayName: user.displayName, email: preset.email },
       account,
     };
-  });
+  },
+  );
 
   app.get('/auth/me', { onRequest: [app.authenticate] }, async (request) => {
     const user = await prisma.user.findUniqueOrThrow({

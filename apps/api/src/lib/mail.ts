@@ -38,3 +38,11 @@ export function verificationEmailHtml(verifyUrl: string): string {
     <p>This link expires in 24 hours. If you did not sign up, you can ignore this email.</p>
   `.trim();
 }
+
+export function passwordResetEmailHtml(resetUrl: string): string {
+  return `
+    <p>We received a request to reset your DCC Web password.</p>
+    <p><a href="${resetUrl}">Choose a new password</a></p>
+    <p>This link expires in 1 hour. If you did not request a reset, you can ignore this email.</p>
+  `.trim();
+}

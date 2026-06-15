@@ -1,3 +1,4 @@
+import { secureRandomInt } from './rng.js';
 import { prisma } from './prisma.js';
 
 /** Only the game creator (dm_user_id) is DM — not co_dm or other player roles. */
@@ -20,11 +21,27 @@ export async function assertGameMember(userId: string, gameId: string) {
   return { ok: true as const, game, isDm: false };
 }
 
+const INVITE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
 export function generateInviteCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < 8; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
+    code += INVITE_CHARS[secureRandomInt(0, INVITE_CHARS.length - 1)]!;
   }
   return code;
+}
+
+const MAX_INVITE_ATTEMPTS = 12;
+
+/** Cryptographically random invite code, retried on the unlikely DB collision. */
+export async function generateUniqueInviteCode(): Promise<string> {
+  for (let attempt = 0; attempt < MAX_INVITE_ATTEMPTS; attempt++) {
+    const inviteCode = generateInviteCode();
+    const existing = await prisma.game.findUnique({
+      where: { inviteCode },
+      select: { id: true },
+    });
+    if (!existing) return inviteCode;
+  }
+  throw new Error('Failed to generate a unique invite code');
 }
