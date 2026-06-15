@@ -1,0 +1,344 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { buildCombatTargetOptions } from '../components/CharacterListItem';
+import type { GameMenuTab } from '../components/GameSideMenu';
+import type { TransferInventoryResult } from '../components/inventory/TransferItemDialog';
+import { useAuth } from '../context/AuthContext';
+import type { TacticalMapToken } from '../types/map';
+import {
+  useCharacterActions,
+  useCharacters,
+  useCombatActions,
+  useDiceRollActions,
+  useDiceTray,
+  useGameDetail,
+  useGameMaps,
+  useGameRealtimeSync,
+  useMapActions,
+  useMonsterActions,
+  useMonsters,
+  usePresence,
+  useRollLog,
+} from './game';
+import { useGameDeleteNotifications } from './useGameDeleteNotifications';
+import { formatError } from '../utils/errors';
+
+export function useGamePageController(gameId: string | undefined) {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [error, setError] = useState<string | null>(null);
+  const [menuTab, setMenuTab] = useState<GameMenuTab>('characters');
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [corpseLootRef, setCorpseLootRef] = useState<{
+    kind: 'character' | 'monster';
+    id: string;
+  } | null>(null);
+  const [corpseLootOpen, setCorpseLootOpen] = useState(false);
+
+  const {
+    detail,
+    loading,
+    setLoading,
+    initiative,
+    isDm,
+    gameSettings,
+    loadDetail,
+    applyInitiative,
+    applyGameSettingsPatch,
+    isAccessError,
+  } = useGameDetail(gameId);
+
+  const {
+    maps,
+    setMaps,
+    activeMapId,
+    setActiveMapId,
+    mapBusy,
+    setMapBusy,
+    npcTokens,
+    activeMap,
+    loadMaps,
+    syncNpcTokensFromMap,
+    applyMapFromServer,
+  } = useGameMaps(gameId);
+
+  const {
+    characters,
+    selectedCharacter,
+    setSelectedCharacter,
+    characterAttackTargetById,
+    setCharacterAttackTargetById,
+    loadCharacters,
+    applyCharacterFromServer,
+  } = useCharacters(gameId, isDm, user?.id);
+
+  const {
+    monsters,
+    setMonsters,
+    selectedMonster,
+    setSelectedMonster,
+    monsterTargetById,
+    setMonsterTargetById,
+    loadMonsters,
+    handleMonsterUpdated,
+  } = useMonsters(gameId, isDm);
+
+  const { rollLog, setRollLog, lastRoll, loadDiceRolls, appendRollLog } = useRollLog(gameId);
+  const { postDiceRoll } = useDiceRollActions(gameId, appendRollLog, applyInitiative);
+
+  const {
+    diceTrayCounts,
+    setDiceTrayCounts,
+    diceRolling,
+    setDiceRolling,
+    diceCharacterId,
+    setDiceCharacterId,
+    diceQuickRollKind,
+    setDiceQuickRollKind,
+    resetDiceTray,
+  } = useDiceTray(characters, selectedCharacter?.id);
+
+  const { presenceUsers, setPresenceUsers } = usePresence(gameId);
+
+  const detailRef = useRef(detail);
+  detailRef.current = detail;
+
+  const monstersVisibleOnMap = gameSettings?.monstersVisibleOnMap === true;
+  const sharedMonsterInitiative = gameSettings?.sharedMonsterInitiative === true;
+  const hideMonsterAcInRollLog = gameSettings?.hideMonsterAcInRollLog === true;
+  const initiativeActive = initiative?.active ?? false;
+
+  const activeMapTokens = useMemo(() => activeMap?.tokens ?? [], [activeMap]);
+
+  const combatTargetOptions = useMemo(
+    () => buildCombatTargetOptions(monsters, npcTokens),
+    [monsters, npcTokens],
+  );
+
+  const onError = useCallback((message: string | null) => setError(message), []);
+
+  const characterActions = useCharacterActions({
+    gameId,
+    isDm,
+    userId: user?.id,
+    characters,
+    characterAttackTargetById,
+    setCharacterAttackTargetById,
+    applyCharacterFromServer,
+    loadCharacters,
+    loadMaps,
+    selectedCharacter,
+    setSelectedCharacter,
+    activeMapId,
+    activeMapTokens,
+    setMenuTab,
+    setCreateDialogOpen,
+    onError,
+  });
+
+  const combatActions = useCombatActions({
+    gameId,
+    isDm,
+    characters,
+    initiative,
+    characterAttackTargetById,
+    diceTrayCounts,
+    diceCharacterId,
+    postDiceRoll,
+    loadCharacters,
+    loadMonsters,
+    loadDetail,
+    applyInitiative,
+    applyGameSettingsPatch,
+    setMenuTab,
+    setDiceRolling,
+    setDiceQuickRollKind,
+    onError,
+    monstersVisibleOnMap,
+    sharedMonsterInitiative,
+    hideMonsterAcInRollLog,
+  });
+
+  const monsterActions = useMonsterActions({
+    gameId,
+    monsters,
+    setMonsters,
+    selectedMonster,
+    setSelectedMonster,
+    setSelectedCharacter,
+    monsterTargetById,
+    setMonsterTargetById,
+    handleMonsterUpdated,
+    applyInitiative,
+    loadMaps,
+    loadCharacters,
+    postDiceRoll,
+    onError,
+  });
+
+  const mapActions = useMapActions({
+    gameId,
+    isDm,
+    userId: user?.id,
+    detailLoaded: Boolean(detail),
+    characters,
+    monsters,
+    initiative,
+    initiativeActive,
+    maps,
+    setMaps,
+    activeMapId,
+    setActiveMapId,
+    activeMap,
+    mapBusy,
+    setMapBusy,
+    loadMaps,
+    syncNpcTokensFromMap,
+    applyMapFromServer,
+    onError,
+    setCorpseLootRef,
+    setCorpseLootOpen,
+    corpseLootRef,
+  });
+
+  const refreshGame = useCallback(async () => {
+    const data = await loadDetail();
+    if (data?.game.settings?.activeMapId) {
+      setActiveMapId(data.game.settings.activeMapId);
+    }
+    await loadMaps();
+  }, [loadDetail, loadMaps, setActiveMapId]);
+
+  useEffect(() => {
+    if (!gameId) return;
+    setLoading(true);
+    void Promise.all([refreshGame(), loadDiceRolls()])
+      .catch((e) => {
+        setError(formatError(e));
+        if (isAccessError(e)) {
+          navigate('/');
+        }
+      })
+      .finally(() => setLoading(false));
+  }, [gameId, refreshGame, loadDiceRolls, navigate, setLoading, isAccessError]);
+
+  useEffect(() => {
+    if (!detail) return;
+    void loadCharacters().catch((e) => setError(formatError(e)));
+    void loadMonsters().catch(() => {});
+  }, [detail, loadCharacters, loadMonsters]);
+
+  useEffect(() => {
+    if (initiativeActive && corpseLootOpen) {
+      setCorpseLootOpen(false);
+      setCorpseLootRef(null);
+    }
+  }, [initiativeActive, corpseLootOpen]);
+
+  useGameRealtimeSync(gameId, Boolean(gameId && detail), user?.id, detailRef, {
+    loadDetail: refreshGame,
+    loadDiceRolls,
+    loadCharacters,
+    loadMonsters,
+    loadMaps,
+    applyInitiative,
+    applyGameSettingsPatch,
+    appendRollLog,
+    setCombatRollByCharacter: combatActions.setCombatRollByCharacter,
+    setPresenceUsers,
+  });
+
+  useGameDeleteNotifications({ gameId });
+
+  const handleInventoryTransferred = useCallback(
+    (result: TransferInventoryResult) => {
+      if (result.sourceCharacter) applyCharacterFromServer(result.sourceCharacter);
+      if (result.targetCharacter) applyCharacterFromServer(result.targetCharacter);
+      if (result.sourceMonster) handleMonsterUpdated(result.sourceMonster);
+      if (result.targetMonster) handleMonsterUpdated(result.targetMonster);
+    },
+    [applyCharacterFromServer, handleMonsterUpdated],
+  );
+
+  const canDragToken = useCallback(
+    (t: TacticalMapToken) =>
+      isDm ||
+      Boolean(
+        t.characterId &&
+          characters.find((c) => c.id === t.characterId)?.ownerUserId === user?.id,
+      ),
+    [isDm, characters, user?.id],
+  );
+
+  const closeCorpseLoot = useCallback(() => {
+    setCorpseLootOpen(false);
+    setCorpseLootRef(null);
+  }, []);
+
+  const selectSidebarCharacter = useCallback(
+    (c: (typeof characters)[number]) => {
+      setSelectedCharacter(c);
+      setMenuTab('characters');
+    },
+    [setSelectedCharacter],
+  );
+
+  return {
+    gameId,
+    user,
+    error,
+    setError,
+    loading,
+    detail,
+    isDm,
+    initiative,
+    initiativeActive,
+    monstersVisibleOnMap,
+    sharedMonsterInitiative,
+    hideMonsterAcInRollLog,
+    characters,
+    monsters,
+    npcTokens,
+    maps,
+    activeMap,
+    activeMapId,
+    mapBusy,
+    rollLog,
+    setRollLog,
+    lastRoll,
+    selectedCharacter,
+    setSelectedCharacter,
+    selectedMonster,
+    setSelectedMonster,
+    monsterTargetById,
+    setMonsters,
+    applyInitiative,
+    menuTab,
+    setMenuTab,
+    createDialogOpen,
+    setCreateDialogOpen,
+    corpseLootOpen,
+    diceTrayCounts,
+    setDiceTrayCounts,
+    diceRolling,
+    diceCharacterId,
+    setDiceCharacterId,
+    diceQuickRollKind,
+    resetDiceTray,
+    presenceUsers,
+    combatTargetOptions,
+    characterAttackTargetById,
+    characterActions,
+    combatActions,
+    monsterActions,
+    mapActions,
+    handleInventoryTransferred,
+    canDragToken,
+    closeCorpseLoot,
+    selectSidebarCharacter,
+    applyCharacterFromServer,
+    handleMonsterUpdated,
+  };
+}
+
+export type GamePageController = ReturnType<typeof useGamePageController>;

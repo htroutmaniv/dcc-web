@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "bun run --filter @dcc-web/shared build && bun run --filter @dcc-web/api build && bun run --filter @dcc-web/web build",
-    "test": "bun run --filter @dcc-web/shared test && bun run --filter @dcc-web/api test",
+    "test": "bun run --filter @dcc-web/shared test && bun run --filter @dcc-web/api test && bun run --filter @dcc-web/web test",
     "typecheck": "bun run --filter @dcc-web/shared build && bun run --filter @dcc-web/api build && bun run --filter @dcc-web/web typecheck",
     "build:shared": "bun run --filter @dcc-web/shared build",
     "setup": "bun scripts/ensure-env.ts && bun install && bun run db:generate && bun run stack && bun run db:migrate && bun run db:seed",

@@ -194,7 +194,7 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
 - [x] Wire `bun run --filter @dcc-web/api test` into CI (replace build-only step).
 - [x] Add regression tests for Phase 2–3 work: optimistic initiative retry, batched `syncMapTokens`, decorator auth paths.
 
-> **Progress (2026-06-15):** Phase 4 started — hooks extracted, UI split begun; 4.4–4.6 landed.
+> **Progress (2026-06-15):** Phase 4 in progress — `GamePage` is a 9-LOC orchestrator; controller + view split; web unit tests added; 4.4–4.6 landed.
 
 ---
 
@@ -212,12 +212,19 @@ Goal: from 1948 LOC + 79 hooks down to a ≤300-LOC orchestrator.
   - [x] `useDiceTray(gameId, characterId)`
   - [x] `useRollLog(gameId)`
   - [x] `usePresence(gameId)`
-- [~] Extract action layer (mutations) into the same hooks where they belong. *(Dice roll actions in `useRollLog`; character/monster/map mutations still in `GamePage`.)*
-- [~] Split the UI into:
-  - [~] `GameSidebar` (characters, monsters, presence) — `GameSideMenu` unchanged; wrap/rename TBD
+- [x] Extract action layer (mutations) into dedicated hooks:
+  - [x] `useCharacterActions` — create, HP, consumables, light, in-play, map token visibility
+  - [x] `useMonsterActions` — monster CRUD/combat/attack target
+  - [x] `useMapActions` — map CRUD, upload, tokens, overlays, corpse loot
+  - [x] `useCombatActions` — dice rolls, initiative, settings toggles, apply damage
+  - [x] `parseCharacterResponse` helper
+- [x] Split the UI into:
+  - [x] `GameSidebar` — thin wrapper around `GameSideMenu`
   - [x] `GameStage` (map + initiative overlay + drawing toolbar)
   - [x] `GameDialogs` (apply damage, consume resource, create character, corpse loot, DM control panel)
-- [ ] After the split, run all Phase-0 tests; add component tests for at least the dialog interactions. *(GamePage ~1670 LOC — mutations still to extract.)*
+  - [x] `GamePageView` — presentational shell; `useGamePageController` owns hook wiring
+- [x] `GamePage.tsx` ≤300 LOC orchestrator *(9 LOC — delegates to controller + view)*
+- [x] Web unit tests for dialog helpers (`parseCharacterResponse`, apply-damage tab selection) in `apps/web/test/`
 
 ### 4.2 Adopt TanStack Query — M
 - [-] Already recommended in `docs/ARCHITECTURE.md`. Decide via ADR (Phase 6).
@@ -232,7 +239,7 @@ Goal: from 1948 LOC + 79 hooks down to a ≤300-LOC orchestrator.
   - [ ] `CharacterSheetView.tsx` (617)
   - [ ] `CharacterListItem.tsx` (557)
   - [ ] `MonsterPanel.tsx` (532)
-  - [ ] `ApplyDamageDialog.tsx` (512)
+  - [x] `ApplyDamageDialog.tsx` (512 → 138) — target lists in `ApplyDamageTargetLists.tsx`; tab/label logic in `utils/apply-damage-dialog.ts`
 
 ### 4.4 Code-splitting & bundle — S
 - [x] `React.lazy` for `GamePage`, `BestiaryPage` in `App.tsx`; wrap routes in `Suspense` with a small loading fallback.
@@ -241,7 +248,9 @@ Goal: from 1948 LOC + 79 hooks down to a ≤300-LOC orchestrator.
   - `mui` → `@mui/*`, `@emotion/*`
   - `konva` → `konva`, `react-konva`
   - `socket` → `socket.io-client`
-- [ ] Verify gzip bundle goal: initial chunk < 200 KB gzip, total deferred < 400 KB gzip.
+- [x] Verify gzip bundle goal: initial chunk < 200 KB gzip, total deferred < 400 KB gzip.
+  - Initial `index-*.js`: **75.9 KB gzip** (excludes lazy mui/konva/socket vendor chunks)
+  - Lazy route/feature chunks (GamePage, sheets, map, dialogs): **~59 KB gzip** combined
 
 ### 4.5 Re-enable WebSocket transport in prod — S
 - [x] `apps/web/src/lib/game-socket-client.ts:19-23` currently forces `polling` in prod. Switch back to `['websocket', 'polling']`. nginx is already configured for upgrade.

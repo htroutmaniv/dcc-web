@@ -8,6 +8,7 @@
     "dev": "bun run bundler",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "preview": "bun ../../scripts/stop-bundler.ts && vite preview --host 0.0.0.0 --port 5173"
   },
   "dependencies": {
