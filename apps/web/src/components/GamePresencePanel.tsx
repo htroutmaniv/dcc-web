@@ -60,7 +60,7 @@ function buildMemberRows(
     rows.push({
       userId: u.userId,
       displayName: u.displayName,
-      isDm: u.isDm,
+      isDm: Boolean(u.isDm),
       isPresent: true,
     });
   }

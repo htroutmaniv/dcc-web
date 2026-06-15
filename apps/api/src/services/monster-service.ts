@@ -11,7 +11,6 @@ import {
   scaleMonsterStats,
   sortInitiativeEntries,
   spawnMonstersSchema,
-  isMonsterKilled,
   isMonsterEligibleForInitiative,
   MONSTER_IN_PLAY_KEY,
   resolveMonsterAfterHpChange,

@@ -160,7 +160,7 @@ export function Level0CharacterSheet({
       staminaMod: mod('sta'),
       personalityMod: mod('per'),
     });
-    const armorDerived = deriveArmorOnSheet({ ...data, abilities, saves, init: mod('agi') });
+    const armorDerived = deriveArmorOnSheet({ ...data, abilities });
     return { saves, init: mod('agi'), ...armorDerived };
   };
 

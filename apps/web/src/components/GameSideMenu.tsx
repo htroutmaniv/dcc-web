@@ -20,7 +20,6 @@ import { DmCharacterSections } from './DmCharacterSections';
 import type { DiceResult } from '../types/game';
 import { DiceTabPanel } from './DiceTabPanel';
 import type { Character, Game, GamePresenceUser, User } from '../types/game';
-import type { DiceRollLogEntry } from '../types/dice-roll-log';
 import {
   createCharacterInitiativeSkipFn,
   isCharacterTurn,
@@ -40,7 +39,7 @@ interface GameSideMenuProps {
   players?: { user: User }[];
   tab: GameMenuTab;
   onTabChange: (tab: GameMenuTab) => void;
-  lastRoll: DiceRollLogEntry | null;
+  lastRoll: DiceResult | null;
   diceTrayCounts: DiceTrayCounts;
   onDiceTrayCountsChange: (counts: DiceTrayCounts) => void;
   onResetDiceTray: () => void;

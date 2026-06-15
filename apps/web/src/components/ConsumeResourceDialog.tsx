@@ -11,7 +11,7 @@ import {
   ListItemButton,
   ListItemText,
 } from '@mui/material';
-import { listConsumableChoices, type ConsumableTrackKind } from '@dcc-web/shared';
+import { listConsumableChoices } from '@dcc-web/shared';
 import type { Character } from '../types/game';
 
 interface ConsumeResourceDialogProps {

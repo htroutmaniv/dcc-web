@@ -255,81 +255,86 @@ export function RollTrackerPanel({
             });
             const clickable =
               isDm && entry.rollKind === 'damage' && onApplyDamage != null;
-            const Row = clickable ? ListItemButton : ListItem;
-            return (
-              <Row
+            const rowContent = (
+              <Box sx={{ width: '100%', minWidth: 0 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.25 }}>
+                  <Chip
+                    label={rollKindLabel(entry.rollKind)}
+                    size="small"
+                    sx={{
+                      height: 18,
+                      fontSize: '0.65rem',
+                      color,
+                      borderColor: color,
+                      bgcolor: 'transparent',
+                    }}
+                    variant="outlined"
+                  />
+                  <Typography
+                    component="span"
+                    variant="caption"
+                    sx={{ color, fontWeight: 700, ml: 'auto' }}
+                  >
+                    {entry.total}
+                  </Typography>
+                </Box>
+                <Typography
+                  variant="caption"
+                  sx={{
+                    color,
+                    display: 'block',
+                    lineHeight: 1.3,
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {line.prefix}
+                  {line.outcome && (
+                    <>
+                      {' '}
+                      <Box
+                        component="span"
+                        sx={{
+                          fontWeight: 800,
+                          color: line.outcome.kind === 'hit' ? 'success.main' : color,
+                        }}
+                      >
+                        {line.outcome.text}
+                      </Box>
+                    </>
+                  )}{' '}
+                  {line.suffix}
+                </Typography>
+                {clickable && (
+                  <Typography variant="caption" color="error.light" sx={{ opacity: 0.8 }}>
+                    Click to apply damage
+                  </Typography>
+                )}
+              </Box>
+            );
+            const rowSx = {
+              py: 0.35,
+              px: 1,
+              alignItems: 'flex-start' as const,
+              ...(clickable
+                ? {
+                    borderRadius: 0.5,
+                    '&:hover': { bgcolor: 'rgba(239, 83, 80, 0.12)' },
+                  }
+                : {}),
+            };
+            return clickable ? (
+              <ListItemButton
                 key={entry.id}
                 dense
-                {...(clickable
-                  ? {
-                      onClick: () => onApplyDamage(entry),
-                      sx: {
-                        py: 0.35,
-                        px: 1,
-                        borderRadius: 0.5,
-                        alignItems: 'flex-start',
-                        '&:hover': { bgcolor: 'rgba(239, 83, 80, 0.12)' },
-                      },
-                    }
-                  : {
-                      sx: { py: 0.35, px: 1, alignItems: 'flex-start' },
-                    })}
+                onClick={() => onApplyDamage(entry)}
+                sx={rowSx}
               >
-                <Box sx={{ width: '100%', minWidth: 0 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.25 }}>
-                    <Chip
-                      label={rollKindLabel(entry.rollKind)}
-                      size="small"
-                      sx={{
-                        height: 18,
-                        fontSize: '0.65rem',
-                        color,
-                        borderColor: color,
-                        bgcolor: 'transparent',
-                      }}
-                      variant="outlined"
-                    />
-                    <Typography
-                      component="span"
-                      variant="caption"
-                      sx={{ color, fontWeight: 700, ml: 'auto' }}
-                    >
-                      {entry.total}
-                    </Typography>
-                  </Box>
-                  <Typography
-                    variant="caption"
-                    sx={{
-                      color,
-                      display: 'block',
-                      lineHeight: 1.3,
-                      wordBreak: 'break-word',
-                    }}
-                  >
-                    {line.prefix}
-                    {line.outcome && (
-                      <>
-                        {' '}
-                        <Box
-                          component="span"
-                          sx={{
-                            fontWeight: 800,
-                            color: line.outcome.kind === 'hit' ? 'success.main' : color,
-                          }}
-                        >
-                          {line.outcome.text}
-                        </Box>
-                      </>
-                    )}{' '}
-                    {line.suffix}
-                  </Typography>
-                  {clickable && (
-                    <Typography variant="caption" color="error.light" sx={{ opacity: 0.8 }}>
-                      Click to apply damage
-                    </Typography>
-                  )}
-                </Box>
-              </Row>
+                {rowContent}
+              </ListItemButton>
+            ) : (
+              <ListItem key={entry.id} dense sx={rowSx}>
+                {rowContent}
+              </ListItem>
             );
           })
         )}

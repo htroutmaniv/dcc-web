@@ -323,7 +323,7 @@ const PC_COLORS = ['#4a90d9', '#50c878', '#e8a838', '#b57edc', '#e85d5d', '#5bc0
 
 async function pruneOrphanMapTokens(
   mapId: string,
-  gameId: string,
+  _gameId: string,
   characters: { id: string; status: string }[],
   monsters: { id: string }[],
 ): Promise<void> {

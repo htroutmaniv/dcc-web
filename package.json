@@ -9,6 +9,8 @@
   ],
   "scripts": {
     "build": "bun run --filter @dcc-web/shared build && bun run --filter @dcc-web/api build && bun run --filter @dcc-web/web build",
+    "test": "bun run --filter @dcc-web/shared test",
+    "typecheck": "bun run --filter @dcc-web/shared build && bun run --filter @dcc-web/api build && bun run --filter @dcc-web/web typecheck",
     "build:shared": "bun run --filter @dcc-web/shared build",
     "setup": "bun scripts/ensure-env.ts && bun install && bun run db:generate && bun run stack && bun run db:migrate && bun run db:seed",
     "stack": "bun scripts/with-env.ts development -- docker compose up -d --force-recreate nginx",
@@ -39,4 +41,4 @@
     "concurrently": "^9.1.2"
   }
 }
-
+

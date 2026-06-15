@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { Box, Typography } from '@mui/material';
-import type { MapDrawTool, MapGridPreset, MapLayoutAnchor } from '@dcc-web/shared';
+import type { MapDrawTool, MapGridPreset, MapLayoutAnchor, MapTokenVisibilityContext } from '@dcc-web/shared';
 import { RollTrackerPanel } from './RollTrackerPanel';
 import { MapToolbar } from './tactical-map/MapToolbar';
 import {

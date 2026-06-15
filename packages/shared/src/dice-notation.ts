@@ -32,7 +32,7 @@ export function parseCompoundNotation(notation: string): {
     throw new Error(`Invalid dice notation: ${notation}`);
   }
 
-  const remainder = normalized.replace(DIE_PART_RE, '');
+  const remainder = normalized.replace(DIE_PART_RE, '').replace(/\+/g, '');
   let modifier = 0;
   if (remainder && remainder !== '+') {
     modifier = Number.parseInt(remainder, 10);

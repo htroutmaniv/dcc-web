@@ -27,7 +27,7 @@ import {
 } from '@dcc-web/shared';
 import { canExpendLightSource } from '../utils/consumables';
 import type { Character } from '../types/game';
-import type { DiceRollLogEntry } from '../types/dice-roll-log';
+import type { DiceResult } from '../types/game';
 import type { CombatRollKind } from '../utils/character-rolls';
 import { getConsumableCounts, isUsingLightSource } from '../utils/consumables';
 import {
@@ -74,7 +74,7 @@ interface CharacterListItemProps {
   onEndTurn?: () => void;
   endingTurn?: boolean;
   rollingKind?: CombatRollKind | null;
-  lastRoll?: DiceRollLogEntry | null;
+  lastRoll?: DiceResult | null;
 }
 
 const ROLL_BUTTONS: { kind: CombatRollKind; label: string }[] = [
@@ -181,7 +181,7 @@ export function CharacterListItem({
   const weapons = getWeaponItems(character);
   const selectedWeaponId = resolveSelectedWeaponId(character) ?? '';
   const showCombatTargets = initiativeActive && combatTargets.length > 0;
-  const lastOutcome = lastRoll ? parseAttackOutcome(lastRoll.reason) : null;
+  const lastOutcome = lastRoll?.reason ? parseAttackOutcome(lastRoll.reason) : null;
   const visibleRollButtons = ROLL_BUTTONS.filter(
     ({ kind }) =>
       kind !== 'initiative' ||
@@ -539,7 +539,7 @@ export function CharacterListItem({
                   : 'success.main',
           }}
         >
-          <strong>{lastRoll.total}</strong> ({stripRollTargetTag(lastRoll.reason) || lastRoll.notation})
+          <strong>{lastRoll.total}</strong> ({stripRollTargetTag(lastRoll.reason ?? '') || lastRoll.notation})
           {lastOutcome === 'hit' && (
             <Box component="span" sx={{ ml: 0.5, fontWeight: 800 }}>
               Success

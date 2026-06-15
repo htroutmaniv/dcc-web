@@ -13,15 +13,15 @@ Prioritized plan to address findings from the principal-architect review. Items 
 Goal: stop shipping refactors blind. Cheapest interventions, highest leverage for everything after.
 
 ### 0.1 Test runner for `packages/shared` — S
-- [ ] Add `bun:test` (or Vitest if you prefer the ecosystem) to `packages/shared`.
-- [ ] Write tests for the pure domain logic:
-  - [ ] `initiative.ts` — `advanceInitiativeTurn`, `normalizeInitiativeTurnIndex`, `createCharacterInitiativeSkipFn`, `getCurrentTurnEntry`, `isCharacterTurn`
-  - [ ] `movement.ts` — `computeMovementFeet`, `movementRangeFromStats`, `parseGameSettings` (every default path)
-  - [ ] `dice-notation.ts` — `rollDice` with a deterministic RNG injected
-  - [ ] `combat-mortality.ts` — `getCharacterVitality`, `resolveMonsterAfterHpChange`
-  - [ ] `monster-sheet.ts` — `parseMonsterSheet` (including the recently-fixed empty-attacks case)
-  - [ ] `consumables.ts` — light source presets, `getCharacterLightRadiusFeet`, `resolveActiveLightItemId`
-  - [ ] `map-token-layout.ts` — `computeUpperLeftTokenGrid` / `computeUpperRightTokenGrid`
+- [x] Add `bun:test` (or Vitest if you prefer the ecosystem) to `packages/shared`.
+- [x] Write tests for the pure domain logic:
+  - [x] `initiative.ts` — `advanceInitiativeTurn`, `normalizeInitiativeTurnIndex`, `createCharacterInitiativeSkipFn`, `getCurrentTurnEntry`, `isCharacterTurn`
+  - [x] `movement.ts` — `computeMovementFeet`, `movementRangeFromStats`, `parseGameSettings` (every default path)
+  - [x] `dice-notation.ts` — `rollDice` with a deterministic RNG injected
+  - [x] `combat-mortality.ts` — `getCharacterVitality`, `resolveMonsterAfterHpChange`
+  - [x] `monster-sheet.ts` — `parseMonsterSheet` (including the recently-fixed empty-attacks case)
+  - [x] `consumables.ts` — light source presets, `getCharacterLightRadiusFeet`, `resolveActiveLightItemId`
+  - [x] `map-token-layout.ts` — `computeUpperLeftTokenGrid` / `computeUpperRightTokenGrid`
 
 ### 0.2 API integration test harness — M
 - [ ] Choose: testcontainers-postgres **or** a shared throwaway db with schema-per-test.
@@ -34,19 +34,21 @@ Goal: stop shipping refactors blind. Cheapest interventions, highest leverage fo
   - [ ] `POST /games/:id/initiative/start` + `/advance` cycles round and ticks mortality
 
 ### 0.3 CI — S
-- [ ] Add a workflow that runs on PR:
-  - [ ] `bun install`
-  - [ ] `bun run --filter @dcc-web/shared build` + tests
-  - [ ] `bun run --filter @dcc-web/api build` + tests
-  - [ ] `bun run --filter @dcc-web/web build` (typecheck via `tsc --noEmit`)
-- [ ] Add `bun run typecheck` script at root (run `tsc --noEmit` in each workspace).
+- [x] Add a workflow that runs on PR:
+  - [x] `bun install`
+  - [x] `bun run --filter @dcc-web/shared build` + tests
+  - [x] `bun run --filter @dcc-web/api build` + tests *(API tests deferred to 0.2)*
+  - [x] `bun run --filter @dcc-web/web build` (typecheck via `tsc --noEmit`)
+- [x] Add `bun run typecheck` script at root (run `tsc --noEmit` in each workspace).
 
 ### 0.4 Shared tsconfig base — S
-- [ ] Add `tsconfig.base.json` at repo root with `strict`, `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`, `noImplicitOverride`.
-- [ ] Have `apps/api`, `apps/web`, `packages/shared` extend it; keep only env-specific overrides (target, module, jsx).
-- [ ] Fix any lints surfaced (api currently lacks `noUnusedLocals` — expect cleanup).
+- [x] Add `tsconfig.base.json` at repo root with `strict`, `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`, `noImplicitOverride`.
+- [x] Have `apps/api`, `apps/web`, `packages/shared` extend it; keep only env-specific overrides (target, module, jsx).
+- [x] Fix any lints surfaced (api currently lacks `noUnusedLocals` — expect cleanup). *(shared + api + web typecheck green as of 2026-06-15)*
 
 **Exit criteria:** PR pipeline green; every push runs the suite; refactors in later phases are guarded.
+
+> **Progress (2026-06-15):** 0.1, 0.3, and 0.4 complete. 43 shared unit tests passing. CI workflow added. **0.2 (API integration tests) remains** — Phase 0 not fully closed until that lands.
 
 ---
 

@@ -28,14 +28,19 @@ export {
 import type { Character, CharacterItem } from '../types/game';
 
 function toItemPayload(items: CatalogItemLike[]): CharacterItem[] {
-  return items.map((item) => ({
-    ...(item.id ? { id: item.id } : {}),
-    category: item.category as CharacterItem['category'],
-    name: item.name,
-    quantity: item.quantity,
-    notes: item.notes ?? '',
-    properties: item.properties ?? {},
-  }));
+  return items.flatMap((item) => {
+    if (!item.id) return [];
+    return [
+      {
+        id: item.id,
+        category: item.category as CharacterItem['category'],
+        name: item.name,
+        quantity: item.quantity,
+        notes: item.notes ?? '',
+        properties: item.properties ?? {},
+      },
+    ];
+  });
 }
 
 export function getConsumableCounts(character: Character) {

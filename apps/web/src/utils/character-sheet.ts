@@ -98,16 +98,6 @@ export const ABILITY_ROWS: { key: string; label: string }[] = [
 
 export { abilityModifier };
 
-function formatWeapon(item: { name: string; properties?: Record<string, unknown> }): string {
-  const dmg = item.properties?.damage as string | undefined;
-  const bonus = item.properties?.attackBonus as number | undefined;
-  if (dmg) {
-    const mod = bonus != null ? ` ${bonus >= 0 ? '+' : ''}${bonus}` : '';
-    return `${item.name}${mod} (${dmg})`;
-  }
-  return item.name;
-}
-
 function parseWeaponLine(line: string): {
   name: string;
   properties: Record<string, unknown>;

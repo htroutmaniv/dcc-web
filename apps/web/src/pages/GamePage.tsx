@@ -24,12 +24,10 @@ import {
   MONSTER_IN_PLAY_KEY,
   movementRangeFromStats,
   parseMonsterSheet,
-  countConsumables,
   emptyDiceTray,
   getActiveLightItemId,
   isCharacterTurn,
   isUsingLightSource,
-  listLightSourceOptions,
   resolveActiveLightItemId,
   parseGameInitiative,
   parseGameSettings,
@@ -41,7 +39,6 @@ import {
   type GameInitiativeState,
   fitImageToGrid,
   type MapDrawTool,
-  type MapGridPreset,
   type MapLayoutAnchor,
   buildMonsterKilledStats,
   MAP_TOKEN_VISIBLE_KEY,
@@ -458,7 +455,7 @@ export default function GamePage() {
     const prevCustom = (c.stats?.custom ?? {}) as Record<string, unknown>;
     try {
       const res = await api<{ character: Character } | Character>(
-        `/characters/${character.id}`,
+        `/characters/${c.id}`,
         {
           method: 'PATCH',
           body: JSON.stringify({
@@ -1425,12 +1422,9 @@ export default function GamePage() {
           (isDm || character.ownerUserId === user?.id)
         ) {
           const stats: SharedCharacterStats = {
+            ...(character.stats as SharedCharacterStats | undefined),
             abilities: (character.stats?.abilities ?? {}) as SharedCharacterStats['abilities'],
             speed: character.stats?.speed ?? 30,
-            armorSpeedPenalty: character.stats?.armorSpeedPenalty,
-            movementModifiers: character.stats?.movementModifiers,
-            initiative: character.stats?.initiative,
-            custom: character.stats?.custom,
           };
           const range = movementRangeFromStats(stats, feetPerCell);
           if (range.cells > 0) overlay.movementRadiusCells = range.cells;

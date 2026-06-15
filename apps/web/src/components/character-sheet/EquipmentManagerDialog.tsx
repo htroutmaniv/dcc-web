@@ -23,7 +23,6 @@ import NotesIcon from '@mui/icons-material/Notes';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import {
   armorTooltipLines,
-  consumableFlagsToProperties,
   consumablePropertiesToRecord,
   EQUIPMENT_SECTIONS,
   EQUIPMENT_SECTION_TO_CATEGORY,
@@ -34,7 +33,6 @@ import {
   getStackUsesAvailable,
   parseConsumableProperties,
   usesPerUnit,
-  type ConsumableFlags,
   type ConsumableProperties,
   type EquipmentSectionKey,
 } from '@dcc-web/shared';

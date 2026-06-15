@@ -462,7 +462,7 @@ export const TacticalMapCanvas = forwardRef<TacticalMapCanvasHandle, TacticalMap
             trackPointer(e);
             handlePointerDown(e);
           }}
-          onMousemove={(e) => {
+          onMousemove={(e: KonvaEventObject<MouseEvent>) => {
             trackPointer(e);
             handlePointerMove(e);
           }}

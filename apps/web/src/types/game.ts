@@ -69,6 +69,7 @@ export interface DiceResult {
   rolls: number[];
   modifier: number;
   total: number;
+  reason?: string;
 }
 
 export type GameMembershipRole = 'dm' | 'player';

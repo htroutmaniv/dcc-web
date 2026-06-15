@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: dcc
+          POSTGRES_PASSWORD: dcc
+          POSTGRES_DB: dcc
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dcc"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://dcc:dcc@localhost:5432/dcc
+      JWT_SECRET: ci-test-secret-not-for-production
+      CORS_ORIGIN: http://localhost:8080
+      SKIP_POSTINSTALL: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Generate Prisma client
+        run: bun run db:generate
+
+      - name: Shared package — build & test
+        run: |
+          bun run --filter @dcc-web/shared build
+          bun run --filter @dcc-web/shared test
+
+      - name: API — build
+        run: bun run --filter @dcc-web/api build
+
+      - name: Web — typecheck & build
+        run: |
+          bun run --filter @dcc-web/web typecheck
+          bun run --filter @dcc-web/web build
