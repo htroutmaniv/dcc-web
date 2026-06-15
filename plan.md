@@ -1,6 +1,8 @@
-# DCC Web — Architectural Remediation Plan
+# DCC Web — Realtime & Client Data-Layer Plan
 
-Prioritized plan to address findings from the principal-architect review. Items are ordered by criticality and grouped into phases so each phase delivers shippable value and reduces risk for the next.
+Plan to shift the app from **client-driven refetch** to **server-authoritative state delivery**: the server owns the database and computes new state on every mutation, then pushes that state to clients over WebSocket. Clients apply patches instead of re-pulling full snapshots.
+
+> The prior **Architectural Remediation Plan** (Phases 0–6) is complete and lives in git history at the previous commit. This document supersedes it as the active roadmap.
 
 **Status legend:** `[ ]` pending · `[~]` in progress · `[x]` done · `[-]` cancelled / deferred
 
@@ -8,359 +10,229 @@ Prioritized plan to address findings from the principal-architect review. Items 
 
 ---
 
-## Phase 0 — Safety net (do first, blocks nothing)
+## The problem (why this plan exists)
 
-Goal: stop shipping refactors blind. Cheapest interventions, highest leverage for everything after.
+Today the server is authoritative for the DB and **does** emit socket events, but most events are **invalidation pings**, not **state delivery**. So after any mutation the client re-pulls full lists:
 
-### 0.1 Test runner for `packages/shared` — S
-- [x] Add `bun:test` (or Vitest if you prefer the ecosystem) to `packages/shared`.
-- [x] Write tests for the pure domain logic:
-  - [x] `initiative.ts` — `advanceInitiativeTurn`, `normalizeInitiativeTurnIndex`, `createCharacterInitiativeSkipFn`, `getCurrentTurnEntry`, `isCharacterTurn`
-  - [x] `movement.ts` — `computeMovementFeet`, `movementRangeFromStats`, `composeGameSettingsFromRecord` (strict DB columns)
-  - [x] `dice-notation.ts` — `rollDice` with a deterministic RNG injected
-  - [x] `combat-mortality.ts` — `getCharacterVitality`, `resolveMonsterAfterHpChange`
-  - [x] `monster-sheet.ts` — `parseMonsterSheet` (including the recently-fixed empty-attacks case)
-  - [x] `consumables.ts` — light source presets, `getCharacterLightRadiusFeet`, `resolveActiveLightItemId`
-  - [x] `map-token-layout.ts` — `computeUpperLeftTokenGrid` / `computeUpperRightTokenGrid`
+| Event | Payload today | Client reaction today |
+|-------|---------------|-----------------------|
+| `map:updated` | `{ actorUserId }` only | `GET /games/:id/maps` (full, N+1) |
+| `monsters:changed` | `{ monsterIds }` | `GET /games/:id/monsters` |
+| `damage:applied` | target metadata | reload **characters + monsters + detail + maps** |
+| `map:token_moved` | `{ token }` | full `loadMaps()` (ignores the token!) |
+| `character:upsert` | full character ✅ | apply locally ✅ |
 
-### 0.2 API integration test harness — M
-- [x] Choose: testcontainers-postgres **or** a shared throwaway db with schema-per-test. *(CI/local Postgres + truncate between tests.)*
-- [x] Add `apps/api/test/` with a `buildTestApp()` helper that boots `buildApp()` against the test db.
-- [x] First five tests (smoke):
-  - [x] `POST /auth/dev-login` + `GET /auth/me` round-trip
-  - [x] `POST /games` then `POST /games/join/:invite` as a second user
-  - [x] `PATCH /characters/:id` with `status: 'dead'` triggers initiative reconcile + map sync
-  - [x] `POST /games/:id/transfer-item` rejects player-to-player while initiative active
-  - [x] `POST /games/:id/initiative/start` + `/advance` cycles round and ticks mortality
+Consequences observed:
 
-**Why deferred:** Phases 1–3 will reshape auth (rate limits, CSRF), `Game.settings` storage, initiative writes, route decorators, and the event facade. Writing integration tests now would mean rewriting the harness and every smoke test as those land. **Target: start 0.2 after Phase 3** (or late Phase 2 if 3 slips). Shared unit tests + CI (0.1, 0.3, 0.4) cover refactors until then.
+1. **Refetch storms** — one damage application = 7+ HTTP requests for the DM (mutation handler reloads 3 lists, socket handler reloads 4 more).
+2. **Duplicate work** — the write path runs `syncActiveMapTokens` (loads all chars/monsters/tokens, plans, writes, reloads the map DTO), **discards the result**, then the client re-fetches the same map via `GET /maps`.
+3. **N+1 reads** — `listGameMaps` issues one `loadMapTokens` query per map and a full `loadGameWithSettings`.
+4. **Wasted deltas** — `map:token_moved` already carries the moved token, but the client throws it away and reloads every map.
 
-### 0.3 CI — S
-- [x] Add a workflow that runs on PR:
-  - [x] `bun install`
-  - [x] `bun run --filter @dcc-web/shared build` + tests
-  - [x] `bun run --filter @dcc-web/api build` + tests *(unit always; integration in CI via `GITHUB_ACTIONS`)*
-  - [x] `bun run --filter @dcc-web/web build` (typecheck via `tsc --noEmit`)
-- [x] Add `bun run typecheck` script at root (run `tsc --noEmit` in each workspace).
-
-### 0.4 Shared tsconfig base — S
-- [x] Add `tsconfig.base.json` at repo root with `strict`, `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`, `noImplicitOverride`.
-- [x] Have `apps/api`, `apps/web`, `packages/shared` extend it; keep only env-specific overrides (target, module, jsx).
-- [x] Fix any lints surfaced (api currently lacks `noUnusedLocals` — expect cleanup). *(shared + api + web typecheck green as of 2026-06-15)*
-
-**Exit criteria:** PR pipeline green on shared build + tests and app typecheck/build. API integration tests (0.2) are a follow-up after Phase 3, not a gate for starting Phases 1–4.
-
-> **Progress (2026-06-15):** 0.1, 0.3, and 0.4 complete. 43 shared unit tests passing. CI workflow added. **0.2 deferred** until after Phase 3 to avoid rewriting tests against APIs and schema that are still moving.
+The DB itself is fast (single-digit ms in logs). The latency is **round-trip fan-out**, not query speed.
 
 ---
 
-## Phase 1 — Security & hardening (do before any production traffic)
+## Target architecture
 
-### 1.1 Fail-fast on missing prod secrets — S
-- [x] In `apps/api/src/lib/config.ts`, throw at boot when `NODE_ENV === 'production'` and any of these are unset / placeholder:
-  - [x] `JWT_SECRET` (and is not `'dev-only-change-in-production'`)
-  - [x] `CORS_ORIGIN` (and isn't `*`)
-  - [x] `DATABASE_URL` (no `localhost` fallback in prod)
-  - [x] If email auth is enabled: `RESEND_API_KEY`, `MAIL_FROM`, `PUBLIC_URL`
-- [x] Log a single, clear startup error and exit non-zero.
+```
+            ┌─────────────────────── Server (authoritative) ──────────────────────┐
+  command   │  validate → write DB (one tx) → compute patch  ──→ publish patch     │
+  (HTTP)    │      │                                │                    │          │
+  ──────────┼──────┘                                │                    │          │
+            │                                       ▼                    ▼          │
+  response  │                              GamePatch (deltas)     game:patch event  │
+  (HTTP) ◀──┼────────────────────────────────────┘                    │            │
+            └──────────────────────────────────────────────────────────┼──────────-┘
+                                                                         ▼
+                          other clients apply the same GamePatch (no refetch)
+```
 
-### 1.2 Rate limiting — S
-- [x] Add `@fastify/rate-limit`.
-- [x] Per-IP global default (e.g., 300 req / min).
-- [x] Tighter buckets:
-  - [x] `POST /auth/login` — 5/min/IP, 20/hour/account
-  - [x] `POST /auth/register` — 3/min/IP, 10/day/IP
-  - [x] `POST /auth/resend-verification` — 1/min/email
-  - [x] `POST /auth/dev-login` — 30/min/IP (still useful in dev, harmless if `ENABLE_DEV_LOGIN` is false)
-  - [x] `POST /games/join/:inviteCode` — 10/min/IP
-  - [x] `POST /dice/roll` — 60/min/user (cheap defence against spam)
+**Principles**
 
-### 1.3 CSRF posture — M
-- [x] Decide via ADR-002: SameSite=Lax + same-origin SPA sufficient for now; double-submit token deferred.
-- [-] If staying with `Lax`: add `@fastify/csrf-protection`, mint a token on `GET /auth/me`, validate on every non-GET. Update `apps/web/src/api/client.ts` to attach `X-CSRF-Token` automatically. *(Deferred — revisit if cross-origin embedding added.)*
-- [-] Add a test covering "cross-site POST without token is rejected".
-
-### 1.4 CORS tightening — S
-- [x] Remove the `'*' → true` branch in `parseCorsOrigins`. With `credentials: true`, wildcard is meaningless; reject the config explicitly.
-- [x] Require a comma-separated allowlist in production.
-
-### 1.5 Invite code RNG — S
-- [x] Replace `Math.random()` in `apps/api/src/lib/game-access.ts:23-30` with `secureRandomInt` (already used elsewhere).
-- [x] While there: enforce uniqueness by retrying on the (unlikely) collision.
-
-### 1.6 Validate `stats.custom` and `combat` shapes — M
-- [x] Build a concrete Zod schema for `CharacterStatsCustom` in `packages/shared/src/schemas.ts` listing the keys that exist today:
-  - [x] `activeInPlay`, `selectedWeaponId`, `selectedWeaponName`, `selectedArmorId`, `selectedShieldId`, `selectedArmorName`, `selectedShieldName`, `baseSpeed`, `usingLightSource`, `activeLightItemId`, `mapTokenVisible`, `attackTargetRef`, `occupation`, `race`, `startingFunds`, `luckySign`, `languages`
-- [x] Same for `combat`: `ac`, `hpMax`, `hpCurrent`, `hpTemp`, `markedDead`, `lastDeathRound`, etc.
-- [x] Use `.passthrough()` *initially* with a soft warn-log so we catch any field we forgot; flip to `.strict()` after a release.
-- [x] Update `patchCharacterSchema` to use these instead of `z.record(z.unknown())`.
-
-### 1.7 Cookie parsing reuse — S
-- [x] Replace the custom parser in `apps/api/src/lib/game-socket.ts` with `app.parseCookie(cookieHeader)` from `@fastify/cookie`.
-
-**Exit criteria:** prod boot refuses to start with bad config; brute-force endpoints rate-limited; no path accepts arbitrary JSON payloads into player-controlled fields.
-
-> **Progress (2026-06-15):** 1.1–1.2, 1.4–1.7 complete. **1.3 deferred** pending ADR-002 (CSRF strategy).
+1. **HTTP = commands + errors.** Mutations stay request/response for auth, validation, and explicit errors. The initiator waits only for *that* round-trip.
+2. **WebSocket = state delivery.** Every successful mutation publishes the **same patch** it returned to the initiator. Other clients apply it; nobody refetches.
+3. **One apply path.** Initiator applies the HTTP response; everyone else applies the socket patch. Identical reducer, identical end state.
+4. **Full fetch only on connect / reconnect.** Initial load + resync-on-reconnect are the only places we pull whole lists.
+5. **No silent fallbacks.** Patches are validated on receipt; a malformed/partial patch triggers an explicit resync, never a quietly-guessed merge. (Honors `.cursor/rules/no-silent-fallbacks`.)
 
 ---
 
-## Phase 2 — Data integrity (eliminate silent overwrites)
+## Phase A — Stop the refetch storms (quick, low-risk wins)
 
-### 2.1 Decompose `Game.settings` — L
-- [x] Add Prisma migration introducing:
-  - [x] `GameInitiative` table: `gameId PK FK`, `state Json`, `version Int`, `updatedAt`
-  - [x] `Game.activeMapId String? @db.Uuid` FK column with `onDelete: SetNull`
-  - [x] `Game.monstersVisibleOnMap Boolean`, `Game.sharedMonsterInitiative Boolean`, `Game.hideMonsterAcInRollLog Boolean`
-  - [x] `Game.gridFtPerCell Decimal(6,2)`, `Game.playerTokenMovement TokenMovementMode` (new enum)
-- [x] Data migration: backfill from `settings` Json blob into the new columns, then drop `settings`.
-- [x] Decompose `Game.settings` JSON into typed columns; API composes `game.settings` at read time via `serializeGameForClient` / `composeGameSettingsFromRecord` (strict — no legacy JSON parser).
+Goal: cut redundant requests without changing the wire contract. Ship first; immediate felt improvement.
 
-### 2.2 Optimistic concurrency on initiative writes — M
-- [x] All initiative writes use `mutateInitiative`: read `state` + `version`, compute next, `update where { gameId, version }`, retry up to 3 on conflict.
-- [x] Wrap in a `withOptimisticRetry()` helper in `apps/api/src/lib/optimistic.ts`.
-- [x] Add a regression test that fires two concurrent `advanceInitiativeTurn` calls and asserts both apply sequentially (`apps/api/test/optimistic-initiative.test.ts`).
+### A.1 Dedupe in-flight `loadMaps` / list loaders — S
+- [ ] In `apps/web/src/hooks/game/useGameMaps.ts`, store an in-flight promise ref; concurrent `loadMaps()` callers share one request instead of each hitting `/maps`.
+- [ ] Same pattern for `useCharacters.loadCharacters` and `useMonsters.loadMonsters`.
+- [ ] Coalesce the realtime debounce (`MAP_RELOAD_DEBOUNCE_MS`) with the dedupe so a burst of events = one fetch.
 
-### 2.3 Map sync efficiency — M
-- [x] Rewrite `syncMapTokens` in `apps/api/src/services/map-service.ts` to:
-  - [x] load existing tokens, characters, monsters in **one batch** each
-  - [x] compute three sets: `toCreate`, `toUpdate` (with diff), `toDelete`
-  - [x] issue `createMany`, batched `update` (grouped by shape), `deleteMany` inside one `prisma.$transaction`
-- [x] Unit tests for `planMapTokenSync` in `apps/api/test/` *(integration DB count test deferred to §3.8)*
+### A.2 Skip actor refetch on `damage:applied` — S
+- [ ] In `useGameRealtimeSync.ts` `onDamageApplied`, return early when `actorUserId === userId` (mirror `map:updated` / `monsters:changed`). The initiator's `useCombatActions.applyDamage` already reloads.
+- [ ] Confirm `damage:applied` payload carries `actorUserId` end-to-end (it does in `routes/dice.ts`); thread it into the `onDamageApplied` handler signature (currently dropped in `useGameSocket.ts`).
 
-### 2.4 Data retention / pruning — S each
-- [x] Add a daily Bun cron (or simple `setInterval` task in `index.ts` if no scheduler yet) to:
-  - [x] Trim `DiceRoll` per game to N=500 most recent (configurable via env `DICE_ROLL_RETENTION_PER_GAME`)
-  - [x] Delete resolved `MovementRequest` rows older than 24h
-  - [x] Sweep orphan uploads in `data/uploads/maps/` not referenced by any `GameMap.imageUrl`
+### A.3 Trim the initiator's apply-damage fan-out — S
+- [ ] `useCombatActions.applyDamage` currently calls `loadCharacters` + `loadMonsters` + `loadDetail`. The route already returns `outcome` and publishes `character:upsert`. Reduce to applying the returned character/monster; drop `loadDetail` unless initiative changed.
 
-### 2.5 Map coords as floats — S
-- [x] Migration: `MapToken.x`, `MapToken.y`, `MovementRequest.target_x/y` → `DOUBLE PRECISION` (Prisma `Float`).
-- [x] Remove the `Number(row.x)` conversions in `apps/api/src/services/map-service.ts`.
+### A.4 Apply `map:token_moved` as a delta — S
+- [ ] `useGameSocket.ts` `map:token_moved` currently calls `onMapUpdated()` (full reload). Add an `onTokenMoved(token)` handler that patches just that token in `useGameMaps`.
+- [ ] Initiator's `moveMapToken` already updates local optimistically; ensure it reconciles from the response without a full `loadMaps`.
 
-**Exit criteria:** no more JSON read-modify-write races; map sync is O(1) queries; data tables stop growing unbounded.
-
-> **Progress (2026-06-15):** Phase 3 complete (3.1–3.8). Next: Phase 4 frontend decomposition.
+**Exit criteria:** a single damage/kill/move action produces ≤ 1 follow-up GET on the initiator and **zero** on other clients (they apply payloads). Measured in server logs.
 
 ---
 
-## Phase 3 — Backend cleanup & efficiency
+## Phase B — Mutation responses carry state (initiator path)
 
-### 3.1 Membership + DM Fastify decorators — M
-- [x] Add a plugin that resolves `:gameId` from the route, caches the result on `request.gameAccess`, and exposes:
-  - [x] `requireMember` preHandler
-  - [x] `requireDm` preHandler
-- [x] Replace inline `assertGameMember` blocks across `routes/{characters,games,maps,monsters,initiative,dice}.ts` (token/movement routes still resolve gameId from entity).
-- [x] Add a 30-second LRU keyed by `userId:gameId` via `resolveGameMemberAccess` (`GAME_MEMBERSHIP_CACHE_TTL_MS`, off in test).
+Goal: every write that already computes new server state **returns** it, so the initiator never re-fetches.
 
-### 3.2 Break map ↔ monster service cycle — S
-- [x] Create `apps/api/src/services/game-state.ts` to own cross-entity effects (`onMonsterDeleted` deletes map tokens, removes monster row, syncs initiative).
-- [x] Remove the dynamic `await import('./map-service.js')` from `monster-service.ts`.
+### B.1 Return the synced map from token-affecting mutations — M
+- [ ] `syncActiveMapTokens(gameId)` already returns `GameMapDto | null`. Surface it in responses for:
+  - [ ] `DELETE /games/:id/monsters/:id` (`routes/monsters.ts`)
+  - [ ] monster kill / in-play PATCH (`routes/monsters.ts`)
+  - [ ] character status PATCH dead/alive + `mapTokenVisible` change (`routes/characters.ts`)
+  - [ ] `POST /games/:id/characters` (create) and apply-damage death (`routes/dice.ts`)
+- [ ] Shape: `{ ...existing, map?: GameMapDto }`.
 
-### 3.3 Domain event facade — M
-- [x] Add `apps/api/src/lib/game-events.ts` exposing `publish(gameId, event)` and `publishMany`.
-- [x] Centralize all `emitToGame` calls behind it (routes + `game-presence.ts`).
-- [x] Define a discriminated `GameEvent` union in `packages/shared/src/game-events.ts`.
-- [x] Begin sending deltas in the event payload (`monsters:changed` includes `monsterIds` when known).
+### B.2 Initiator applies map response instead of `loadMaps()` — S
+- [ ] `useMonsterActions.killMonster` / `deleteMonsterQuick` → `applyMapFromServer(res.map)` instead of `await loadMaps()`.
+- [ ] `useCharacterActions.patchCharacterStatus` / `toggleCharacterMapToken` / `createCharacter` → same.
 
-### 3.4 Multipart map uploads — M
-- [x] Add `@fastify/multipart`.
-- [x] Replace the base64-data-URL pipeline in `apps/api/src/services/map-service.ts:228-247`.
-- [x] Stream to disk under `STORAGE_PATH` (already in config but unused — wire it up).
-- [x] Use magic-byte sniffing (`file-type` package) to validate, not just the regex header.
-- [x] Filename = `${mapId}-${sha256}.{ext}`; switch old file out atomically.
+### B.3 Standardize the mutation envelope — M
+- [ ] Define a `GamePatch` type in `packages/shared/src/game-events.ts`:
+  ```ts
+  type GamePatch = {
+    characters?: { upserted?: CharacterDto[]; deletedIds?: string[] };
+    monsters?: { upserted?: MonsterDto[]; deletedIds?: string[] };
+    map?: GameMapDto;                 // full active-map snapshot (small)
+    tokens?: { upserted?: MapTokenDto[]; deletedIds?: string[] };
+    initiative?: GameInitiativeState | null;
+    settings?: Partial<GameSettings>;
+  };
+  ```
+- [ ] Mutations return `{ ok: true, patch: GamePatch }` (plus any command-specific result like `outcome`).
+- [ ] Keep existing fields during migration; add `patch` alongside, then remove the redundant top-level fields in a later pass.
 
-### 3.5 Storage path consistency — S
-- [x] Centralize map upload paths in `apps/api/src/lib/storage-paths.ts`; read from `config.storagePath` (default `./data/uploads`).
-- [x] Reuse in `map-service.ts`, `routes/maps.ts`, and `data-retention.ts`.
-
-### 3.6 Remove deprecated paths — S
-- [x] Delete `POST /games/:gameId/characters/generate`.
-- [x] Delete `generateCharacterSchema` from `packages/shared/src/schemas.ts`.
-- [x] Delete `addMonstersToInitiative`, `buildMonsterInitiativeEntries` from `monster-service.ts`.
-- [x] Audit other `@deprecated` markers — remaining are intentional shims documented below:
-  - `InitiativeEntry.monsterId` — persisted legacy initiative rows; kept for parse compatibility.
-  - `packages/shared` consumables/map-token-layout legacy aliases — external save data may reference old keys.
-  - `apps/web` utils (`armor.ts`, `consumables.ts`, `character-rolls.ts`, socket client) — Phase 4 cleanup.
-
-### 3.7 Docker / deploy hygiene — S
-- [x] `apps/api/Dockerfile` currently runs `npx prisma migrate deploy` in CMD — race condition with multiple replicas. Move migrations to a one-shot init job and have the app container only run the server.
-- [x] Switch to `bun install --frozen-lockfile` instead of `npm install` for consistency with local dev.
-- [x] Gate `prisma generate` in root `postinstall` on `SKIP_POSTINSTALL=1` so CI install is faster.
-
-**Exit criteria:** routes contain only domain logic; cross-cutting concerns (auth, events, uploads) live in plugins; deploy is reproducible.
-
-### 3.8 API integration test harness *(carried from 0.2)* — M
-- [x] Un-defer 0.2: choose test DB strategy, add `buildTestApp()`, land the five smoke tests listed in §0.2.
-- [x] Wire `bun run --filter @dcc-web/api test` into CI (replace build-only step).
-- [x] Add regression tests for Phase 2–3 work: optimistic initiative retry, batched `syncMapTokens`, decorator auth paths.
-
-> **Progress (2026-06-15):** Phase 4 complete (4.1–4.6). All planned `.tsx` files ≤400 LOC. **4.2 TanStack Query skipped** for now (ADR-004; hooks + socket sync sufficient).
+**Exit criteria:** initiator-side `loadMaps()` / `loadCharacters()` / `loadMonsters()` calls remain **only** in initial load and reconnect resync.
 
 ---
 
-## Phase 4 — Frontend decomposition
+## Phase C — Rich socket payloads (replace invalidation pings)
 
-### 4.1 Split `GamePage.tsx` — L
-Goal: from 1948 LOC + 79 hooks down to a ≤300-LOC orchestrator.
+Goal: other clients receive the same `GamePatch` and apply it; no socket handler triggers a full refetch.
 
-- [x] Extract data layer hooks (one per file in `apps/web/src/hooks/game/`):
-  - [x] `useGameDetail(gameId)` — replaces `loadDetail`, returns `{ detail, isDm, refresh, settings }`
-  - [x] `useCharacters(gameId, isDm)` — replaces `loadCharacters` + character socket handler
-  - [x] `useMonsters(gameId, isDm)`
-  - [x] `useInitiative(gameId, isDm)` — folded into `useGameDetail` (initiative state + `applyInitiative`)
-  - [x] `useGameMaps(gameId, isDm)`
-  - [x] `useDiceTray(gameId, characterId)`
-  - [x] `useRollLog(gameId)`
-  - [x] `usePresence(gameId)`
-- [x] Extract action layer (mutations) into dedicated hooks:
-  - [x] `useCharacterActions` — create, HP, consumables, light, in-play, map token visibility
-  - [x] `useMonsterActions` — monster CRUD/combat/attack target
-  - [x] `useMapActions` — map CRUD, upload, tokens, overlays, corpse loot
-  - [x] `useCombatActions` — dice rolls, initiative, settings toggles, apply damage
-  - [x] `parseCharacterResponse` helper
-- [x] Split the UI into:
-  - [x] `GameSidebar` — thin wrapper around `GameSideMenu`
-  - [x] `GameStage` (map + initiative overlay + drawing toolbar)
-  - [x] `GameDialogs` (apply damage, consume resource, create character, corpse loot, DM control panel)
-  - [x] `GamePageView` — presentational shell; `useGamePageController` owns hook wiring
-- [x] `GamePage.tsx` ≤300 LOC orchestrator *(9 LOC — delegates to controller + view)*
-- [x] Web unit tests for dialog helpers (`parseCharacterResponse`, apply-damage tab selection) in `apps/web/test/`
+### C.1 Add a unified `game:patch` event — M
+- [ ] Extend the `GameEvent` union in `packages/shared/src/game-events.ts` with `{ type: 'game:patch'; patch: GamePatch; actorUserId?: string }`.
+- [ ] `publish`/`publishMany` in `apps/api/src/lib/game-events.ts` already forward arbitrary payloads — no transport change needed.
+- [ ] After each mutation, publish the **same** `GamePatch` returned to the initiator (single source of truth for "what changed").
 
-### 4.2 Adopt TanStack Query — M
-- [-] **Skipped for now** — per ADR-004 and team decision (2026-06-15): custom hooks + `useGameRealtimeSync` are sufficient at current scale; no planned adoption in the remediation roadmap.
-- [-] ~~If adopted: replace each `loadX` + state-tuple with `useQuery`; replace socket `setX` with `queryClient.setQueryData(...)`.~~
-- [-] ~~Strangler-fig migration: do `characters` first, validate, then do the rest.~~
+### C.2 Client patch reducer — M
+- [ ] Add `applyGamePatch(patch)` in the controller (`useGamePageController.ts`) that fans out to `applyCharacterFromServer`, `handleMonsterUpdated`, `applyMapFromServer`, `applyInitiative`, `applyGameSettingsPatch`.
+- [ ] `useGameRealtimeSync.onGamePatch` → `applyGamePatch`, with `actorUserId === userId` short-circuit (initiator already applied via HTTP response).
+- [ ] Validate the patch shape on receipt; on validation failure, fall back to a **single** targeted resync (not silent partial merge).
 
-Revisit only if duplicate fetches, cache invalidation bugs, or refetch-on-focus become painful — see `docs/adr/004-client-data-layer.md`.
+### C.3 Enrich or retire the legacy ping events — M
+- [ ] `map:updated` → carry `{ map }` (deprecate empty-payload form); or emit `game:patch` with `map` and drop `map:updated`.
+- [ ] `monsters:changed` → carry `{ monsters: { upserted, deletedIds } }` instead of just IDs.
+- [ ] `damage:applied` → keep for log/animation purposes, but it should no longer drive list refetches (state arrives via `game:patch` / `character:upsert`).
+- [ ] `map:token_moved` → already carries the token; route it through the token delta path (A.4), not a reload.
 
-### 4.3 Component file-size budget — M
-- [x] Target ≤ 400 LOC per `.tsx` file. Original splits:
-  - [x] `EquipmentManagerDialog.tsx` (934 → 353) — `equipment-types.tsx`, `EquipmentItemFormDialog.tsx`, `EquipmentItemCategoryFields.tsx`
-  - [x] `TacticalMapCanvas.tsx` (838 → 285) — `MapTokenChip`, `TokenRangeOverlay`, `MapSceneLayer`, `useTacticalMapViewport`, `useMapDrawingInteraction`, `map-viewport-math.ts`
-  - [x] `Level0CharacterSheet.tsx` (802 → 86) — `level0/*` section components + `sheet-primitives.tsx`
-  - [x] `CharacterSheetView.tsx` (617 → 153) — `useCharacterSheetView.ts`, `CharacterSheetToolbar.tsx`
-  - [x] `MonsterPanel.tsx` (532 → 35) — `monster-panel/` spawn form, spawned list, state hook
-  - [x] `CharacterListItem.tsx` (557 → 171) — `character-list/*` siblings; `buildCombatTargetOptions` → `utils/combat-target-options.ts`
-  - [x] `ApplyDamageDialog.tsx` (512 → 138) — `ApplyDamageTargetLists.tsx`; tab/label logic in `utils/apply-damage-dialog.ts`
+### C.4 Reconnect resync stays full — S
+- [ ] Keep `onConnected` doing `loadDetail` + `loadDiceRolls` (+ maps/characters/monsters) as the authoritative catch-up after any missed events. This is the only sanctioned full pull post-initial-load.
 
-### 4.4 Code-splitting & bundle — S
-- [x] `React.lazy` for `GamePage`, `BestiaryPage` in `App.tsx`; wrap routes in `Suspense` with a small loading fallback.
-- [x] `React.lazy` for `EquipmentManagerDialog`, `MonsterSheetView`, `CharacterSheetView`, `CorpseLootSheet`.
-- [x] `vite.config.ts` → add `build.rollupOptions.output.manualChunks`:
-  - `mui` → `@mui/*`, `@emotion/*`
-  - `konva` → `konva`, `react-konva`
-  - `socket` → `socket.io-client`
-- [x] Verify gzip bundle goal: initial chunk < 200 KB gzip, total deferred < 400 KB gzip.
-  - Initial `index-*.js`: **75.9 KB gzip** (excludes lazy mui/konva/socket vendor chunks)
-  - Lazy route/feature chunks (GamePage, sheets, map, dialogs): **~59 KB gzip** combined
-
-### 4.5 Re-enable WebSocket transport in prod — S
-- [x] `apps/web/src/lib/game-socket-client.ts:19-23` currently forces `polling` in prod. Switch back to `['websocket', 'polling']`. nginx is already configured for upgrade.
-- [x] Add a feature-flag env var if you want a kill switch (`VITE_SOCKET_POLLING_ONLY=true`).
-
-### 4.6 API client cleanup — S
-- [x] In `apps/web/src/api/client.ts`:
-  - [x] Return `undefined` for `204`
-  - [x] Branch on `Content-Type` before `res.json()`
-  - [x] Surface validation errors (Zod flatten output) in a structured way
-
-**Exit criteria:** initial bundle slim; `GamePage` testable; no file > 400 LOC except generated.
+**Exit criteria:** with two clients open, a mutation by one produces **zero** `GET /maps|/monsters|/characters` on the other; both reach identical state via `game:patch`.
 
 ---
 
-## Phase 5 — Operability & realtime scale
+## Phase D — Server efficiency & optional cache
 
-### 5.1 Decide single-vs-multi-instance — ADR (see Phase 6)
-- [x] If staying single-instance: document the limit in `docs/DEPLOYMENT.md`; add a startup banner + `/health` field reporting "single instance".
-- [x] ~~If scaling out~~ **Deferred** — current deploy scale does not require horizontal API scaling; one process supports many concurrent games. Revisit when connection/CPU limits or zero-downtime multi-worker deploys are needed (see ADR-003):
-  - [ ] Add Redis service to `docker-compose.yml`
-  - [ ] Add `@socket.io/redis-adapter` wiring in `apps/api/src/index.ts`
-  - [ ] Move `presenceByGame` Map from `apps/api/src/lib/game-presence.ts` into Redis (`game:{id}:presence` hash keyed by socketId)
-  - [ ] Move the membership-LRU from 3.1 into Redis as well
+Goal: make the server-side write+compute cheap enough that patches are effectively free.
 
-### 5.2 Audit log — M
-- [x] New `AuditLog` Prisma model: `id, gameId, actorUserId, kind, targetType, targetId, payload Json, createdAt`.
-- [x] Log:
-  - [x] character: status change (kill / revive / archive), ownership change
-  - [x] monster: kill, in-play toggle
-  - [x] inventory: every transfer between owners
-  - [x] game: settings change, map clear/reset
-- [x] Surface in DM-only `GET /games/:id/audit?limit=...` and a debug pane in `DmControlPanel`.
+### D.1 Fix `listGameMaps` N+1 — M
+- [ ] In `apps/api/src/services/map-service.ts`, replace the per-map `loadMapTokens` loop with one `mapToken.findMany({ where: { mapId: { in: mapIds } } })` grouped in memory.
+- [ ] Benchmark before/after on a game with multiple maps.
 
-### 5.3 Observability — S
-- [x] Already have pino via Fastify default; add request ids in logs (Fastify does this) and ensure they bubble through to `emitToGame` debug lines.
-- [x] ~~Optional: Sentry on both API and web — env-gated.~~ Skipped until public consumption / ops need justifies it.
+### D.2 Cheap `activeMapId` lookup — S
+- [ ] `syncActiveMapTokens` currently calls full `listGameMaps` just to read `activeMapId`. Read it directly from the `Game.activeMapId` column (Phase 2.1 added it) via a lightweight `select`.
 
-### 5.4 Health & readiness — S
-- [x] Expand `GET /health` to include `db: 'ok'|'fail'`, `socket: 'ok'`, `version` (from package.json + git sha at build).
-- [x] Optional `/ready` that pings Postgres so nginx / k8s can gate traffic.
+### D.3 Single-tx mutation + patch builder — M
+- [ ] Add `buildGamePatchAfter*` helpers in `apps/api/src/services/game-state.ts` that, given a mutation, return the minimal `GamePatch` (e.g., `onMonsterDeleted` → deleted monster id + resynced active map + initiative).
+- [ ] Reuse these in both the HTTP response (Phase B) and the socket publish (Phase C) so they can never diverge.
 
-**Exit criteria:** prod can be safely operated, scaled, and audited.
+### D.4 Optional in-process per-game cache — M (defer unless needed)
+- [-] Consider an in-memory `Map<gameId, GameState>` on the single API instance to avoid re-reading unchanged entities when building patches. **Deferred**: only pursue if profiling shows DB reads dominate after D.1–D.3. Must move to Redis if/when multi-instance (see ADR-003). Cache is a server optimization only — clients never depend on it.
+
+**Exit criteria:** building and publishing a `GamePatch` costs ≤ the single mutation's own write; no N+1 in the maps read path.
 
 ---
 
-## Phase 6 — Documentation & ADRs
+## Phase E — Client data-layer consolidation
 
-### 6.1 ADRs to write — S each
-Create `docs/adr/` and add:
-- [x] **ADR-001** Game state storage: dedicated tables vs JSON column with optimistic locking. *(Drives Phase 2.1.)* — `docs/adr/001-game-state-storage.md`
-- [x] **ADR-002** Auth surface: keep email+JWT cookie, role of dev-login in prod, CSRF strategy. *(Drives Phase 1.3.)* — `docs/adr/002-auth-session-csrf.md`
-- [x] **ADR-003** Realtime scope: single instance vs Redis adapter. *(Drives Phase 5.1.)* — `docs/adr/003-realtime-single-instance.md`
-- [x] **ADR-004** Client data layer: keep ad-hoc state vs TanStack Query. *(Drives Phase 4.2.)* — `docs/adr/004-client-data-layer.md`; **TanStack Query skipped** for remediation scope.
-- [x] **ADR-005** Image storage: local FS vs object storage (S3/MinIO) when going multi-instance. — `docs/adr/005-map-image-storage.md`
-- [x] ADR index: `docs/adr/README.md`
+Goal: one predictable apply path, optimistic UX, no stale-override bugs.
 
-### 6.2 Doc/code drift cleanup — S
-- [x] `docs/ARCHITECTURE.md` recommends TanStack Query / Zustand / co_dm role — reconcile after ADRs. *(Rewritten as as-built; ADR-004 defers TanStack Query.)*
-- [x] Remove unused `GamePlayerRole.co_dm` enum value OR implement the role — **kept enum, documented as reserved** in ARCHITECTURE + DATA-MODEL; runtime DM = `dm_user_id` only (co-DM is out of scope).
-- [x] `README.md` add: link to plan.md, link to ADRs index, mention test commands.
+### E.1 Optimistic-then-reconcile pattern — M
+- [ ] For high-frequency actions (token move, HP nudge, light toggle), update local state immediately, then reconcile from the command response / `game:patch`.
+- [ ] On error or patch-validation failure, roll back to last server state and surface the error (no silent swallow).
 
-### 6.3 Shared package reorganization — M
-- [x] `packages/shared/src/` grouped into domain subfolders (combat, dice, inventory, map, initiative, monsters, characters).
-- [x] Keep `index.ts` as the public barrel.
-- [x] Split `consumables.ts` (640 LOC) into `consumable-types`, `consumable-parse`, `consumable-presets`, `light-source` + barrel.
-- [x] Split `schemas.ts` per domain under `schemas/` (auth, character, monster, map, game, dice, initiative).
+### E.2 Remove redundant local override maps — S
+- [ ] Audit `characterAttackTargetById` / `monsterTargetById`: now that `loadCharacters` reads server state, drop client-only override layers that can desync (the stale-target cleanup effect already pushes truth to the server).
 
-**Exit criteria:** future contributors find decisions documented and code grouped by concern.
+### E.3 Centralize "apply server entity" — S
+- [ ] Ensure `applyCharacterFromServer`, `handleMonsterUpdated`, `applyMapFromServer`, `applyInitiative` are the **only** mutators of their slices, and `applyGamePatch` is the only thing realtime calls. No component sets list state directly.
 
-> **Progress (2026-06-15):** Phase 6 complete. All ADRs written; docs reconciled; shared package reorganized.
+### E.4 Revisit TanStack Query decision — S (ADR update, not necessarily adoption)
+- [ ] With a clean patch/reducer model, re-evaluate ADR-004. If `game:patch` + reducer is sufficient, record that the decision stands; if cache-invalidation pain reappears, scope a strangler migration (characters first).
+
+**Exit criteria:** every state slice has exactly one server-apply entry point; realtime updates flow through a single `applyGamePatch`.
+
+---
+
+## Phase F — Validation, tests, docs
+
+### F.1 Tests — M
+- [ ] Shared: unit-test `applyGamePatch` reducer (upsert/delete/merge ordering, idempotency).
+- [ ] API integration (extend `apps/api/test/`): mutation returns a `patch` equal to the published `game:patch` for delete-monster, mark-dead, move-token, apply-damage.
+- [ ] Web: two-client simulation (or reducer-level) asserting non-initiator reaches the same state with **zero** list fetches.
+
+### F.2 Wire-contract docs + ADR — S
+- [ ] Add `docs/adr/006-realtime-state-delivery.md`: command/HTTP + patch/WebSocket split, `GamePatch` schema, resync-on-reconnect rule, actor short-circuit.
+- [ ] Update `docs/ARCHITECTURE.md` realtime section and the event table above as events are enriched/retired.
+
+### F.3 Observability — S
+- [ ] Add a debug counter (DM panel or log) for "full list fetches per minute" to prove the storms are gone and catch regressions.
+
+**Exit criteria:** the new contract is documented, tested, and measurable.
 
 ---
 
 ## Sequencing & dependencies
 
 ```
-Phase 0 (0.1–0.4) ──┬─→ Phase 1 ──┐
-                    ├─→ Phase 2 ──┼─→ Phase 3 ──→ 0.2 / 3.8 ──┬─→ Phase 4
-                    └─────────────┘                           └─→ Phase 5 ──→ Phase 6
+Phase A (storms) ──→ Phase B (responses) ──→ Phase C (socket patches) ──┐
+                                  └────────→ Phase D (server eff.) ──────┼─→ Phase E ─→ Phase F
 ```
 
-- Phase 0 (minus 0.2) unblocks every later refactor. Shared unit tests + CI are the safety net until API integration tests land.
-- **0.2 is intentionally deferred** until after Phase 3 so smoke tests are written once against stable routes, schema, and auth plugins.
-- Phases 1 and 2 are independent of each other; pick whichever risk feels hotter.
-- Phase 3 depends on Phase 2 (the decorator/event facade is much easier with first-class columns).
-- Phase 4 can begin in parallel with Phase 3 once Phase 0 (0.1–0.4) is done; API client cleanup (4.6) is easier after the event facade (3.3).
-- Phase 5 needs Phase 3 (esp. event facade) to be sane.
-- Phase 6 is mostly documentation; the ADRs themselves should be drafted **before** the corresponding phases start, ratified during, and finalized after.
+- **Phase A** ships independently and immediately (no contract change) — do first.
+- **Phase B** before **C**: define `GamePatch` once, prove it on the initiator path, then reuse for sockets.
+- **Phase D** can run parallel to C (server-internal).
+- **Phase E** depends on B+C (single apply path needs the patch model).
+- **Phase F** finalizes once the contract is stable.
 
 ---
 
-## Definition of done per phase
+## Risks & mitigations
 
-A phase is "done" when:
-1. All `[ ]` items in it are `[x]` or `[-]` (with a recorded reason).
-2. CI is green on a PR that contains the phase's work.
-3. No regression in the smoke tests from Phase 0.
-4. Any new behavior is documented (README, docs/, or ADR).
-5. Changelog entry added.
+- **Patch/refetch divergence** → build the patch once (D.3) and use it for both HTTP response and socket publish.
+- **Missed events / out-of-order** → keep authoritative resync on reconnect (C.4); validate patches and resync-on-failure (C.2) rather than silently merging.
+- **Player visibility rules** (e.g., hidden monsters) → patches must respect per-viewer filtering; do not leak DM-only entities in `game:patch`. Filter server-side per room or per socket as today's list endpoints do.
+- **Optimistic rollback bugs** → snapshot previous slice before optimistic write; reconcile or restore explicitly.
 
 ---
 
 ## Out of scope (for now)
 
-- Feature work (new sheets, new monster types, fog of war, co-DM, mobile views, PWA).
-- Theming / visual polish beyond what's required to validate splits in Phase 4.
-- Migration to a different runtime (stay on Bun) or different DB.
-- Self-hostable distribution / installer.
+- Redis adapter / multi-instance fan-out (ADR-003) — only if horizontal scale is needed.
+- Full migration to TanStack Query / a normalized cache (ADR-004) — revisit in E.4.
+- New gameplay features, theming, mobile/PWA.
 
-These can resume on the cleaned-up foundation after Phase 4.
+These remain available once the realtime data-layer is server-authoritative.
