@@ -26,7 +26,6 @@ export type MonsterActionsDeps = {
   handleMonsterUpdated: (monster: GameMonsterInstance) => void;
   applyInitiative: (next: GameInitiativeState | null) => void;
   applyGamePatch: (patch: GamePatch) => void;
-  loadCharacters: () => Promise<unknown>;
   postDiceRoll: (params: {
     notation: string;
     reason?: string;
@@ -46,7 +45,6 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
     handleMonsterUpdated,
     applyInitiative,
     applyGamePatch,
-    loadCharacters,
     postDiceRoll,
     onError,
   } = deps;
@@ -66,6 +64,7 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
       const data = await api<{
         monster: GameMonsterInstance;
         initiative?: GameInitiativeState | null;
+        patch?: GamePatch;
       }>(`/games/${gameId}/monsters/${monster.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
@@ -75,8 +74,11 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
           },
         }),
       });
-      handleMonsterUpdated(data.monster);
-      if (data.initiative) applyInitiative(data.initiative);
+      if (data.patch) applyGamePatch(data.patch);
+      else {
+        handleMonsterUpdated(data.monster);
+        if (data.initiative !== undefined) applyInitiative(data.initiative);
+      }
       onError(null);
     } catch (e) {
       onError(formatError(e));
@@ -146,7 +148,7 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
       if (data.patch) applyGamePatch(data.patch);
       else {
         handleMonsterUpdated(data.monster);
-        if (data.initiative) applyInitiative(data.initiative);
+        if (data.initiative !== undefined) applyInitiative(data.initiative);
       }
     } catch (e) {
       handleMonsterUpdated(snapshot);
@@ -175,7 +177,7 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
       if (data.patch) applyGamePatch(data.patch);
       else {
         handleMonsterUpdated(data.monster);
-        if (data.initiative) applyInitiative(data.initiative);
+        if (data.initiative !== undefined) applyInitiative(data.initiative);
         if (data.map) applyGamePatch({ map: data.map });
       }
       onError(null);
@@ -215,7 +217,7 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
     if (!m || !gameId) return;
     const prevCustom = (m.stats?.custom ?? {}) as Record<string, unknown>;
     try {
-      const { monster: updated } = await api<{ monster: GameMonsterInstance }>(
+      const data = await api<{ monster: GameMonsterInstance; patch?: GamePatch }>(
         `/games/${gameId}/monsters/${monsterId}`,
         {
           method: 'PATCH',
@@ -227,7 +229,8 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
           }),
         },
       );
-      handleMonsterUpdated(updated);
+      if (data.patch) applyGamePatch(data.patch);
+      else handleMonsterUpdated(data.monster);
     } catch (e) {
       onError(formatError(e));
     }
@@ -264,7 +267,7 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
         reason: `${monster.name} → ${target.name} damage`,
         rollKind: 'damage',
       });
-      const { hpAfter } = await api<{ hpAfter: number; targetName: string }>(
+      const { hpAfter, patch } = await api<{ hpAfter: number; targetName: string; patch?: GamePatch }>(
         `/games/${gameId}/apply-damage`,
         {
           method: 'POST',
@@ -276,7 +279,7 @@ export function useMonsterActions(deps: MonsterActionsDeps) {
           }),
         },
       );
-      await loadCharacters();
+      if (patch) applyGamePatch(patch);
       setLastMonsterAttackSummary(
         `${monster.name} hit ${target.name} (${attackResult.total} vs AC ${ac}) for ${damageResult.total} → ${hpAfter} HP`,
       );

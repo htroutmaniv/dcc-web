@@ -144,27 +144,36 @@ export function useCharacterActions(deps: CharacterActionsDeps) {
     }
   };
 
-  const setCharacterAttackTarget = async (characterId: string, targetRef: string | null) => {
-    const c = characters.find((x) => x.id === characterId);
-    if (!c) return;
-    const prevCustom = (c.stats?.custom ?? {}) as Record<string, unknown>;
-    try {
-      const updated = parseCharacterResponse(
-        await api<{ character: Character } | Character>(`/characters/${c.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({
-            stats: {
-              ...c.stats,
-              custom: { ...prevCustom, [CHARACTER_ATTACK_TARGET_KEY]: targetRef ?? '' },
-            },
-          }),
-        }),
-      );
-      if (updated) applyCharacterFromServer(updated);
-    } catch (e) {
-      onError(formatError(e));
-    }
-  };
+  const setCharacterAttackTarget = useCallback(
+    async (characterId: string, targetRef: string | null) => {
+      const c = characters.find((x) => x.id === characterId);
+      if (!c) return;
+      const prevCustom = (c.stats?.custom ?? {}) as Record<string, unknown>;
+      try {
+        const res = await api<{ character: Character; patch?: GamePatch } | Character>(
+          `/characters/${c.id}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({
+              stats: {
+                ...c.stats,
+                custom: { ...prevCustom, [CHARACTER_ATTACK_TARGET_KEY]: targetRef ?? '' },
+              },
+            }),
+          },
+        );
+        if (res && typeof res === 'object' && 'patch' in res && res.patch) {
+          applyGamePatch(res.patch);
+          return;
+        }
+        const updated = parseCharacterResponse(res);
+        if (updated) applyCharacterFromServer(updated);
+      } catch (e) {
+        onError(formatError(e));
+      }
+    },
+    [characters, applyGamePatch, applyCharacterFromServer, onError],
+  );
 
   const patchCharacterHp = async (character: Character, hpCurrent: number) => {
     const hpMax =

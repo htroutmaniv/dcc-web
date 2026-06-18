@@ -269,7 +269,7 @@ export async function monsterRoutes(app: FastifyInstance) {
       const eventCtx = publishContextFromRequest(request);
       const patch = buildMonsterUpsertPatch(monster, {
         map,
-        ...(initiative !== null ? { initiative } : {}),
+        ...(initiative !== undefined ? { initiative } : {}),
       });
       publishGamePatch(app.io, gameId, patch, request.userId, eventCtx);
 
@@ -300,7 +300,12 @@ export async function monsterRoutes(app: FastifyInstance) {
         });
       }
 
-      return { monster, initiative, patch, ...(map ? { map } : {}) };
+      return {
+        monster,
+        ...(initiative !== undefined ? { initiative } : {}),
+        patch,
+        ...(map ? { map } : {}),
+      };
     },
   );
 
@@ -388,7 +393,7 @@ export async function monsterRoutes(app: FastifyInstance) {
       const map = await syncActiveMapTokens(gameId);
       const patch = buildMonsterDeletedPatch(monsterId, {
         map,
-        ...(initiative !== null ? { initiative } : {}),
+        initiative,
       });
       publishGamePatch(app.io, gameId, patch, request.userId);
       return { ok: true, initiative, patch, ...(map ? { map } : {}) };

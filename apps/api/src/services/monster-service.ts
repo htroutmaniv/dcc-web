@@ -290,7 +290,7 @@ export async function patchGameMonster(
     stats?: Record<string, unknown>;
     combat?: Record<string, unknown>;
   },
-): Promise<{ monster: GameMonsterInstance; initiative: GameInitiativeState | null }> {
+): Promise<{ monster: GameMonsterInstance; initiative?: GameInitiativeState | null }> {
   const existing = await prisma.gameMonster.findFirstOrThrow({
     where: { id: monsterId, gameId },
   });
@@ -352,7 +352,7 @@ export async function patchGameMonster(
     hpCurrent: row.hpCurrent,
     stats: row.stats as MonsterStatsJson | undefined,
   });
-  let initiative: GameInitiativeState | null = null;
+  let initiative: GameInitiativeState | null | undefined = undefined;
   if (inInitiativeBefore !== inInitiativeAfter) {
     initiative = await syncMonsterGroupInitiative(gameId);
   }

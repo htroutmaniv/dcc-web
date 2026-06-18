@@ -213,7 +213,6 @@ export function useGamePageController(gameId: string | undefined) {
     handleMonsterUpdated,
     applyInitiative,
     applyGamePatch,
-    loadCharacters,
     postDiceRoll,
     onError,
   });
@@ -245,6 +244,7 @@ export function useGamePageController(gameId: string | undefined) {
 
   const lastGameFetchRef = useRef(0);
   const detailLoaded = detail !== null;
+  const initialListsLoadedForGameRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!gameId) return;
@@ -271,9 +271,17 @@ export function useGamePageController(gameId: string | undefined) {
 
   useEffect(() => {
     if (!gameId || !detailLoaded) return;
+    if (initialListsLoadedForGameRef.current === gameId) return;
+    initialListsLoadedForGameRef.current = gameId;
     void loadCharacters().catch((e) => setError(formatError(e)));
     if (isDm) void loadMonsters().catch(() => {});
-  }, [gameId, detailLoaded, isDm, loadCharacters, loadMonsters]);
+  }, [gameId, detailLoaded, isDm, loadCharacters, loadMonsters, setError]);
+
+  useEffect(() => {
+    return () => {
+      initialListsLoadedForGameRef.current = null;
+    };
+  }, [gameId]);
 
   useEffect(() => {
     if (initiativeActive && corpseLootOpen) {
